@@ -1,0 +1,40 @@
+import { SetupNotice } from "@/components/SetupNotice";
+import { TournamentCard } from "@/components/TournamentCard";
+import { Card } from "@/components/ui/Card";
+import { hasSupabaseEnv } from "@/lib/env";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import type { Tournament } from "@/types/domain";
+
+export const dynamic = "force-dynamic";
+
+export default async function TournamentsPage() {
+  if (!hasSupabaseEnv()) {
+    return <SetupNotice />;
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const { data: tournaments } = await supabase
+    .from("tournaments")
+    .select("*")
+    .neq("status", "draft")
+    .order("tournament_start_at", { ascending: true });
+
+  return (
+    <div className="grid gap-6">
+      <div>
+        <h1 className="text-2xl font-bold">赛事列表</h1>
+        <p className="mt-2 text-sm text-slate-600">支持硬镖、软镖和软硬交替赛事；软镖当前通过手动录入结算。</p>
+      </div>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {(tournaments || []).map((tournament) => (
+          <TournamentCard key={tournament.id} tournament={tournament as Tournament} />
+        ))}
+      </div>
+      {(tournaments || []).length === 0 ? (
+        <Card>
+          <p className="text-sm text-slate-600">暂无已发布赛事。</p>
+        </Card>
+      ) : null}
+    </div>
+  );
+}
