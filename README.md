@@ -9,9 +9,7 @@ The system treats every match participant as a `tournament_participant`. For ind
 ## Setup
 
 1. Create a Supabase project.
-2. Run the migration files in order in the Supabase SQL editor or through the Supabase CLI:
-   `001_initial_schema.sql`, `002_runtime_fixes.sql`, and `003_casual_scorer_and_split_ratings.sql`.
-   The third migration adds casual sparring matches, split tournament/general ratings, and checkout dart counts.
+2. Run every migration file in `supabase/migrations` in numeric order through the Supabase SQL editor or Supabase CLI.
 3. Copy `.env.example` to `.env.local` and fill the Supabase URL, anon key, and service role key.
 4. Install dependencies with `npm install`.
 5. Start the app with `npm run dev`.
@@ -32,5 +30,18 @@ where id = 'USER_UUID';
 - `npm run build` builds the app.
 - `npm run typecheck` runs TypeScript validation.
 - `npm run test` runs algorithm tests.
+- `npm run db:wake` sends a low-cost Supabase REST request so an idle project can wake up.
+- `npm run db:test` wakes Supabase and checks the expected database tables. With `SUPABASE_SERVICE_ROLE_KEY`, it also checks the `avatars` storage bucket.
+
+## Supabase wake schedule
+
+`.github/workflows/wake-supabase.yml` runs every three days and can also be started manually from GitHub Actions.
+
+Add these repository secrets in GitHub:
+
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+
+Do not add `SUPABASE_SERVICE_ROLE_KEY` to the wake workflow. It is only needed locally for the stricter `npm run db:test` schema check.
 
 When using `next dev`, avoid running `npm run build` against the same `.next` directory while the dev server is still open. If the UI loses styling or returns stale chunks, stop the server, delete `.next`, and start `npm run dev` again.
