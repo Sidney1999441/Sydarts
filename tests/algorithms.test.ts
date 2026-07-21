@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { generateBalancedTeams, generateGroups, generatePreferredBalancedTeams } from "@/lib/algorithms/grouping";
-import { generateRoundRobinMatches, generateSingleEliminationBracket } from "@/lib/algorithms/schedule";
+import {
+  expandMixedDartRoundRobinMatches,
+  generateRoundRobinMatches,
+  generateSingleEliminationBracket
+} from "@/lib/algorithms/schedule";
 import { applyTurn, calculateDartStats, createScoringState } from "@/lib/algorithms/scoring";
+import { updateTournamentStandings } from "@/lib/algorithms/standings";
 import { updateUserRating } from "@/lib/algorithms/rating";
 import { calculatePlayerLevel } from "@/lib/algorithms/player-level";
 import { resolveMatchLegRules, validateMatchLegRules, getMatchDartMode, getMatchGameVariant } from "@/lib/darts/variants";
@@ -47,10 +52,65 @@ describe("team-first tournament algorithms", () => {
     expect(groups[0].members.length + groups[1].members.length).toBe(3);
   });
 
+  it("sorts standings by points, leg difference, head-to-head, then wins", () => {
+    const participants = [
+      { id: "team-a", name: "Team A", rating: 1000 },
+      { id: "team-b", name: "Team B", rating: 1000 },
+      { id: "team-c", name: "Team C", rating: 1000 },
+      { id: "team-d", name: "Team D", rating: 1000 }
+    ];
+    const standings = updateTournamentStandings(participants, [
+      {
+        id: "m1",
+        participant_a_id: "team-c",
+        participant_b_id: "team-b",
+        winner_participant_id: "team-c",
+        score_a: 4,
+        score_b: 2,
+        status: "completed"
+      },
+      {
+        id: "m2",
+        participant_a_id: "team-a",
+        participant_b_id: "team-c",
+        winner_participant_id: "team-a",
+        score_a: 4,
+        score_b: 2,
+        status: "completed"
+      },
+      {
+        id: "m3",
+        participant_a_id: "team-b",
+        participant_b_id: "team-d",
+        winner_participant_id: "team-b",
+        score_a: 4,
+        score_b: 2,
+        status: "completed"
+      }
+    ]);
+
+    expect(standings.map((row) => row.participantId)).toEqual(["team-a", "team-c", "team-b", "team-d"]);
+  });
+
   it("generates round robin matches", () => {
     const matches = generateRoundRobinMatches(players.slice(0, 4), { groupName: "A" });
     expect(matches).toHaveLength(6);
     expect(matches[0].stage).toBe("group");
+  });
+
+  it("expands mixed dart round robin into one soft and one steel match per pair", () => {
+    const matches = generateRoundRobinMatches(players.slice(0, 4), { groupName: "A" });
+    const expanded = expandMixedDartRoundRobinMatches(matches, { firstDartMode: "soft" });
+    const pairModes = new Map<string, Set<string>>();
+
+    for (const match of expanded) {
+      const key = [match.participantAId, match.participantBId].sort().join(":");
+      pairModes.set(key, pairModes.get(key) || new Set());
+      pairModes.get(key)?.add(match.forceDartMode || "");
+    }
+
+    expect(expanded).toHaveLength(12);
+    expect([...pairModes.values()].every((modes) => modes.has("soft") && modes.has("steel"))).toBe(true);
   });
 
   it("generates knockout matches with byes", () => {
@@ -73,6 +133,31 @@ describe("team-first tournament algorithms", () => {
     const stats = calculateDartStats(state.participants[0].turns);
     expect(stats.highestTurnScore).toBe(180);
     expect(stats.count180).toBe(2);
+  });
+
+  it("records the exact thrower for team scoring turns", () => {
+    const legRules = [
+      { legNumber: 1, participantMode: "team", dartMode: "steel", gameVariant: "501" },
+      { legNumber: 2, participantMode: "team", dartMode: "steel", gameVariant: "501" },
+      { legNumber: 3, participantMode: "team", dartMode: "steel", gameVariant: "501" }
+    ] as const;
+    let state = createScoringState({
+      participantAId: "team-1",
+      participantBId: "team-2",
+      legRules: [...legRules],
+      legLineups: [
+        {
+          legNumber: 1,
+          participantAUserIds: ["u1", "u2"],
+          participantBUserIds: ["u3", "u4"]
+        }
+      ]
+    });
+
+    state = applyTurn(state, 100, 3, "u1");
+
+    expect(state.turns[0].userId).toBe("u1");
+    expect(() => applyTurn(state, 60, 3, "u1")).toThrow(/lineup/i);
   });
 
   it("records checkout darts for accurate averages", () => {
@@ -222,6 +307,54 @@ describe("team-first tournament algorithms", () => {
     expect(roundOne).toBe("soft");
     expect(roundTwo).toBe("steel");
     expect(getMatchGameVariant({ matchDartMode: roundOne, softGame: "soft_cricket" })).toBe("soft_cricket");
+  });
+
+  it("uses separate custom templates for mixed alternating rounds", () => {
+    const templates = {
+      steel: [
+        { legNumber: 1, participantMode: "doubles", dartMode: "steel", gameVariant: "501" },
+        { legNumber: 2, participantMode: "singles", dartMode: "steel", gameVariant: "501" },
+        { legNumber: 3, participantMode: "singles", dartMode: "steel", gameVariant: "301" }
+      ],
+      soft: [
+        { legNumber: 1, participantMode: "singles", dartMode: "soft", gameVariant: "soft_501" },
+        { legNumber: 2, participantMode: "doubles", dartMode: "soft", gameVariant: "soft_501" },
+        { legNumber: 3, participantMode: "singles", dartMode: "soft", gameVariant: "soft_cricket" },
+        { legNumber: 4, participantMode: "doubles", dartMode: "soft", gameVariant: "soft_half_it" },
+        { legNumber: 5, participantMode: "singles", dartMode: "soft", gameVariant: "soft_501" },
+        { legNumber: 6, participantMode: "singles", dartMode: "soft", gameVariant: "soft_high_score" },
+        { legNumber: 7, participantMode: "doubles", dartMode: "soft", gameVariant: "soft_701" }
+      ]
+    } as const;
+
+    const roundOne = resolveMatchLegRules({
+      matchRuleMode: "custom_legs",
+      dartMode: "mixed_alternating",
+      mixedFirstDartMode: "soft",
+      roundNumber: 1,
+      customRules: templates
+    });
+    const roundTwo = resolveMatchLegRules({
+      matchRuleMode: "custom_legs",
+      dartMode: "mixed_alternating",
+      mixedFirstDartMode: "soft",
+      roundNumber: 2,
+      customRules: templates
+    });
+
+    expect(new Set(roundOne.map((rule) => rule.dartMode))).toEqual(new Set(["soft"]));
+    expect(validateMatchLegRules({ dartMode: "soft", rules: [...roundOne] })).toBeNull();
+    expect(roundOne.map((rule) => rule.gameVariant)).toEqual([
+      "soft_501",
+      "soft_501",
+      "soft_cricket",
+      "soft_half_it",
+      "soft_501",
+      "soft_high_score",
+      "soft_701"
+    ]);
+    expect(new Set(roundTwo.map((rule) => rule.dartMode))).toEqual(new Set(["steel"]));
+    expect(roundTwo.map((rule) => rule.gameVariant)).toEqual(["501", "501", "301"]);
   });
 
   it("keeps new players in the entry rank until enough data exists", () => {

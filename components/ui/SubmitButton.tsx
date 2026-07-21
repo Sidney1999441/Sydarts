@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/Button";
 
 export function SubmitButton({
   children,
-  pendingText = "处理中...",
+  pendingText = "\u5904\u7406\u4e2d",
   variant = "primary"
 }: {
   children: ReactNode;
@@ -16,7 +16,7 @@ export function SubmitButton({
   const { pending } = useFormStatus();
 
   return (
-    <Button type="submit" variant={variant} disabled={pending}>
+    <Button type="submit" variant={variant} disabled={pending} pendingText={pendingText}>
       {pending ? pendingText : children}
     </Button>
   );

@@ -31,8 +31,9 @@ export function updateTournamentStandings(
     });
   });
 
-  matches
-    .filter((match) => match.status === "completed" && match.winner_participant_id)
+  const completedMatches = matches.filter((match) => match.status === "completed" && match.winner_participant_id);
+
+  completedMatches
     .forEach((match) => {
       if (!match.participant_a_id || !match.participant_b_id) return;
       const rowA = rows.get(match.participant_a_id);
@@ -60,12 +61,53 @@ export function updateTournamentStandings(
       rowB.legDiff = rowB.legsWon - rowB.legsLost;
     });
 
+  const getHeadToHead = (participantAId: string, participantBId: string) => {
+    let pointsA = 0;
+    let pointsB = 0;
+    let legsWonA = 0;
+    let legsLostA = 0;
+    let legsWonB = 0;
+    let legsLostB = 0;
+
+    completedMatches.forEach((match) => {
+      if (!match.participant_a_id || !match.participant_b_id || !match.winner_participant_id) return;
+      const isAFirst = match.participant_a_id === participantAId && match.participant_b_id === participantBId;
+      const isBFirst = match.participant_a_id === participantBId && match.participant_b_id === participantAId;
+      if (!isAFirst && !isBFirst) return;
+
+      const participantAScore = isAFirst ? match.score_a : match.score_b;
+      const participantBScore = isAFirst ? match.score_b : match.score_a;
+      legsWonA += participantAScore;
+      legsLostA += participantBScore;
+      legsWonB += participantBScore;
+      legsLostB += participantAScore;
+
+      if (match.winner_participant_id === participantAId) {
+        pointsA += 3;
+      } else if (match.winner_participant_id === participantBId) {
+        pointsB += 3;
+      }
+    });
+
+    return {
+      pointsA,
+      pointsB,
+      legDiffA: legsWonA - legsLostA,
+      legDiffB: legsWonB - legsLostB
+    };
+  };
+
   return [...rows.values()].sort(
-    (a, b) =>
-      b.points - a.points ||
-      b.wins - a.wins ||
-      b.legDiff - a.legDiff ||
-      b.legsWon - a.legsWon ||
-      a.name.localeCompare(b.name)
+    (a, b) => {
+      const headToHead = getHeadToHead(a.participantId, b.participantId);
+      return (
+        b.points - a.points ||
+        b.legDiff - a.legDiff ||
+        headToHead.pointsB - headToHead.pointsA ||
+        headToHead.legDiffB - headToHead.legDiffA ||
+        b.wins - a.wins ||
+        a.name.localeCompare(b.name)
+      );
+    }
   );
 }

@@ -4,22 +4,34 @@
 
 :root {
   color-scheme: light;
-  background: #f4f7fb;
-  color: #17202a;
+  --color-ink: 11 18 32;
+  --color-field: 247 249 252;
+  --color-board: 37 99 235;
+  --color-wire: 216 224 236;
+  --color-accent: 249 115 22;
+  --color-surface: 255 255 255;
+  --color-muted: 100 116 139;
+  --color-primary: 11 18 32;
+  background: rgb(var(--color-field));
+  color: rgb(var(--color-ink));
 }
 
 * {
   box-sizing: border-box;
 }
 
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
-  background:
-    radial-gradient(circle at top left, rgba(15, 118, 110, 0.08), transparent 34rem),
-    linear-gradient(180deg, #f8fafc 0%, #eef3f8 100%);
-  color: #17202a;
+  background: rgb(var(--color-field));
+  color: rgb(var(--color-ink));
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  padding-bottom: env(safe-area-inset-bottom);
 }
 
 button,
@@ -36,28 +48,56 @@ a {
 
 button,
 a,
-[role="button"] {
+[role="button"],
+input,
+select,
+textarea {
   -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+button,
+[role="button"] {
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+button:disabled {
+  touch-action: none;
 }
 
 .form-input {
   width: 100%;
-  border: 1px solid #d7dee8;
+  border: 1px solid rgb(var(--color-wire));
   border-radius: 8px;
-  background: white;
-  padding: 0.7rem 0.8rem;
+  background: rgb(var(--color-surface));
+  color: rgb(var(--color-ink));
+  min-height: 3rem;
+  padding: 0.75rem 0.85rem;
   outline: none;
+  transition: border-color 90ms ease, box-shadow 90ms ease, background-color 90ms ease;
 }
 
 .form-input:focus {
-  border-color: #0f766e;
-  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.14);
+  border-color: rgb(var(--color-board));
+  box-shadow: 0 0 0 3px rgb(var(--color-board) / 0.14);
 }
 
 .label {
   display: grid;
   gap: 0.35rem;
-  color: #3f4d5a;
+  color: rgb(var(--color-muted));
   font-size: 0.9rem;
   font-weight: 600;
+}
+
+::selection {
+  background: rgb(var(--color-board) / 0.18);
+}
+
+@media (max-width: 1023px) {
+  body {
+    padding-bottom: calc(5.5rem + env(safe-area-inset-bottom));
+  }
 }

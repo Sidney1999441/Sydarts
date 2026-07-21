@@ -6,12 +6,14 @@ import { calculateDartStats, type ScoreTurn } from "@/lib/algorithms/scoring";
 import { updateUserRating } from "@/lib/algorithms/rating";
 import { requireAdmin, requireUser } from "@/lib/auth/guards";
 import { getLegStartingScore } from "@/lib/darts/variants";
+import { hasSameResultSubmission } from "@/lib/results/submission";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { fromFormString } from "@/lib/utils";
 import type { MatchDartMode, MatchLegLineup, MatchLegResult, MatchLegRule } from "@/types/domain";
 
 const SOFT_RATING_WEIGHT = 0.45;
+const resultSubmissionIdSchema = z.string().uuid();
 
 type ManualSoftStats = {
   averageScore?: number;
@@ -21,6 +23,10 @@ type ManualSoftStats = {
   highestCheckout?: number;
   countHighCheckout?: number;
   countWhiteHorse?: number;
+  totalMarks?: number;
+  count5Marks?: number;
+  count6Marks?: number;
+  count7Marks?: number;
   averagePer3Darts?: number;
   totalScoredPoints?: number;
   totalDarts?: number;
@@ -36,15 +42,66 @@ type ManualSoftStats = {
 };
 
 type ManualStatsById = Record<string, ManualSoftStats>;
+type ResultStatsById = Record<string, ManualSoftStats | ReturnType<typeof calculateDartStats>>;
+type SettlementStatsScope = "tournament" | "general" | "soft";
+
+type SettlementRatingLog = {
+  userId: string;
+  ratingBefore: number;
+  ratingAfter: number;
+  delta: number;
+  reason: "match_win" | "match_loss";
+  ratingScope: "tournament" | "general" | "soft";
+  matchSource: "tournament" | "tournament_soft";
+};
+
+type SettlementStatEvent = {
+  userId: string;
+  statsScope: SettlementStatsScope;
+  won: boolean;
+  legsWon: number;
+  legsLost: number;
+  totalScoredPoints?: number;
+  totalDarts?: number;
+  highestTurnScore?: number;
+  bustCount?: number;
+  checkoutCount?: number;
+  highestCheckout?: number;
+  countHighCheckout?: number;
+  count60Plus?: number;
+  count80Plus?: number;
+  count180?: number;
+  count100Plus?: number;
+  count140Plus?: number;
+  count170Plus?: number;
+  averageScore?: number | null;
+  averageScoreSamples?: number;
+  averageMpr?: number | null;
+  averageMprSamples?: number;
+  countTon80?: number;
+  countHatTrick?: number;
+  countWhiteHorse?: number;
+  totalMarks?: number;
+  count5Marks?: number;
+  count6Marks?: number;
+  count7Marks?: number;
+};
+
+function submissionIdFromForm(formData: FormData) {
+  const raw = fromFormString(formData.get("submission_id"));
+  return raw ? resultSubmissionIdSchema.parse(raw) : undefined;
+}
 
 const completeMatchSchema = z.object({
   matchId: z.string().uuid(),
+  submissionId: z.string().uuid().optional(),
   winnerParticipantId: z.string().uuid(),
   scoreA: z.number().int().min(0),
   scoreB: z.number().int().min(0),
   turns: z.array(
     z.object({
       participantId: z.string(),
+      userId: z.string().uuid().optional(),
       score: z.number(),
       darts: z.number().optional(),
       legNumber: z.number().int().min(1).default(1),
@@ -76,6 +133,7 @@ const completeMatchSchema = z.object({
 });
 
 const completeCasualMatchSchema = z.object({
+  submissionId: z.string().uuid().optional(),
   opponentName: z.string().trim().min(1).max(80),
   opponentUserId: z.string().uuid().optional().nullable(),
   startingScore: z.union([z.literal(301), z.literal(501), z.literal(701)]),
@@ -146,6 +204,34 @@ function userIdsFromLineups(input: {
   return selected.size > 0 ? [...selected] : input.fallbackUserIds;
 }
 
+function turnLineupUserIds(input: {
+  turn: Pick<ScoreTurn, "participantId" | "legNumber">;
+  participantAId: string;
+  participantBId: string;
+  lineups: MatchLegLineup[];
+}) {
+  const lineup = input.lineups.find((item) => item.legNumber === input.turn.legNumber);
+  if (!lineup) return [];
+  if (input.turn.participantId === input.participantAId) return lineup.participantAUserIds || [];
+  if (input.turn.participantId === input.participantBId) return lineup.participantBUserIds || [];
+  return [];
+}
+
+function assertTurnUsersInLineups(input: {
+  turns: ScoreTurn[];
+  participantAId: string;
+  participantBId: string;
+  lineups: MatchLegLineup[];
+}) {
+  for (const turn of input.turns) {
+    if (!turn.userId) continue;
+    const allowedUserIds = turnLineupUserIds({ ...input, turn });
+    if (!allowedUserIds.includes(turn.userId)) {
+      throw new Error("A scored turn references a player outside this leg lineup.");
+    }
+  }
+}
+
 function parseLineupsFromForm(input: {
   formData: FormData;
   legRules: MatchLegRule[];
@@ -193,7 +279,19 @@ function parseManualStatsForUsers(formData: FormData, userIds: string[]): Manual
         countHatTrick: optionalIntegerFromForm(formData, `stats_${userId}_count_hat_trick`),
         highestCheckout: optionalIntegerFromForm(formData, `stats_${userId}_highest_checkout`),
         countHighCheckout: optionalIntegerFromForm(formData, `stats_${userId}_count_high_checkout`),
-        countWhiteHorse: optionalIntegerFromForm(formData, `stats_${userId}_count_white_horse`)
+        countWhiteHorse: optionalIntegerFromForm(formData, `stats_${userId}_count_white_horse`),
+        totalMarks: optionalIntegerFromForm(formData, `stats_${userId}_total_marks`),
+        count5Marks: optionalIntegerFromForm(formData, `stats_${userId}_count_5_marks`),
+        count6Marks: optionalIntegerFromForm(formData, `stats_${userId}_count_6_marks`),
+        count7Marks: optionalIntegerFromForm(formData, `stats_${userId}_count_7_marks`),
+        count60Plus: optionalIntegerFromForm(formData, `stats_${userId}_count_60_plus`),
+        count80Plus: optionalIntegerFromForm(formData, `stats_${userId}_count_80_plus`),
+        count180:
+          optionalIntegerFromForm(formData, `stats_${userId}_count_180`) ??
+          optionalIntegerFromForm(formData, `stats_${userId}_count_ton80`),
+        count100Plus: optionalIntegerFromForm(formData, `stats_${userId}_count_100_plus`),
+        count140Plus: optionalIntegerFromForm(formData, `stats_${userId}_count_140_plus`),
+        count170Plus: optionalIntegerFromForm(formData, `stats_${userId}_count_170_plus`)
       })
     ]).filter(([, stats]) => Object.keys(stats).length > 0)
   );
@@ -217,7 +315,11 @@ function buildSoftStatsRpcPayload(input: {
     p_count_high_checkout: input.stats?.countHighCheckout || 0,
     p_count_ton80: input.stats?.countTon80 || 0,
     p_count_hat_trick: input.stats?.countHatTrick || 0,
-    p_count_white_horse: input.stats?.countWhiteHorse || 0
+    p_count_white_horse: input.stats?.countWhiteHorse || 0,
+    p_total_marks: input.stats?.totalMarks || 0,
+    p_count_5_marks: input.stats?.count5Marks || 0,
+    p_count_6_marks: input.stats?.count6Marks || 0,
+    p_count_7_marks: input.stats?.count7Marks || 0
   };
 }
 
@@ -249,6 +351,117 @@ function buildStatsRpcPayload(input: {
   };
 }
 
+function hasManualStats(stats?: ManualSoftStats) {
+  return Boolean(stats && Object.keys(stats).length > 0);
+}
+
+function buildManualSteelStatsRpcPayload(input: {
+  userId: string;
+  won: boolean;
+  legsWon: number;
+  legsLost: number;
+  stats?: ManualSoftStats;
+}) {
+  const average = input.stats?.averagePer3Darts ?? input.stats?.averageScore;
+  return {
+    p_user_id: input.userId,
+    p_won: input.won,
+    p_legs_won: input.legsWon,
+    p_legs_lost: input.legsLost,
+    p_total_scored_points:
+      average !== undefined ? Math.max(0, Math.round(average)) : input.stats?.totalScoredPoints || 0,
+    p_total_darts: average !== undefined ? 3 : input.stats?.totalDarts || 0,
+    p_highest_turn_score: input.stats?.highestTurnScore || 0,
+    p_bust_count: input.stats?.bustCount || 0,
+    p_checkout_count: input.stats?.checkoutCount || 0,
+    p_highest_checkout: input.stats?.highestCheckout || 0,
+    p_count_high_checkout: input.stats?.countHighCheckout || 0,
+    p_count_60_plus: input.stats?.count60Plus || 0,
+    p_count_80_plus: input.stats?.count80Plus || 0,
+    p_count_180: input.stats?.count180 ?? input.stats?.countTon80 ?? 0,
+    p_count_100_plus: input.stats?.count100Plus || 0,
+    p_count_140_plus: input.stats?.count140Plus || 0,
+    p_count_170_plus: input.stats?.count170Plus || 0
+  };
+}
+
+function buildSteelStatEvent(input: {
+  userId: string;
+  statsScope: Extract<SettlementStatsScope, "tournament" | "general">;
+  won: boolean;
+  legsWon: number;
+  legsLost: number;
+  stats?: ReturnType<typeof calculateDartStats>;
+  manualStats?: ManualSoftStats;
+}): SettlementStatEvent {
+  const payload = hasManualStats(input.manualStats)
+    ? buildManualSteelStatsRpcPayload({
+        userId: input.userId,
+        won: input.won,
+        legsWon: input.legsWon,
+        legsLost: input.legsLost,
+        stats: input.manualStats
+      })
+    : buildStatsRpcPayload({
+        userId: input.userId,
+        won: input.won,
+        legsWon: input.legsWon,
+        legsLost: input.legsLost,
+        stats: input.stats
+      });
+
+  return {
+    userId: input.userId,
+    statsScope: input.statsScope,
+    won: input.won,
+    legsWon: input.legsWon,
+    legsLost: input.legsLost,
+    totalScoredPoints: payload.p_total_scored_points,
+    totalDarts: payload.p_total_darts,
+    highestTurnScore: payload.p_highest_turn_score,
+    bustCount: payload.p_bust_count,
+    checkoutCount: payload.p_checkout_count,
+    highestCheckout: payload.p_highest_checkout,
+    countHighCheckout: payload.p_count_high_checkout,
+    count60Plus: payload.p_count_60_plus,
+    count80Plus: payload.p_count_80_plus,
+    count180: payload.p_count_180,
+    count100Plus: payload.p_count_100_plus,
+    count140Plus: payload.p_count_140_plus,
+    count170Plus: payload.p_count_170_plus
+  };
+}
+
+function buildSoftStatEvent(input: {
+  userId: string;
+  won: boolean;
+  legsWon: number;
+  legsLost: number;
+  stats?: ManualSoftStats;
+}): SettlementStatEvent {
+  const payload = buildSoftStatsRpcPayload(input);
+  return {
+    userId: input.userId,
+    statsScope: "soft",
+    won: input.won,
+    legsWon: input.legsWon,
+    legsLost: input.legsLost,
+    averageScore: payload.p_average_score,
+    averageScoreSamples: payload.p_average_score === null ? 0 : 1,
+    averageMpr: payload.p_average_mpr,
+    averageMprSamples: payload.p_average_mpr === null ? 0 : 1,
+    highestCheckout: payload.p_highest_checkout,
+    countHighCheckout: payload.p_count_high_checkout,
+    countTon80: payload.p_count_ton80,
+    countHatTrick: payload.p_count_hat_trick,
+    countWhiteHorse: payload.p_count_white_horse,
+    totalMarks: payload.p_total_marks,
+    count5Marks: payload.p_count_5_marks,
+    count6Marks: payload.p_count_6_marks,
+    count7Marks: payload.p_count_7_marks
+  };
+}
+
 function buildParticipantStatsFromTurns(input: {
   participantAId: string;
   participantBId: string;
@@ -264,6 +477,16 @@ function buildParticipantStatsFromTurns(input: {
   };
 }
 
+function buildUserStatsFromTurns(turns: ScoreTurn[]): ResultStatsById {
+  const userIds = [...new Set(turns.map((turn) => turn.userId).filter(Boolean))] as string[];
+  return Object.fromEntries(
+    userIds.map((userId) => [
+      userId,
+      calculateDartStats(turns.filter((turn) => turn.userId === userId))
+    ])
+  );
+}
+
 function buildManualResultDetails(input: {
   source: string;
   dartMode: MatchDartMode;
@@ -272,10 +495,12 @@ function buildManualResultDetails(input: {
   legLineups?: MatchLegLineup[];
   legResults?: MatchLegResult[];
   participantStats?: Record<string, ReturnType<typeof calculateDartStats> | ManualSoftStats>;
-  userStats?: ManualStatsById;
+  userStats?: ResultStatsById;
+  submissionId?: string | null;
 }) {
   return {
     source: input.source,
+    submissionId: input.submissionId || null,
     dartMode: input.dartMode,
     gameVariant: input.gameVariant,
     legRules: input.legRules || [],
@@ -305,11 +530,15 @@ function buildParticipantManualStats(userIds: string[], userStats: ManualStatsBy
     countHatTrick: stats.reduce((total, stat) => total + (stat.countHatTrick || 0), 0),
     highestCheckout: Math.max(0, ...stats.map((stat) => stat.highestCheckout || 0)),
     countHighCheckout: stats.reduce((total, stat) => total + (stat.countHighCheckout || 0), 0),
-    countWhiteHorse: stats.reduce((total, stat) => total + (stat.countWhiteHorse || 0), 0)
+    countWhiteHorse: stats.reduce((total, stat) => total + (stat.countWhiteHorse || 0), 0),
+    totalMarks: stats.reduce((total, stat) => total + (stat.totalMarks || 0), 0),
+    count5Marks: stats.reduce((total, stat) => total + (stat.count5Marks || 0), 0),
+    count6Marks: stats.reduce((total, stat) => total + (stat.count6Marks || 0), 0),
+    count7Marks: stats.reduce((total, stat) => total + (stat.count7Marks || 0), 0)
   });
 }
 
-async function applyStatsAndRating(input: {
+async function buildSettlementSideEffects(input: {
   admin: ReturnType<typeof createSupabaseAdminClient>;
   matchId: string;
   tournamentId: string;
@@ -322,8 +551,11 @@ async function applyStatsAndRating(input: {
   dartMode?: MatchDartMode;
   userStats?: ManualStatsById;
   legLineups?: MatchLegLineup[];
-}) {
+  recalculate?: boolean;
+}): Promise<{ ratingLogs: SettlementRatingLog[]; statEvents: SettlementStatEvent[] }> {
   const { admin } = input;
+  const ratingLogs: SettlementRatingLog[] = [];
+  const statEvents: SettlementStatEvent[] = [];
   const dartMode = input.dartMode || "steel";
   const loserParticipantId =
     input.winnerParticipantId === input.participantAId
@@ -346,7 +578,7 @@ async function applyStatsAndRating(input: {
     lineups: input.legLineups
   });
   const allUserIds = [...winnerUserIds, ...loserUserIds];
-  if (allUserIds.length === 0) return;
+  if (allUserIds.length === 0) return { ratingLogs, statEvents };
 
   const { data: profiles, error: profileError } = await admin
     .from("profiles")
@@ -354,9 +586,33 @@ async function applyStatsAndRating(input: {
     .in("id", allUserIds);
 
   if (profileError) throw new Error(profileError.message);
+  const tournamentRatingByUser = new Map(
+    (profiles || []).map((profile) => [profile.id, profile.tournament_rating ?? profile.rating ?? 1000])
+  );
+  const casualRatingByUser = new Map(
+    (profiles || []).map((profile) => [profile.id, profile.casual_rating ?? profile.rating ?? 1000])
+  );
   const softRatingByUser = new Map(
     (profiles || []).map((profile) => [profile.id, profile.soft_rating ?? profile.rating ?? 1000])
   );
+
+  if (input.recalculate) {
+    const { data: previousRatingLogs, error: previousRatingError } = await admin
+      .from("rating_logs")
+      .select("user_id, rating_scope, delta")
+      .eq("match_id", input.matchId);
+
+    if (previousRatingError) throw new Error(previousRatingError.message);
+    for (const log of previousRatingLogs || []) {
+      if (log.rating_scope === "soft") {
+        softRatingByUser.set(log.user_id, (softRatingByUser.get(log.user_id) || 1000) - log.delta);
+      } else if (log.rating_scope === "general") {
+        casualRatingByUser.set(log.user_id, (casualRatingByUser.get(log.user_id) || 1000) - log.delta);
+      } else if (log.rating_scope === "tournament") {
+        tournamentRatingByUser.set(log.user_id, (tournamentRatingByUser.get(log.user_id) || 1000) - log.delta);
+      }
+    }
+  }
 
   if (dartMode === "soft") {
     const winnerSoftAverage =
@@ -377,28 +633,16 @@ async function applyStatsAndRating(input: {
       const legsLost = input.winnerParticipantId === input.participantAId ? input.scoreB : input.scoreA;
       const stats = input.userStats?.[userId];
 
-      await admin.from("profiles").update({ soft_rating: softRating.winnerRatingAfter }).eq("id", userId);
-      await admin.from("rating_logs").insert({
-        user_id: userId,
-        tournament_id: input.tournamentId,
-        match_id: input.matchId,
-        rating_before: currentSoftRating,
-        rating_after: softRating.winnerRatingAfter,
+      ratingLogs.push({
+        userId,
+        ratingBefore: currentSoftRating,
+        ratingAfter: softRating.winnerRatingAfter,
         delta: softRating.winnerDelta,
         reason: "match_win",
-        rating_scope: "soft",
-        match_source: "tournament_soft"
+        ratingScope: "soft",
+        matchSource: "tournament_soft"
       });
-      await admin.rpc(
-        "upsert_soft_match_stats",
-        buildSoftStatsRpcPayload({
-          userId,
-          won: true,
-          legsWon,
-          legsLost,
-          stats
-        })
-      );
+      statEvents.push(buildSoftStatEvent({ userId, won: true, legsWon, legsLost, stats }));
     }
 
     for (const userId of loserUserIds) {
@@ -412,39 +656,21 @@ async function applyStatsAndRating(input: {
       const legsLost = loserParticipantId === input.participantAId ? input.scoreB : input.scoreA;
       const stats = input.userStats?.[userId];
 
-      await admin.from("profiles").update({ soft_rating: softRating.loserRatingAfter }).eq("id", userId);
-      await admin.from("rating_logs").insert({
-        user_id: userId,
-        tournament_id: input.tournamentId,
-        match_id: input.matchId,
-        rating_before: currentSoftRating,
-        rating_after: softRating.loserRatingAfter,
+      ratingLogs.push({
+        userId,
+        ratingBefore: currentSoftRating,
+        ratingAfter: softRating.loserRatingAfter,
         delta: softRating.loserDelta,
         reason: "match_loss",
-        rating_scope: "soft",
-        match_source: "tournament_soft"
+        ratingScope: "soft",
+        matchSource: "tournament_soft"
       });
-      await admin.rpc(
-        "upsert_soft_match_stats",
-        buildSoftStatsRpcPayload({
-          userId,
-          won: false,
-          legsWon,
-          legsLost,
-          stats
-        })
-      );
+      statEvents.push(buildSoftStatEvent({ userId, won: false, legsWon, legsLost, stats }));
     }
 
-    return;
+    return { ratingLogs, statEvents };
   }
 
-  const tournamentRatingByUser = new Map(
-    (profiles || []).map((profile) => [profile.id, profile.tournament_rating ?? profile.rating ?? 1000])
-  );
-  const casualRatingByUser = new Map(
-    (profiles || []).map((profile) => [profile.id, profile.casual_rating ?? profile.rating ?? 1000])
-  );
   const winnerTournamentAverage =
     winnerUserIds.reduce((total, id) => total + (tournamentRatingByUser.get(id) || 1000), 0) /
     Math.max(1, winnerUserIds.length);
@@ -465,6 +691,13 @@ async function applyStatsAndRating(input: {
       calculateDartStats(input.turns.filter((turn) => turn.participantId === participantId))
     );
   });
+  const hasUserTurnStats = input.turns.some((turn) => Boolean(turn.userId));
+  const statsByUser = new Map<string, ReturnType<typeof calculateDartStats>>();
+  if (hasUserTurnStats) {
+    for (const userId of allUserIds) {
+      statsByUser.set(userId, calculateDartStats(input.turns.filter((turn) => turn.userId === userId)));
+    }
+  }
 
   for (const userId of winnerUserIds) {
     const currentTournamentRating = tournamentRatingByUser.get(userId) || 1000;
@@ -477,51 +710,53 @@ async function applyStatsAndRating(input: {
       winnerRating: currentCasualRating,
       loserRating: Math.round(loserCasualAverage)
     });
-    const stats = statsByParticipant.get(input.winnerParticipantId);
+    const stats = hasUserTurnStats
+      ? statsByUser.get(userId)
+      : statsByParticipant.get(input.winnerParticipantId);
+    const manualStats = input.userStats?.[userId];
     const legsWon = input.winnerParticipantId === input.participantAId ? input.scoreA : input.scoreB;
     const legsLost = input.winnerParticipantId === input.participantAId ? input.scoreB : input.scoreA;
 
-    await admin
-      .from("profiles")
-      .update({
-        rating: tournamentRating.winnerRatingAfter,
-        tournament_rating: tournamentRating.winnerRatingAfter,
-        casual_rating: casualRating.winnerRatingAfter
-      })
-      .eq("id", userId);
-    await admin.from("rating_logs").insert([
+    ratingLogs.push(
       {
-        user_id: userId,
-        tournament_id: input.tournamentId,
-        match_id: input.matchId,
-        rating_before: currentTournamentRating,
-        rating_after: tournamentRating.winnerRatingAfter,
+        userId,
+        ratingBefore: currentTournamentRating,
+        ratingAfter: tournamentRating.winnerRatingAfter,
         delta: tournamentRating.winnerDelta,
         reason: "match_win",
-        rating_scope: "tournament",
-        match_source: "tournament"
+        ratingScope: "tournament",
+        matchSource: "tournament"
       },
       {
-        user_id: userId,
-        tournament_id: input.tournamentId,
-        match_id: input.matchId,
-        rating_before: currentCasualRating,
-        rating_after: casualRating.winnerRatingAfter,
+        userId,
+        ratingBefore: currentCasualRating,
+        ratingAfter: casualRating.winnerRatingAfter,
         delta: casualRating.winnerDelta,
         reason: "match_win",
-        rating_scope: "general",
-        match_source: "tournament"
+        ratingScope: "general",
+        matchSource: "tournament"
       }
-    ]);
-    const statsPayload = buildStatsRpcPayload({
-      userId,
-      won: true,
-      legsWon,
-      legsLost,
-      stats
-    });
-    await admin.rpc("upsert_user_match_stats", statsPayload);
-    await admin.rpc("upsert_general_match_stats", statsPayload);
+    );
+    statEvents.push(
+      buildSteelStatEvent({
+        userId,
+        statsScope: "tournament",
+        won: true,
+        legsWon,
+        legsLost,
+        stats,
+        manualStats
+      }),
+      buildSteelStatEvent({
+        userId,
+        statsScope: "general",
+        won: true,
+        legsWon,
+        legsLost,
+        stats,
+        manualStats
+      })
+    );
   }
 
   for (const userId of loserUserIds) {
@@ -535,146 +770,90 @@ async function applyStatsAndRating(input: {
       winnerRating: Math.round(winnerCasualAverage),
       loserRating: currentCasualRating
     });
-    const stats = statsByParticipant.get(loserParticipantId);
+    const stats = hasUserTurnStats
+      ? statsByUser.get(userId)
+      : statsByParticipant.get(loserParticipantId);
+    const manualStats = input.userStats?.[userId];
     const legsWon = loserParticipantId === input.participantAId ? input.scoreA : input.scoreB;
     const legsLost = loserParticipantId === input.participantAId ? input.scoreB : input.scoreA;
 
-    await admin
-      .from("profiles")
-      .update({
-        rating: tournamentRating.loserRatingAfter,
-        tournament_rating: tournamentRating.loserRatingAfter,
-        casual_rating: casualRating.loserRatingAfter
-      })
-      .eq("id", userId);
-    await admin.from("rating_logs").insert([
+    ratingLogs.push(
       {
-        user_id: userId,
-        tournament_id: input.tournamentId,
-        match_id: input.matchId,
-        rating_before: currentTournamentRating,
-        rating_after: tournamentRating.loserRatingAfter,
+        userId,
+        ratingBefore: currentTournamentRating,
+        ratingAfter: tournamentRating.loserRatingAfter,
         delta: tournamentRating.loserDelta,
         reason: "match_loss",
-        rating_scope: "tournament",
-        match_source: "tournament"
+        ratingScope: "tournament",
+        matchSource: "tournament"
       },
       {
-        user_id: userId,
-        tournament_id: input.tournamentId,
-        match_id: input.matchId,
-        rating_before: currentCasualRating,
-        rating_after: casualRating.loserRatingAfter,
+        userId,
+        ratingBefore: currentCasualRating,
+        ratingAfter: casualRating.loserRatingAfter,
         delta: casualRating.loserDelta,
         reason: "match_loss",
-        rating_scope: "general",
-        match_source: "tournament"
+        ratingScope: "general",
+        matchSource: "tournament"
       }
-    ]);
-    const statsPayload = buildStatsRpcPayload({
-      userId,
-      won: false,
-      legsWon,
-      legsLost,
-      stats
-    });
-    await admin.rpc("upsert_user_match_stats", statsPayload);
-    await admin.rpc("upsert_general_match_stats", statsPayload);
-  }
-}
-
-async function advanceKnockoutWinner(
-  admin: ReturnType<typeof createSupabaseAdminClient>,
-  matchId: string,
-  winnerParticipantId: string
-) {
-  const { data: match, error } = await admin
-    .from("matches")
-    .select("id, stage, next_match_id, next_match_slot")
-    .eq("id", matchId)
-    .single();
-
-  if (error) throw new Error(error.message);
-  if (match.stage !== "knockout" || !match.next_match_id || !match.next_match_slot) {
-    return;
+    );
+    statEvents.push(
+      buildSteelStatEvent({
+        userId,
+        statsScope: "tournament",
+        won: false,
+        legsWon,
+        legsLost,
+        stats,
+        manualStats
+      }),
+      buildSteelStatEvent({
+        userId,
+        statsScope: "general",
+        won: false,
+        legsWon,
+        legsLost,
+        stats,
+        manualStats
+      })
+    );
   }
 
-  const nextSlotColumn =
-    match.next_match_slot === "A" ? "participant_a_id" : "participant_b_id";
-  const { error: advanceError } = await admin
-    .from("matches")
-    .update({ [nextSlotColumn]: winnerParticipantId })
-    .eq("id", match.next_match_id);
-
-  if (advanceError) throw new Error(advanceError.message);
+  return { ratingLogs, statEvents };
 }
 
-async function insertScoredLegsAndTurns(input: {
+async function settleTournamentMatch(input: {
   admin: ReturnType<typeof createSupabaseAdminClient>;
   matchId: string;
-  legResults: MatchLegResult[];
-  turns: ScoreTurn[];
+  winnerParticipantId?: string | null;
+  scoreA: number;
+  scoreB: number;
+  details: Record<string, unknown>;
+  legResults?: MatchLegResult[];
+  turns?: ScoreTurn[];
+  ratingLogs: SettlementRatingLog[];
+  statEvents: SettlementStatEvent[];
+  confirmationId?: string | null;
+  recalculate?: boolean;
 }) {
-  if (input.legResults.length === 0) {
-    if (input.turns.length > 0) {
-      await input.admin.from("match_turns").insert(
-        input.turns.map((turn, index) => ({
-          match_id: input.matchId,
-          participant_id: turn.participantId,
-          leg_number: turn.legNumber || 1,
-          turn_number: index + 1,
-          score: turn.score,
-          darts: turn.darts || 3,
-          remaining_before: turn.remainingBefore,
-          remaining_after: turn.remainingAfter,
-          is_bust: turn.isBust,
-          is_checkout: turn.isCheckout
-        }))
-      );
-    }
-    return;
-  }
+  const { error } = await input.admin.rpc("settle_tournament_match", {
+    p_match_id: input.matchId,
+    p_winner_participant_id: input.winnerParticipantId || null,
+    p_score_a: input.scoreA,
+    p_score_b: input.scoreB,
+    p_details: input.details,
+    p_leg_results: (input.legResults || []).map((result) => ({
+      ...result,
+      startingScore: getLegStartingScore(result)
+    })),
+    p_turns: input.turns || [],
+    p_rating_logs: input.ratingLogs,
+    p_stat_events: input.statEvents,
+    p_confirmation_id: input.confirmationId || null,
+    p_recalculate: Boolean(input.recalculate)
+  });
 
-  const { data: insertedLegs, error: legError } = await input.admin
-    .from("match_legs")
-    .insert(
-      input.legResults.map((result) => ({
-        match_id: input.matchId,
-        leg_number: result.legNumber,
-        starting_score: getLegStartingScore(result),
-        participant_mode: result.participantMode,
-        dart_mode: result.dartMode,
-        game_variant: result.gameVariant,
-        participant_a_user_ids: result.participantAUserIds || [],
-        participant_b_user_ids: result.participantBUserIds || [],
-        winner_participant_id: result.winnerParticipantId,
-        checkout_score: result.checkoutScore || null,
-        status: "completed"
-      }))
-    )
-    .select("id, leg_number");
-
-  if (legError) throw new Error(legError.message);
-  const legIdByNumber = new Map((insertedLegs || []).map((leg) => [leg.leg_number, leg.id]));
-
-  if (input.turns.length > 0) {
-    const { error: turnError } = await input.admin.from("match_turns").insert(
-      input.turns.map((turn, index) => ({
-        match_id: input.matchId,
-        leg_id: legIdByNumber.get(turn.legNumber) || null,
-        participant_id: turn.participantId,
-        leg_number: turn.legNumber || 1,
-        turn_number: index + 1,
-        score: turn.score,
-        darts: turn.darts || 3,
-        remaining_before: turn.remainingBefore,
-        remaining_after: turn.remainingAfter,
-        is_bust: turn.isBust,
-        is_checkout: turn.isCheckout
-      }))
-    );
-    if (turnError) throw new Error(turnError.message);
-  }
+  if (error) throw new Error(error.message);
 }
 
 export async function completeScoredMatchAction(payload: unknown) {
@@ -685,17 +864,29 @@ export async function completeScoredMatchAction(payload: unknown) {
   const admin = createSupabaseAdminClient();
   const { data: match, error: matchError } = await admin
     .from("matches")
-    .select("id, tournament_id, participant_a_id, participant_b_id, dart_mode, game_variant, leg_rules, match_finish_mode")
+    .select("id, tournament_id, participant_a_id, participant_b_id, status, dart_mode, game_variant, leg_rules, match_finish_mode, details")
     .eq("id", values.matchId)
     .single();
 
   if (matchError) throw new Error(matchError.message);
+  if (match.status === "bye") {
+    throw new Error("This match has already been settled.");
+  }
+  if (match.status === "completed" && !hasSameResultSubmission(match.details, values.submissionId)) {
+    throw new Error("This match has already been settled.");
+  }
   if (!match.participant_a_id || !match.participant_b_id) {
     throw new Error("Match does not have two participants.");
   }
   if ((match.dart_mode || "steel") === "soft") {
     throw new Error("Soft dart matches are manual-entry only for now.");
   }
+  assertTurnUsersInLineups({
+    turns: values.turns,
+    participantAId: match.participant_a_id,
+    participantBId: match.participant_b_id,
+    lineups: values.legLineups as MatchLegLineup[]
+  });
 
   const details = buildManualResultDetails({
     source: "scorer",
@@ -704,34 +895,16 @@ export async function completeScoredMatchAction(payload: unknown) {
     legRules: (match.leg_rules || []) as MatchLegRule[],
     legLineups: values.legLineups as MatchLegLineup[],
     legResults: values.legResults as MatchLegResult[],
+    submissionId: values.submissionId,
     participantStats: buildParticipantStatsFromTurns({
       participantAId: match.participant_a_id,
       participantBId: match.participant_b_id,
       turns: values.turns
-    })
+    }),
+    userStats: buildUserStatsFromTurns(values.turns)
   });
 
-  const { error } = await admin
-    .from("matches")
-    .update({
-      winner_participant_id: values.winnerParticipantId,
-      score_a: values.scoreA,
-      score_b: values.scoreB,
-      status: "completed",
-      details
-    })
-    .eq("id", values.matchId);
-
-  if (error) throw new Error(error.message);
-
-  await insertScoredLegsAndTurns({
-    admin,
-    matchId: values.matchId,
-    legResults: values.legResults as MatchLegResult[],
-    turns: values.turns
-  });
-
-  await applyStatsAndRating({
+  const settlement = await buildSettlementSideEffects({
     admin,
     matchId: values.matchId,
     tournamentId: match.tournament_id,
@@ -744,7 +917,18 @@ export async function completeScoredMatchAction(payload: unknown) {
     dartMode: "steel",
     legLineups: values.legLineups as MatchLegLineup[]
   });
-  await advanceKnockoutWinner(admin, values.matchId, values.winnerParticipantId);
+  await settleTournamentMatch({
+    admin,
+    matchId: values.matchId,
+    winnerParticipantId: values.winnerParticipantId,
+    scoreA: values.scoreA,
+    scoreB: values.scoreB,
+    details,
+    legResults: values.legResults as MatchLegResult[],
+    turns: values.turns,
+    ratingLogs: settlement.ratingLogs,
+    statEvents: settlement.statEvents
+  });
 
   revalidatePath(`/scorer/${values.matchId}`);
   revalidatePath(`/tournaments/${match.tournament_id}`);
@@ -760,6 +944,21 @@ export async function completeCasualMatchAction(payload: unknown) {
   }
 
   const admin = createSupabaseAdminClient();
+  if (values.submissionId) {
+    const { data: existingCasualMatch, error: existingCasualMatchError } = await admin
+      .from("casual_matches")
+      .select("id")
+      .eq("created_by", user.id)
+      .contains("details", { submissionId: values.submissionId })
+      .maybeSingle();
+    if (existingCasualMatchError) throw new Error(existingCasualMatchError.message);
+    if (existingCasualMatch) {
+      revalidatePath("/scorer");
+      revalidatePath("/profile");
+      return { casualMatchId: existingCasualMatch.id };
+    }
+  }
+
   const profileIds = [user.id, opponentUserId].filter(Boolean) as string[];
   const { data: profiles, error: profileError } = await admin
     .from("profiles")
@@ -809,6 +1008,7 @@ export async function completeCasualMatchAction(payload: unknown) {
       confirmation_status: opponentUserId ? "pending" : "not_required",
       details: {
         source: "casual_scorer",
+        submissionId: values.submissionId || null,
         participantStats: {
           A: statsA,
           B: statsB
@@ -830,7 +1030,24 @@ export async function completeCasualMatchAction(payload: unknown) {
     .select("id")
     .single();
 
-  if (casualMatchError) throw new Error(casualMatchError.message);
+  if (casualMatchError) {
+    if (values.submissionId) {
+      const { data: existingCasualMatch, error: existingCasualMatchError } = await admin
+        .from("casual_matches")
+        .select("id")
+        .eq("created_by", user.id)
+        .contains("details", { submissionId: values.submissionId })
+        .limit(1)
+        .maybeSingle();
+      if (existingCasualMatchError) throw new Error(existingCasualMatchError.message);
+      if (existingCasualMatch) {
+        revalidatePath("/scorer");
+        revalidatePath("/profile");
+        return { casualMatchId: existingCasualMatch.id };
+      }
+    }
+    throw new Error(casualMatchError.message);
+  }
 
   if (values.turns.length > 0) {
     const { error: turnError } = await admin.from("casual_match_turns").insert(
@@ -977,31 +1194,58 @@ export async function confirmCasualMatchAction(formData: FormData) {
 }
 
 export async function submitManualResultAction(formData: FormData) {
-  const { user } = await requireUser();
+  const { user, profile } = await requireUser();
   const matchId = fromFormString(formData.get("match_id"));
+  const submissionId = submissionIdFromForm(formData);
   const winnerParticipantId = fromFormString(formData.get("winner_participant_id"));
   const scoreA = Number(formData.get("score_a"));
   const scoreB = Number(formData.get("score_b"));
-  await assertMatchMember(matchId, user.id);
+  const isAdmin = profile?.role === "admin";
+  if (!isAdmin) {
+    await assertMatchMember(matchId, user.id);
+  }
 
   const admin = createSupabaseAdminClient();
   const { data: match, error: matchError } = await admin
     .from("matches")
-    .select("id, tournament_id, participant_a_id, participant_b_id, dart_mode, game_variant, leg_rules")
+    .select("id, tournament_id, participant_a_id, participant_b_id, status, dart_mode, game_variant, leg_rules, details")
     .eq("id", matchId)
     .single();
   if (matchError) throw new Error(matchError.message);
+  if (match.status === "bye") {
+    throw new Error("This match has already been settled.");
+  }
+  if (match.status === "completed") {
+    if (!isAdmin && hasSameResultSubmission(match.details, submissionId)) {
+      revalidatePath(`/tournaments/${match.tournament_id}`);
+      return;
+    }
+    if (!hasSameResultSubmission(match.details, submissionId)) {
+      throw new Error("This match has already been settled.");
+    }
+  }
   if (!match.participant_a_id || !match.participant_b_id) {
     throw new Error("Manual result requires two participants.");
   }
+  if (!isAdmin && submissionId) {
+    const { data: existingConfirmation, error: existingConfirmationError } = await admin
+      .from("match_result_confirmations")
+      .select("id, status")
+      .eq("match_id", matchId)
+      .eq("submitted_by", user.id)
+      .contains("details", { submissionId })
+      .limit(1)
+      .maybeSingle();
+    if (existingConfirmationError) throw new Error(existingConfirmationError.message);
+    if (existingConfirmation) {
+      revalidatePath(`/tournaments/${match.tournament_id}`);
+      return;
+    }
+  }
+  if (!isAdmin && match.status === "pending_confirmation") {
+    throw new Error("This match is already waiting for result confirmation.");
+  }
 
-  const opponentParticipantId =
-    winnerParticipantId === match.participant_a_id ? match.participant_b_id : match.participant_a_id;
-  const opponentUserIds = opponentParticipantId
-    ? await getTeamUserIds(admin, opponentParticipantId)
-    : [];
-  const requiredConfirmBy = opponentUserIds[0];
-  if (!requiredConfirmBy) throw new Error("Could not find an opponent user to confirm.");
   const participantAUserIds = await getTeamUserIds(admin, match.participant_a_id);
   const participantBUserIds = await getTeamUserIds(admin, match.participant_b_id);
   const allUserIds = [...new Set([...participantAUserIds, ...participantBUserIds])];
@@ -1038,29 +1282,111 @@ export async function submitManualResultAction(formData: FormData) {
     lineups: legLineups
   });
 
-  await admin.from("match_result_confirmations").insert({
-    match_id: matchId,
-    submitted_by: user.id,
-    required_confirm_by: requiredConfirmBy,
-    proposed_winner_participant_id: winnerParticipantId,
-    proposed_score_a: scoreA,
-    proposed_score_b: scoreB,
-    status: "pending",
-    details: buildManualResultDetails({
-      source: "manual_submission",
-      dartMode,
-      gameVariant: match.game_variant,
-      legRules,
-      legLineups,
-      participantStats: {
-        [match.participant_a_id]: buildParticipantManualStats(participantAPlayedUserIds, userStats),
-        [match.participant_b_id]: buildParticipantManualStats(participantBPlayedUserIds, userStats)
-      },
-      userStats
-    })
+  const details = buildManualResultDetails({
+    source: isAdmin ? "admin_public_manual" : "manual_submission",
+    dartMode,
+    gameVariant: match.game_variant,
+    legRules,
+    legLineups,
+    submissionId,
+    participantStats: {
+      [match.participant_a_id]: buildParticipantManualStats(participantAPlayedUserIds, userStats),
+      [match.participant_b_id]: buildParticipantManualStats(participantBPlayedUserIds, userStats)
+    },
+    userStats
   });
 
-  await admin.from("matches").update({ status: "pending_confirmation" }).eq("id", matchId);
+  if (isAdmin) {
+    const settlement = winnerParticipantId
+      ? await buildSettlementSideEffects({
+          admin,
+          matchId,
+          tournamentId: match.tournament_id,
+          participantAId: match.participant_a_id,
+          participantBId: match.participant_b_id,
+          winnerParticipantId,
+          scoreA,
+          scoreB,
+          turns: [],
+          dartMode,
+          userStats,
+          legLineups
+        })
+      : { ratingLogs: [], statEvents: [] };
+
+    await settleTournamentMatch({
+      admin,
+      matchId,
+      winnerParticipantId: winnerParticipantId || null,
+      scoreA,
+      scoreB,
+      details,
+      ratingLogs: settlement.ratingLogs,
+      statEvents: settlement.statEvents
+    });
+    revalidatePath(`/tournaments/${match.tournament_id}`);
+    revalidatePath(`/admin/tournaments/${match.tournament_id}/results`);
+    return;
+  }
+
+  const opponentParticipantId =
+    winnerParticipantId === match.participant_a_id ? match.participant_b_id : match.participant_a_id;
+  const opponentUserIds = opponentParticipantId
+    ? await getTeamUserIds(admin, opponentParticipantId)
+    : [];
+  const requiredConfirmBy = opponentUserIds[0];
+  if (!requiredConfirmBy) throw new Error("Could not find an opponent user to confirm.");
+
+  const { data: insertedConfirmation, error: confirmationInsertError } = await admin
+    .from("match_result_confirmations")
+    .insert({
+      match_id: matchId,
+      submitted_by: user.id,
+      required_confirm_by: requiredConfirmBy,
+      proposed_winner_participant_id: winnerParticipantId,
+      proposed_score_a: scoreA,
+      proposed_score_b: scoreB,
+      status: "pending",
+      details
+    })
+    .select("id")
+    .single();
+  if (confirmationInsertError) {
+    if (submissionId) {
+      const { data: existingConfirmation, error: existingConfirmationError } = await admin
+        .from("match_result_confirmations")
+        .select("id")
+        .eq("match_id", matchId)
+        .eq("submitted_by", user.id)
+        .contains("details", { submissionId })
+        .limit(1)
+        .maybeSingle();
+      if (existingConfirmationError) throw new Error(existingConfirmationError.message);
+      if (existingConfirmation) {
+        revalidatePath(`/tournaments/${match.tournament_id}`);
+        return;
+      }
+    }
+    throw new Error(confirmationInsertError.message);
+  }
+  if (!insertedConfirmation) throw new Error("Could not create result confirmation.");
+
+  const { data: pendingMatch, error: pendingMatchError } = await admin
+    .from("matches")
+    .update({ status: "pending_confirmation" })
+    .eq("id", matchId)
+    .neq("status", "completed")
+    .neq("status", "bye")
+    .select("id")
+    .maybeSingle();
+  if (pendingMatchError) throw new Error(pendingMatchError.message);
+  if (!pendingMatch) {
+    await admin
+      .from("match_result_confirmations")
+      .update({ status: "disputed", reject_reason: "Match was settled before confirmation started." })
+      .eq("id", insertedConfirmation.id);
+    throw new Error("This match has already been settled.");
+  }
   revalidatePath(`/tournaments/${match.tournament_id}`);
 }
 
@@ -1072,7 +1398,7 @@ export async function confirmManualResultAction(formData: FormData) {
 
   const { data: confirmation, error } = await admin
     .from("match_result_confirmations")
-    .select("id, match_id, required_confirm_by, proposed_winner_participant_id, proposed_score_a, proposed_score_b, details")
+    .select("id, match_id, required_confirm_by, proposed_winner_participant_id, proposed_score_a, proposed_score_b, status, details")
     .eq("id", confirmationId)
     .single();
 
@@ -1080,11 +1406,14 @@ export async function confirmManualResultAction(formData: FormData) {
   if (confirmation.required_confirm_by !== user.id) {
     throw new Error("Only the required opponent can confirm this result.");
   }
+  if (confirmation.status !== "pending") {
+    throw new Error("This confirmation has already been handled.");
+  }
 
   if (decision === "confirmed") {
     const { data: match, error: matchError } = await admin
       .from("matches")
-      .select("id, tournament_id, participant_a_id, participant_b_id, dart_mode, game_variant")
+      .select("id, tournament_id, participant_a_id, participant_b_id, status, dart_mode, game_variant")
       .eq("id", confirmation.match_id)
       .single();
 
@@ -1092,27 +1421,17 @@ export async function confirmManualResultAction(formData: FormData) {
     if (!match.participant_a_id || !match.participant_b_id || !confirmation.proposed_winner_participant_id) {
       throw new Error("Manual result confirmation is missing match participants.");
     }
+    if (match.status === "completed" || match.status === "bye") {
+      throw new Error("This match has already been settled.");
+    }
 
-    await admin
-      .from("match_result_confirmations")
-      .update({ status: "confirmed", confirmed_at: new Date().toISOString() })
-      .eq("id", confirmationId);
-    await admin
-      .from("matches")
-      .update({
-        winner_participant_id: confirmation.proposed_winner_participant_id,
-        score_a: confirmation.proposed_score_a,
-        score_b: confirmation.proposed_score_b,
-        status: "completed",
-        details: {
-          ...((confirmation.details as Record<string, unknown> | null) || {}),
-          source: "manual_confirmation",
-          dartMode: match.dart_mode || "steel",
-          gameVariant: match.game_variant
-        }
-      })
-      .eq("id", confirmation.match_id);
-    await applyStatsAndRating({
+    const details = {
+      ...((confirmation.details as Record<string, unknown> | null) || {}),
+      source: "manual_confirmation",
+      dartMode: match.dart_mode || "steel",
+      gameVariant: match.game_variant
+    };
+    const settlement = await buildSettlementSideEffects({
       admin,
       matchId: confirmation.match_id,
       tournamentId: match.tournament_id,
@@ -1128,14 +1447,33 @@ export async function confirmManualResultAction(formData: FormData) {
       legLineups:
         ((confirmation.details as { legLineups?: MatchLegLineup[] } | null)?.legLineups || []) as MatchLegLineup[]
     });
-    await advanceKnockoutWinner(admin, confirmation.match_id, confirmation.proposed_winner_participant_id);
+    await settleTournamentMatch({
+      admin,
+      matchId: confirmation.match_id,
+      winnerParticipantId: confirmation.proposed_winner_participant_id,
+      scoreA: confirmation.proposed_score_a,
+      scoreB: confirmation.proposed_score_b,
+      details,
+      ratingLogs: settlement.ratingLogs,
+      statEvents: settlement.statEvents,
+      confirmationId
+    });
     revalidatePath(`/tournaments/${match.tournament_id}`);
   } else {
-    await admin
+    const { data: updatedConfirmation, error: confirmationUpdateError } = await admin
       .from("match_result_confirmations")
       .update({ status: "rejected", reject_reason: "Rejected by opponent" })
-      .eq("id", confirmationId);
-    await admin.from("matches").update({ status: "disputed" }).eq("id", confirmation.match_id);
+      .eq("id", confirmationId)
+      .eq("status", "pending")
+      .select("id")
+      .maybeSingle();
+    if (confirmationUpdateError) throw new Error(confirmationUpdateError.message);
+    if (!updatedConfirmation) throw new Error("This confirmation has already been handled.");
+    await admin
+      .from("matches")
+      .update({ status: "disputed" })
+      .eq("id", confirmation.match_id)
+      .neq("status", "completed");
   }
   revalidatePath("/profile");
 }
@@ -1144,13 +1482,14 @@ export async function adminUpdateMatchResultAction(formData: FormData) {
   await requireAdmin();
   const matchId = fromFormString(formData.get("match_id"));
   const tournamentId = fromFormString(formData.get("tournament_id"));
+  const submissionId = submissionIdFromForm(formData);
   const winnerParticipantId = fromFormString(formData.get("winner_participant_id"));
   const scoreA = Number(formData.get("score_a"));
   const scoreB = Number(formData.get("score_b"));
   const admin = createSupabaseAdminClient();
   const { data: match, error: matchError } = await admin
     .from("matches")
-    .select("id, tournament_id, participant_a_id, participant_b_id, winner_participant_id, status, dart_mode, game_variant, leg_rules")
+    .select("id, tournament_id, participant_a_id, participant_b_id, winner_participant_id, status, dart_mode, game_variant, leg_rules, details")
     .eq("id", matchId)
     .single();
 
@@ -1195,50 +1534,49 @@ export async function adminUpdateMatchResultAction(formData: FormData) {
     fallbackUserIds: participantBUserIds,
     lineups: legLineups
   });
-  const shouldApplyStatsAndRating = Boolean(winnerParticipantId) && match.status !== "completed";
-
-  const { error } = await admin
-    .from("matches")
-    .update({
-      winner_participant_id: winnerParticipantId || null,
-      score_a: scoreA,
-      score_b: scoreB,
-      status: "completed",
-      details: buildManualResultDetails({
-        source: "admin_override",
+  const details = buildManualResultDetails({
+    source: "admin_override",
+    dartMode,
+    gameVariant: match.game_variant,
+    legRules,
+    legLineups,
+    submissionId,
+    participantStats: {
+      [match.participant_a_id]: buildParticipantManualStats(participantAPlayedUserIds, userStats),
+      [match.participant_b_id]: buildParticipantManualStats(participantBPlayedUserIds, userStats)
+    },
+    userStats
+  });
+  const recalculate = match.status === "completed";
+  const settlement = winnerParticipantId
+    ? await buildSettlementSideEffects({
+        admin,
+        matchId,
+        tournamentId: match.tournament_id,
+        participantAId: match.participant_a_id,
+        participantBId: match.participant_b_id,
+        winnerParticipantId,
+        scoreA,
+        scoreB,
+        turns: [],
         dartMode,
-        gameVariant: match.game_variant,
-        legRules,
+        userStats,
         legLineups,
-        participantStats: {
-          [match.participant_a_id]: buildParticipantManualStats(participantAPlayedUserIds, userStats),
-          [match.participant_b_id]: buildParticipantManualStats(participantBPlayedUserIds, userStats)
-        },
-        userStats
+        recalculate
       })
-    })
-    .eq("id", matchId);
+    : { ratingLogs: [], statEvents: [] };
 
-  if (error) throw new Error(error.message);
-  if (shouldApplyStatsAndRating && winnerParticipantId) {
-    await applyStatsAndRating({
-      admin,
-      matchId,
-      tournamentId,
-      participantAId: match.participant_a_id,
-      participantBId: match.participant_b_id,
-      winnerParticipantId,
-      scoreA,
-      scoreB,
-      turns: [],
-      dartMode,
-      userStats,
-      legLineups
-    });
-  }
-  if (winnerParticipantId) {
-    await advanceKnockoutWinner(admin, matchId, winnerParticipantId);
-  }
+  await settleTournamentMatch({
+    admin,
+    matchId,
+    winnerParticipantId: winnerParticipantId || null,
+    scoreA,
+    scoreB,
+    details,
+    ratingLogs: settlement.ratingLogs,
+    statEvents: settlement.statEvents,
+    recalculate
+  });
   revalidatePath(`/admin/tournaments/${tournamentId}/results`);
   revalidatePath(`/tournaments/${tournamentId}`);
 }

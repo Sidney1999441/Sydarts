@@ -29,6 +29,22 @@ const REQUIRED_TABLES = [
   "site_theme_settings"
 ];
 
+const REQUIRED_COLUMN_SELECTS = [
+  { table: "match_turns", select: "user_id" },
+  { table: "soft_user_stats", select: "total_marks,count_5_marks,count_6_marks,count_7_marks" }
+];
+
+const SERVICE_ROLE_TABLES = [
+  "match_settlements",
+  "match_user_stat_baselines",
+  "match_user_stat_events"
+];
+
+const SERVICE_ROLE_COLUMN_SELECTS = [
+  { table: "match_settlements", select: "submission_id,recalculated_at" },
+  { table: "match_user_stat_events", select: "match_id,user_id,stats_scope,total_marks,count_7_marks" }
+];
+
 const args = new Set(process.argv.slice(2));
 const shouldCheckSchema = args.has("--check-schema") || args.has("--test");
 
@@ -104,7 +120,40 @@ async function checkDatabaseSchema() {
     }
   }
 
+  for (const check of REQUIRED_COLUMN_SELECTS) {
+    const response = await requestWithRetry(
+      `/rest/v1/${encodeURIComponent(check.table)}?select=${encodeURIComponent(check.select)}&limit=1`,
+      { retryServerErrors: false }
+    );
+
+    if (!isSuccess(response.status)) {
+      failures.push(`${check.table}.${check.select}: HTTP ${response.status}`);
+    }
+  }
+
   if (serviceRoleKey) {
+    for (const table of SERVICE_ROLE_TABLES) {
+      const response = await requestWithRetry(
+        `/rest/v1/${encodeURIComponent(table)}?select=*&limit=1`,
+        { retryServerErrors: false, useServiceRole: true }
+      );
+
+      if (!isSuccess(response.status)) {
+        failures.push(`${table}: HTTP ${response.status}`);
+      }
+    }
+
+    for (const check of SERVICE_ROLE_COLUMN_SELECTS) {
+      const response = await requestWithRetry(
+        `/rest/v1/${encodeURIComponent(check.table)}?select=${encodeURIComponent(check.select)}&limit=1`,
+        { retryServerErrors: false, useServiceRole: true }
+      );
+
+      if (!isSuccess(response.status)) {
+        failures.push(`${check.table}.${check.select}: HTTP ${response.status}`);
+      }
+    }
+
     const bucketResponse = await requestWithRetry("/storage/v1/bucket/avatars", {
       retryServerErrors: false,
       useServiceRole: true
@@ -119,7 +168,9 @@ async function checkDatabaseSchema() {
     throw new Error(`Database schema check failed:\n- ${failures.join("\n- ")}`);
   }
 
-  console.log(`Database schema check OK (${REQUIRED_TABLES.length} tables checked).`);
+  console.log(
+    `Database schema check OK (${REQUIRED_TABLES.length} public tables, ${SERVICE_ROLE_TABLES.length} internal tables, ${REQUIRED_COLUMN_SELECTS.length + SERVICE_ROLE_COLUMN_SELECTS.length} column groups checked).`
+  );
 }
 
 async function requestWithRetry(path, options = {}) {

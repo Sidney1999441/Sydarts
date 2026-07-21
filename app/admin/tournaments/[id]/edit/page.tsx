@@ -35,7 +35,7 @@ export default async function EditTournamentPage({
     <div className="grid gap-6">
       <div>
         <h1 className="text-2xl font-bold">编辑赛事</h1>
-        <p className="mt-2 text-sm text-slate-600">{tournament.name}</p>
+        <p className="mt-2 text-sm text-muted">{tournament.name}</p>
       </div>
       {flags.saved || flags.created ? (
         <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">

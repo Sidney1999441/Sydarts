@@ -3,6 +3,7 @@ import type { MatchFinishMode, MatchLegLineup, MatchLegResult, MatchLegRule } fr
 
 export type ScoreTurn = {
   participantId: string;
+  userId?: string;
   legNumber: number;
   score: number;
   darts?: number;
@@ -63,6 +64,21 @@ function getLineupForLeg(lineups: MatchLegLineup[], legNumber: number): MatchLeg
   );
 }
 
+function getLineupUserIdsForParticipant(input: {
+  state: ScoringState;
+  participantId: string;
+  legNumber: number;
+}) {
+  const lineup = getLineupForLeg(input.state.legLineups, input.legNumber);
+  if (input.participantId === input.state.participants[0].participantId) {
+    return lineup.participantAUserIds || [];
+  }
+  if (input.participantId === input.state.participants[1].participantId) {
+    return lineup.participantBUserIds || [];
+  }
+  return [];
+}
+
 function shouldFinishMatch(state: ScoringState, currentParticipant: ScoringParticipant) {
   if (state.matchFinishMode === "majority") {
     return currentParticipant.legsWon >= legsNeeded(state.legRules.length);
@@ -120,7 +136,7 @@ export function createScoringState(input: {
   };
 }
 
-export function applyTurn(state: ScoringState, rawScore: number, darts = 3) {
+export function applyTurn(state: ScoringState, rawScore: number, darts = 3, throwerUserId?: string | null) {
   if (state.winnerParticipantId) return state;
   if (!Number.isInteger(rawScore) || rawScore < 0 || rawScore > 180) {
     throw new Error("Score must be an integer from 0 to 180.");
@@ -142,6 +158,16 @@ export function applyTurn(state: ScoringState, rawScore: number, darts = 3) {
     throw new Error("Invalid scoring state.");
   }
 
+  const allowedUserIds = getLineupUserIdsForParticipant({
+    state: next,
+    participantId: current.participantId,
+    legNumber: next.currentLeg
+  });
+  if (throwerUserId && allowedUserIds.length > 0 && !allowedUserIds.includes(throwerUserId)) {
+    throw new Error("Selected thrower is not in this leg lineup.");
+  }
+  const userId = throwerUserId || (allowedUserIds.length === 1 ? allowedUserIds[0] : undefined);
+
   const remainingBefore = current.remaining;
   const proposedRemaining = remainingBefore - rawScore;
   const isBust = proposedRemaining < 0;
@@ -149,6 +175,7 @@ export function applyTurn(state: ScoringState, rawScore: number, darts = 3) {
 
   const turn = {
     participantId: current.participantId,
+    userId,
     legNumber: next.currentLeg,
     score: rawScore,
     darts,

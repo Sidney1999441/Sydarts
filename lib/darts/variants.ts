@@ -5,13 +5,14 @@ import type {
   MatchDartMode,
   MatchFinishMode,
   MatchLegRule,
+  MatchLegRuleTemplateSet,
   MatchRuleMode,
   MixedFirstDartMode,
   SoftGameVariant,
   TournamentType
 } from "@/types/domain";
 
-export const dartModeOptions: Array<{ value: Exclude<DartMode, "mixed_alternating">; label: string; description: string }> = [
+export const dartModeOptions: Array<{ value: DartMode; label: string; description: string }> = [
   {
     value: "steel",
     label: "硬镖",
@@ -21,6 +22,11 @@ export const dartModeOptions: Array<{ value: Exclude<DartMode, "mixed_alternatin
     value: "soft",
     label: "软镖",
     description: "目前仅支持手动录入，并预留软镖机接入"
+  },
+  {
+    value: "mixed_alternating",
+    label: "软硬轮次交替",
+    description: "联赛轮次可软硬交替，单场 BO 内不混合镖种"
   }
 ];
 
@@ -37,7 +43,10 @@ export const matchFinishModeOptions: Array<{ value: MatchFinishMode; label: stri
 export const softGameOptions: Array<{ value: SoftGameVariant; label: string; doublesOnly?: boolean }> = [
   { value: "soft_301", label: "软镖 301" },
   { value: "soft_501", label: "软镖 501" },
-  { value: "soft_cricket", label: "米老鼠" },
+  { value: "soft_701", label: "软镖 701" },
+  { value: "soft_cricket", label: "米老鼠 / Cricket" },
+  { value: "soft_half_it", label: "减半 / HALF-IT" },
+  { value: "soft_high_score", label: "高分 / HIGH SCORE" },
   { value: "snow_501", label: "雪分制 501", doublesOnly: true },
   { value: "snow_701", label: "雪分制 701", doublesOnly: true }
 ];
@@ -54,9 +63,22 @@ export const steelLegGameOptions: Array<{ value: Extract<LegGameVariant, "301" |
   { value: "701", label: "701" }
 ];
 
+type RuleDefaults = {
+  dartGame?: number | string | null;
+  softGame?: SoftGameVariant | string | null;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isTemplateSet(value: unknown): value is MatchLegRuleTemplateSet {
+  return isRecord(value) && (Array.isArray(value.steel) || Array.isArray(value.soft));
+}
+
 export function getDartModeLabel(mode?: string | null) {
   if (mode === "soft") return "软镖";
-  if (mode === "mixed_alternating") return "软硬交替（历史）";
+  if (mode === "mixed_alternating") return "软硬轮次交替";
   return "硬镖";
 }
 
@@ -85,14 +107,16 @@ export function getLegParticipantModeLabel(mode?: string | null) {
 }
 
 export function getLegRuleLabel(rule: MatchLegRule) {
-  return `第${rule.legNumber}局 ${getLegParticipantModeLabel(rule.participantMode)} · ${getGameVariantLabel({
+  return `第 ${rule.legNumber} 局 ${getLegParticipantModeLabel(rule.participantMode)} · ${getGameVariantLabel({
     dartMode: rule.dartMode,
     gameVariant: rule.gameVariant
   })}`;
 }
 
 export function hasCustomLegRules(value?: unknown): value is MatchLegRule[] {
-  return Array.isArray(value) && value.length > 0;
+  if (Array.isArray(value)) return value.length > 0;
+  if (isTemplateSet(value)) return Boolean(value.steel?.length || value.soft?.length);
+  return false;
 }
 
 export function isSnowGame(game?: string | null) {
@@ -192,6 +216,97 @@ export function normalizeMatchLegRules(rules: unknown): MatchLegRule[] {
     .map((rule, index) => ({ ...rule, legNumber: index + 1 }));
 }
 
+function getFallbackVariant(dartMode: MatchDartMode, defaults?: RuleDefaults) {
+  return getMatchGameVariant({
+    matchDartMode: dartMode,
+    dartGame: defaults?.dartGame,
+    softGame: defaults?.softGame
+  }) as LegGameVariant;
+}
+
+function coerceGameVariant(input: {
+  rule: MatchLegRule;
+  targetDartMode: MatchDartMode;
+  defaults?: RuleDefaults;
+}) {
+  const value = String(input.rule.gameVariant);
+  if (input.targetDartMode === "steel") {
+    if (value.endsWith("301")) return "301";
+    if (value.endsWith("701")) return "701";
+    if (value.endsWith("501")) return "501";
+    return getFallbackVariant("steel", input.defaults);
+  }
+
+  if (value === "301") return "soft_301";
+  if (value === "501") return "soft_501";
+  if (value === "701") return "soft_701";
+  if (softGameOptions.some((option) => option.value === value)) return value as LegGameVariant;
+  return getFallbackVariant("soft", input.defaults);
+}
+
+export function coerceRuleToDartMode(
+  rule: MatchLegRule,
+  targetDartMode: MatchDartMode,
+  defaults?: RuleDefaults
+): MatchLegRule {
+  return {
+    ...rule,
+    dartMode: targetDartMode,
+    gameVariant: coerceGameVariant({ rule, targetDartMode, defaults })
+  };
+}
+
+function renumberRules(rules: MatchLegRule[]) {
+  return rules.map((rule, index) => ({ ...rule, legNumber: index + 1 }));
+}
+
+export function normalizeMatchLegRuleTemplates(value: unknown): Required<MatchLegRuleTemplateSet> {
+  if (isTemplateSet(value)) {
+    return {
+      steel: renumberRules(normalizeMatchLegRules(value.steel).map((rule) => coerceRuleToDartMode(rule, "steel"))),
+      soft: renumberRules(normalizeMatchLegRules(value.soft).map((rule) => coerceRuleToDartMode(rule, "soft")))
+    };
+  }
+
+  const rules = normalizeMatchLegRules(value);
+  return {
+    steel: renumberRules(rules.filter((rule) => rule.dartMode === "steel")),
+    soft: renumberRules(rules.filter((rule) => rule.dartMode === "soft"))
+  };
+}
+
+export function selectMatchLegRules(input: {
+  customRules?: unknown;
+  matchDartMode: MatchDartMode;
+  dartMode?: DartMode | string | null;
+  dartGame?: number | string | null;
+  softGame?: SoftGameVariant | string | null;
+}) {
+  if (isTemplateSet(input.customRules)) {
+    const templates = normalizeMatchLegRuleTemplates(input.customRules);
+    return renumberRules(templates[input.matchDartMode]);
+  }
+
+  const rules = normalizeMatchLegRules(input.customRules);
+  if (rules.length === 0) return [];
+
+  if (rules.every((rule) => rule.dartMode === input.matchDartMode)) {
+    return renumberRules(rules);
+  }
+
+  const matchingRules = rules.filter((rule) => rule.dartMode === input.matchDartMode);
+  if (matchingRules.length > 0) return renumberRules(matchingRules);
+
+  return renumberRules(
+    rules.map((rule) =>
+      coerceRuleToDartMode(rule, input.matchDartMode, {
+        dartGame: input.dartGame,
+        softGame: input.softGame
+      })
+    )
+  );
+}
+
 export function resolveMatchLegRules(input: {
   matchRuleMode?: MatchRuleMode | string | null;
   customRules?: unknown;
@@ -204,7 +319,12 @@ export function resolveMatchLegRules(input: {
   roundNumber?: number | null;
   mixedFirstDartMode?: MixedFirstDartMode | string | null;
 }) {
-  const customRules = normalizeMatchLegRules(input.customRules);
+  const matchDartMode = getMatchDartMode({
+    dartMode: input.dartMode,
+    mixedFirstDartMode: input.mixedFirstDartMode,
+    roundNumber: input.roundNumber
+  });
+  const customRules = selectMatchLegRules({ ...input, matchDartMode });
   if (input.matchRuleMode === "custom_legs" && customRules.length > 0) {
     return customRules;
   }
@@ -228,13 +348,13 @@ export function validateMatchLegRules(input: {
   if (input.rules.length % 2 === 0) return "自定义赛制需要设置奇数局，避免出现平局。";
 
   const mixedDartMode = input.rules.some((rule) => rule.dartMode !== input.dartMode);
-  if (mixedDartMode) return "同一套赛制内不能混合软镖和硬镖。";
+  if (mixedDartMode) return "同一套 BO 赛制内不能混合软镖和硬镖。";
 
   const invalidSoft = input.rules.some((rule) => {
     if (rule.dartMode !== "soft") return false;
     return !softGameOptions.some((option) => option.value === rule.gameVariant);
   });
-  if (invalidSoft) return "软镖赛制只能选择 301、501、米老鼠、雪分制501、雪分制701。";
+  if (invalidSoft) return "软镖赛制只能选择 301、501、701、米老鼠/Cricket、HALF-IT、HIGH SCORE、雪分制501、雪分制701。";
 
   const invalidSteel = input.rules.some((rule) => {
     if (rule.dartMode !== "steel") return false;
@@ -245,7 +365,7 @@ export function validateMatchLegRules(input: {
   const invalidSnow = input.rules.some(
     (rule) => rule.dartMode === "soft" && isSnowGame(rule.gameVariant) && rule.participantMode !== "doubles"
   );
-  if (invalidSnow) return "雪分制501/701 仅限双人局。";
+  if (invalidSnow) return "雪分制 501/701 仅限双人局。";
 
   return null;
 }

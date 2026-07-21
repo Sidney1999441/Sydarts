@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { confirmCasualMatchAction, confirmManualResultAction } from "@/lib/actions/matches";
+import { updateSavedTeamProfileAction } from "@/lib/actions/teams";
 import { calculatePlayerLevel, type PlayerLevelStats, type SoftPlayerLevelStats } from "@/lib/algorithms/player-level";
 import { calculateDartStats, type ScoreTurn } from "@/lib/algorithms/scoring";
 import { requireUser } from "@/lib/auth/guards";
@@ -8,6 +9,7 @@ import { hasSupabaseEnv } from "@/lib/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { cn, formatDateTime } from "@/lib/utils";
 import { SetupNotice } from "@/components/SetupNotice";
+import { AvatarUploader } from "@/components/ui/AvatarUploader";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 
@@ -50,6 +52,10 @@ type DbSoftStats = {
   count_ton80?: number | null;
   count_hat_trick?: number | null;
   count_white_horse?: number | null;
+  total_marks?: number | null;
+  count_5_marks?: number | null;
+  count_6_marks?: number | null;
+  count_7_marks?: number | null;
   current_rating?: number | null;
 };
 
@@ -59,6 +65,10 @@ type SoftDisplayStats = {
   countTon80?: number;
   countHatTrick?: number;
   countWhiteHorse?: number;
+  totalMarks?: number;
+  count5Marks?: number;
+  count6Marks?: number;
+  count7Marks?: number;
 };
 
 type DartStats = ReturnType<typeof calculateDartStats> & SoftDisplayStats;
@@ -163,6 +173,10 @@ function normalizeDartStats(value?: Partial<DartStats> | null): DartStats {
     countTon80: toNumber(value?.countTon80),
     countHatTrick: toNumber(value?.countHatTrick),
     countWhiteHorse: toNumber(value?.countWhiteHorse),
+    totalMarks: toNumber(value?.totalMarks),
+    count5Marks: toNumber(value?.count5Marks),
+    count6Marks: toNumber(value?.count6Marks),
+    count7Marks: toNumber(value?.count7Marks),
     checkoutScore: value?.checkoutScore ?? null
   };
 }
@@ -181,6 +195,7 @@ function statsFromTurns(turns: ScoreTurn[]) {
 
 function mapOfficialTurn(row: {
   participant_id: string;
+  user_id?: string | null;
   score: number;
   darts?: number | null;
   remaining_before: number;
@@ -191,6 +206,7 @@ function mapOfficialTurn(row: {
 }): ScoreTurn {
   return {
     participantId: row.participant_id,
+    userId: row.user_id || undefined,
     legNumber: row.leg_number || 1,
     score: row.score,
     darts: row.darts || 3,
@@ -234,7 +250,8 @@ export default async function ProfilePage() {
     { data: registrations },
     { data: confirmations },
     { data: pendingCasualMatches },
-    { data: teamMemberships }
+    { data: teamMemberships },
+    { data: savedTeams }
   ] = await Promise.all([
     supabase.from("user_stats").select("*").eq("user_id", user.id).maybeSingle(),
     supabase.from("general_user_stats").select("*").eq("user_id", user.id).maybeSingle(),
@@ -258,7 +275,12 @@ export default async function ProfilePage() {
       .eq("confirmation_status", "pending")
       .order("created_at", { ascending: false })
       .limit(6),
-    supabase.from("team_members").select("team_id").eq("user_id", user.id)
+    supabase.from("team_members").select("team_id").eq("user_id", user.id),
+    supabase
+      .from("saved_teams")
+      .select("id, name, avatar_url, status, created_at, updated_at")
+      .eq("captain_user_id", user.id)
+      .order("updated_at", { ascending: false })
   ]);
 
   const teamIds = (teamMemberships || []).map((item) => item.team_id);
@@ -319,7 +341,7 @@ export default async function ProfilePage() {
     officialMatchIds.length > 0
       ? supabase
           .from("match_turns")
-          .select("match_id, participant_id, turn_number, score, darts, remaining_before, remaining_after, is_bust, is_checkout")
+          .select("match_id, participant_id, user_id, turn_number, score, darts, remaining_before, remaining_after, is_bust, is_checkout")
           .in("match_id", officialMatchIds)
           .order("turn_number", { ascending: true })
       : Promise.resolve({ data: [] }),
@@ -406,7 +428,10 @@ export default async function ProfilePage() {
         ? participantById.get(opponentParticipantId)?.display_name || "对手"
         : "对手";
       const matchTurns = (officialTurnsByMatch.get(match.id) || []).map(mapOfficialTurn);
-      const myTurns = matchTurns.filter((turn) => turn.participantId === myParticipantId);
+      const hasPersonalTurns = matchTurns.some((turn) => Boolean(turn.userId));
+      const myTurns = hasPersonalTurns
+        ? matchTurns.filter((turn) => turn.userId === user.id)
+        : matchTurns.filter((turn) => turn.participantId === myParticipantId);
       const opponentTurns = opponentParticipantId
         ? matchTurns.filter((turn) => turn.participantId === opponentParticipantId)
         : [];
@@ -414,7 +439,8 @@ export default async function ProfilePage() {
       const myUserStatsFromDetails = readStatsFromDetails(match.details, user.id, "userStats");
       const hasMyUserStats =
         toNumber(myUserStatsFromDetails.averageScore) > 0 ||
-        toNumber(myUserStatsFromDetails.averageMpr) > 0;
+        toNumber(myUserStatsFromDetails.averageMpr) > 0 ||
+        toNumber(myUserStatsFromDetails.totalMarks) > 0;
       const opponentStatsFromDetails = opponentParticipantId
         ? readStatsFromDetails(match.details, opponentParticipantId)
         : normalizeDartStats();
@@ -437,7 +463,10 @@ export default async function ProfilePage() {
           opponentStats:
             opponentTurns.length > 0 ? statsFromTurns(opponentTurns) : opponentStatsFromDetails,
           turns: matchTurns.map((turn) => ({
-            playerName: participantById.get(turn.participantId)?.display_name || "选手",
+            playerName:
+              turn.userId === user.id
+                ? `${participantById.get(turn.participantId)?.display_name || "我方"} / 我`
+                : participantById.get(turn.participantId)?.display_name || "选手",
             score: turn.score,
             darts: turn.darts || 3,
             remainingAfter: turn.remainingAfter,
@@ -499,11 +528,24 @@ export default async function ProfilePage() {
 
   return (
     <div className="grid gap-5 sm:gap-6">
-      <div>
-        <h1 className="text-2xl font-bold">个人中心</h1>
-        <p className="mt-2 text-sm text-slate-600">
-          {profile?.display_name || user.email} · 普通 {generalLevel.label} · 赛事 {tournamentLevel.label}
-        </p>
+      <div className="flex flex-wrap items-center gap-4 rounded-lg border border-wire bg-surface p-4 shadow-soft">
+        <AvatarUploader
+          entityType="profile"
+          entityId={user.id}
+          initialUrl={profile?.avatar_url}
+          fallback={profile?.display_name || user.email || "U"}
+          label="更换头像"
+          size="lg"
+        />
+        <div className="min-w-0">
+          <div className="mb-3 inline-flex min-h-10 items-center rounded-lg border border-wire bg-field px-3 text-sm font-bold text-board">
+            UID {profile?.uid || "------"}
+          </div>
+          <h1 className="text-2xl font-bold">个人中心</h1>
+          <p className="mt-2 text-sm text-muted">
+            {profile?.display_name || user.email} · 普通 {generalLevel.label} · 赛事 {tournamentLevel.label}
+          </p>
+        </div>
       </div>
 
       <CombinedStatsPanel
@@ -527,11 +569,11 @@ export default async function ProfilePage() {
         <div className="mb-4 grid gap-3 sm:flex sm:flex-wrap sm:items-end sm:justify-between">
           <div>
             <h2 className="text-xl font-bold">最近 30 局详细记录</h2>
-            <p className="mt-1 text-sm text-slate-600">
+            <p className="mt-1 text-sm text-muted">
               新比赛会自动排在最前面，个人页只保留最近 30 局的结算式明细。
             </p>
           </div>
-          <Link className="inline-flex min-h-11 touch-manipulation items-center justify-center rounded-lg border border-wire bg-white px-4 text-sm font-semibold text-board shadow-soft sm:border-0 sm:bg-transparent sm:px-0 sm:shadow-none sm:underline" href="/scorer/casual">
+          <Link className="inline-flex min-h-11 touch-manipulation items-center justify-center rounded-lg border border-wire bg-surface px-4 text-sm font-semibold text-board shadow-soft sm:border-0 sm:bg-transparent sm:px-0 sm:shadow-none sm:underline" href="/scorer/casual">
             打开切磋计分器
           </Link>
         </div>
@@ -541,7 +583,7 @@ export default async function ProfilePage() {
           ))}
           {history.length === 0 ? (
             <Card>
-              <p className="text-sm text-slate-600">
+              <p className="text-sm text-muted">
                 还没有可展示的比赛明细。用计分器完成一局后，这里会出现类似结算页的统计回顾。
               </p>
             </Card>
@@ -551,6 +593,7 @@ export default async function ProfilePage() {
 
       <section className="grid gap-3 sm:gap-4 lg:grid-cols-2">
         <RegistrationCard registrations={registrations || []} tournamentById={tournamentById} />
+        <SavedTeamCaptainCard savedTeams={savedTeams || []} />
       </section>
     </div>
   );
@@ -640,15 +683,15 @@ function CombinedStatsPanel({
   ];
 
   return (
-    <section className="rounded-lg border border-wire bg-white p-5 shadow-soft">
+    <section className="rounded-lg border border-wire bg-surface p-5 shadow-soft">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-bold">水平与统计</h2>
-          <p className="mt-1 text-sm text-slate-600">
+          <p className="mt-1 text-sm text-muted">
             普通统计包含赛事和切磋，赛事统计只计算正式比赛。
           </p>
         </div>
-        <div className="rounded-full bg-field px-3 py-1 text-xs font-semibold text-slate-600">
+        <div className="rounded-full bg-field px-3 py-1 text-xs font-semibold text-muted">
           段位由平均分、胜率、legs 胜率和高分表现综合计算
         </div>
       </div>
@@ -673,6 +716,10 @@ function CombinedStatsPanel({
           <Metric label="胜率" value={`${percent(softStats?.wins, softStats?.matches_played)}%`} />
           <Metric label="均分" value={toNumber(softStats?.average_score).toFixed(1)} />
           <Metric label="MPR" value={toNumber(softStats?.average_mpr).toFixed(2)} />
+          <Metric label="总标数" value={toNumber(softStats?.total_marks)} />
+          <Metric label="5标" value={toNumber(softStats?.count_5_marks)} />
+          <Metric label="6标" value={toNumber(softStats?.count_6_marks)} />
+          <Metric label="7标" value={toNumber(softStats?.count_7_marks)} />
           <Metric label="TON80" value={toNumber(softStats?.count_ton80)} />
           <Metric label="帽子戏法" value={toNumber(softStats?.count_hat_trick)} />
           <Metric label="白马" value={toNumber(softStats?.count_white_horse)} />
@@ -680,8 +727,8 @@ function CombinedStatsPanel({
       </div>
       <div className="mt-4 grid gap-2 sm:hidden">
         {comparisonRows.map((row) => (
-          <div key={row.label} className="rounded-lg border border-wire bg-white p-3">
-            <div className="text-sm font-semibold text-slate-600">{row.label}</div>
+          <div key={row.label} className="rounded-lg border border-wire bg-surface p-3">
+            <div className="text-sm font-semibold text-muted">{row.label}</div>
             <div className="mt-2 grid grid-cols-2 gap-2">
               <div className="min-h-16 rounded-lg bg-emerald-50 p-3">
                 <div className="text-xs font-bold text-emerald-700">普通</div>
@@ -712,7 +759,7 @@ function CombinedStatsPanel({
       <div className="mt-4 hidden overflow-hidden rounded-lg border border-wire sm:block">
         <div className="overflow-x-auto">
           <div className="min-w-[560px]">
-            <div className="grid grid-cols-[1.15fr_0.9fr_0.9fr] bg-field px-4 py-3 text-xs font-bold text-slate-500">
+            <div className="grid grid-cols-[1.15fr_0.9fr_0.9fr] bg-field px-4 py-3 text-xs font-bold text-muted">
               <span>指标</span>
               <span className="text-right text-emerald-700">普通统计</span>
               <span className="text-right text-violet-700">赛事统计</span>
@@ -722,7 +769,7 @@ function CombinedStatsPanel({
                 key={row.label}
                 className="grid grid-cols-[1.15fr_0.9fr_0.9fr] items-center border-t border-wire px-4 py-3 text-sm"
               >
-                <span className="font-medium text-slate-600">{row.label}</span>
+                <span className="font-medium text-muted">{row.label}</span>
                 <span
                   className={cn(
                     "text-right font-semibold text-emerald-700",
@@ -796,7 +843,7 @@ function LevelSummary({
             <div className="text-2xl font-bold">{level.score}</div>
           </div>
         </div>
-        <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/80">
+        <div className="mt-4 h-2 overflow-hidden rounded-full bg-surface/80">
           <div
             className={cn("h-full", isGeneral ? "bg-emerald-500" : "bg-violet-500")}
             style={{ width: `${level.progressToNext}%` }}
@@ -847,7 +894,7 @@ function PendingManualCard({
               <div className="font-semibold">
                 {participantA} vs {participantB}
               </div>
-              <div className="mt-1 text-slate-600">
+              <div className="mt-1 text-muted">
                 提交比分 {confirmation.proposed_score_a}:{confirmation.proposed_score_b}，胜者 {winner}
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
@@ -868,7 +915,7 @@ function PendingManualCard({
           );
         })}
         {confirmations.length === 0 ? (
-          <p className="text-slate-600">暂无需要你确认的赛事结果。</p>
+          <p className="text-muted">暂无需要你确认的赛事结果。</p>
         ) : null}
       </div>
     </Card>
@@ -896,7 +943,7 @@ function PendingCasualCard({
             <div className="font-semibold">
               {match.player_a_name} vs {match.player_b_name}
             </div>
-            <div className="mt-1 text-slate-600">
+            <div className="mt-1 text-muted">
               比分 {match.score_a}:{match.score_b}，{match.winner_side === "B" ? "你方获胜" : "对手获胜"}
             </div>
             <div className="mt-3 flex flex-wrap gap-2">
@@ -915,7 +962,54 @@ function PendingCasualCard({
             </div>
           </div>
         ))}
-        {matches.length === 0 ? <p className="text-slate-600">暂无需要你确认的切磋记录。</p> : null}
+        {matches.length === 0 ? <p className="text-muted">暂无需要你确认的切磋记录。</p> : null}
+      </div>
+    </Card>
+  );
+}
+
+function SavedTeamCaptainCard({
+  savedTeams
+}: {
+  savedTeams: Array<{
+    id: string;
+    name: string;
+    avatar_url: string | null;
+    status: string;
+    updated_at: string;
+  }>;
+}) {
+  return (
+    <Card>
+      <h2 className="text-lg font-bold">我的长期队伍</h2>
+      <div className="mt-4 grid gap-3 text-sm">
+        {savedTeams.map((team) => (
+          <form key={team.id} action={updateSavedTeamProfileAction} className="grid gap-3 rounded-lg border border-wire p-4">
+            <input type="hidden" name="saved_team_id" value={team.id} />
+            <AvatarUploader
+              entityType="saved_team"
+              entityId={team.id}
+              initialUrl={team.avatar_url}
+              fallback={team.name}
+              label="上传队伍头像"
+              size="md"
+            />
+            <label className="label">
+              队伍名称
+              <input className="form-input" name="name" defaultValue={team.name} required />
+            </label>
+            <div className="text-xs text-muted">状态 {team.status}</div>
+            <div className="flex flex-wrap gap-2">
+              <Button type="submit" variant="secondary">保存队伍资料</Button>
+              <Link className="inline-flex min-h-11 items-center rounded-lg px-3 text-sm font-bold text-board underline" href={`/teams/${team.id}`}>
+                历史
+              </Link>
+            </div>
+          </form>
+        ))}
+        {savedTeams.length === 0 ? (
+          <p className="text-muted">你作为队长保存的长期队伍会显示在这里。</p>
+        ) : null}
       </div>
     </Card>
   );
@@ -923,7 +1017,7 @@ function PendingCasualCard({
 
 function HistoryCard({ item }: { item: MatchHistoryItem }) {
   return (
-    <article className="rounded-lg border border-wire bg-white p-3 shadow-soft sm:p-4">
+    <article className="rounded-lg border border-wire bg-surface p-3 shadow-soft sm:p-4">
       <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-start">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -935,8 +1029,8 @@ function HistoryCard({ item }: { item: MatchHistoryItem }) {
             >
               {item.source}
             </span>
-            <span className="text-xs font-semibold text-slate-500">{item.statusLabel}</span>
-            <span className="text-xs text-slate-500">{formatDateTime(item.playedAt)}</span>
+            <span className="text-xs font-semibold text-muted">{item.statusLabel}</span>
+            <span className="text-xs text-muted">{formatDateTime(item.playedAt)}</span>
           </div>
           <h3 className="mt-2 break-words text-base font-bold">
             {item.href ? (
@@ -947,7 +1041,7 @@ function HistoryCard({ item }: { item: MatchHistoryItem }) {
               item.title
             )}
           </h3>
-          <p className="mt-1 text-sm text-slate-600">
+          <p className="mt-1 text-sm text-muted">
             {item.myName} vs {item.opponentName}
           </p>
         </div>
@@ -964,7 +1058,7 @@ function HistoryCard({ item }: { item: MatchHistoryItem }) {
           >
             {item.result}
           </div>
-          <div className="text-sm font-semibold text-slate-600">{item.scoreLabel}</div>
+          <div className="text-sm font-semibold text-muted">{item.scoreLabel}</div>
         </div>
       </div>
 
@@ -981,7 +1075,7 @@ function HistoryCard({ item }: { item: MatchHistoryItem }) {
               <div
                 key={`${item.id}-${index}`}
                 className={cn(
-                  "rounded-lg border bg-white px-3 py-2 text-xs",
+                  "rounded-lg border bg-surface px-3 py-2 text-xs",
                   turn.isCheckout
                     ? "border-emerald-300"
                     : turn.isBust
@@ -993,7 +1087,7 @@ function HistoryCard({ item }: { item: MatchHistoryItem }) {
                   <span className="truncate font-semibold">{turn.playerName}</span>
                   <span className="font-bold">{turn.score}</span>
                 </div>
-                <div className="mt-1 flex justify-between text-slate-500">
+                <div className="mt-1 flex justify-between text-muted">
                   <span>{turn.darts} 镖</span>
                   <span>
                     {turn.isBust ? "爆镖" : turn.isCheckout ? "结镖" : `剩 ${turn.remainingAfter}`}
@@ -1003,7 +1097,7 @@ function HistoryCard({ item }: { item: MatchHistoryItem }) {
             ))}
           </div>
         ) : (
-          <p className="rounded-lg bg-field p-3 text-sm text-slate-600">
+          <p className="rounded-lg bg-field p-3 text-sm text-muted">
             这局没有逐轮计分明细，通常是手动录入或旧数据。
           </p>
         )}
@@ -1030,6 +1124,10 @@ function PlayerSummary({
         <Metric label="最高结镖" value={stats.highestCheckout} />
         {stats.averageScore ? <Metric label="软镖均分" value={stats.averageScore.toFixed(1)} /> : null}
         {stats.averageMpr ? <Metric label="MPR" value={stats.averageMpr.toFixed(2)} /> : null}
+        {stats.totalMarks ? <Metric label="总标数" value={stats.totalMarks} /> : null}
+        {stats.count5Marks ? <Metric label="5标" value={stats.count5Marks} /> : null}
+        {stats.count6Marks ? <Metric label="6标" value={stats.count6Marks} /> : null}
+        {stats.count7Marks ? <Metric label="7标" value={stats.count7Marks} /> : null}
         <Metric label="高拆" value={stats.countHighCheckout} />
         {stats.countTon80 ? <Metric label="TON80" value={stats.countTon80} /> : null}
         {stats.countHatTrick ? <Metric label="帽子戏法" value={stats.countHatTrick} /> : null}
@@ -1062,10 +1160,10 @@ function RegistrationCard({
             className="grid min-h-14 touch-manipulation gap-2 rounded-lg border border-wire p-3 hover:bg-field sm:grid-cols-[1fr_auto] sm:items-center"
           >
             <span className="break-words">{tournamentById.get(registration.tournament_id)?.name || `赛事 ${registration.tournament_id.slice(0, 8)}`}</span>
-            <span className="font-semibold text-slate-600">{registration.status}</span>
+            <span className="font-semibold text-muted">{registration.status}</span>
           </Link>
         ))}
-        {registrations.length === 0 ? <p className="text-slate-600">暂无报名记录。</p> : null}
+        {registrations.length === 0 ? <p className="text-muted">暂无报名记录。</p> : null}
       </div>
     </Card>
   );
@@ -1073,8 +1171,8 @@ function RegistrationCard({
 
 function Metric({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className="rounded-lg bg-white/70 p-2.5 sm:p-3">
-      <dt className="text-slate-500">{label}</dt>
+    <div className="rounded-lg bg-surface/70 p-2.5 sm:p-3">
+      <dt className="text-muted">{label}</dt>
       <dd className="mt-1 font-bold text-ink">{value}</dd>
     </div>
   );

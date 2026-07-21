@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { CalendarDays, ChevronRight, MapPin, Plus, Target } from "lucide-react";
 import { deleteTournamentAction, setTournamentStatusAction } from "@/lib/actions/tournaments";
 import { requireAdmin } from "@/lib/auth/guards";
 import { getDartModeLabel, getGameVariantLabel } from "@/lib/darts/variants";
@@ -7,9 +8,17 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { formatDateTime } from "@/lib/utils";
 import { SetupNotice } from "@/components/SetupNotice";
 import { Button } from "@/components/ui/Button";
-import { Card } from "@/components/ui/Card";
+import type { TournamentStatus } from "@/types/domain";
 
 export const dynamic = "force-dynamic";
+
+const statusLabels: Record<TournamentStatus, string> = {
+  draft: "草稿",
+  registration_open: "报名中",
+  registration_closed: "报名结束",
+  in_progress: "进行中",
+  completed: "完成"
+};
 
 export default async function AdminTournamentsPage() {
   if (!hasSupabaseEnv()) return <SetupNotice />;
@@ -21,77 +30,82 @@ export default async function AdminTournamentsPage() {
     .order("created_at", { ascending: false });
 
   return (
-    <div className="grid gap-6">
+    <div className="grid gap-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold">赛事管理</h1>
-          <p className="mt-2 text-sm text-slate-600">双人赛/队制赛默认优先。</p>
-        </div>
-        <Link className="rounded-lg bg-board px-4 py-2 text-sm font-semibold text-white" href="/admin/tournaments/new">
-          创建赛事
+        <h1 className="text-2xl font-black">赛事</h1>
+        <Link className="inline-flex min-h-12 touch-manipulation items-center gap-2 rounded-lg bg-board px-4 text-sm font-bold text-white" href="/admin/tournaments/new">
+          <Plus className="h-4 w-4" aria-hidden />
+          创建
         </Link>
       </div>
-      <Card>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[900px] text-left text-sm">
-            <thead className="text-slate-500">
-              <tr>
-                <th className="py-2">赛事</th>
-                <th>类型</th>
-                <th>时间</th>
-                <th>状态</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(tournaments || []).map((tournament) => (
-                <tr key={tournament.id} className="border-t border-wire">
-                  <td className="py-3">
-                    <div className="font-bold">{tournament.name}</div>
-                    <div className="text-xs text-slate-500">{tournament.location || "地点待定"}</div>
-                  </td>
-                  <td>
-                    <div>{tournament.tournament_type} · {tournament.team_size}人/队</div>
-                    <div className="text-xs text-slate-500">
-                      {getDartModeLabel(tournament.dart_mode)} · {tournament.dart_mode === "steel" ? `${tournament.dart_game}` : getGameVariantLabel({ dartMode: "soft", gameVariant: tournament.soft_game })}
-                    </div>
-                  </td>
-                  <td>{formatDateTime(tournament.tournament_start_at)}</td>
-                  <td>{tournament.status}</td>
-                  <td>
-                    <div className="flex flex-wrap gap-2">
-                      <Link className="rounded-lg border border-wire px-3 py-2 font-semibold" href={`/admin/tournaments/${tournament.id}/edit`}>
-                        编辑
-                      </Link>
-                      <Link className="rounded-lg border border-wire px-3 py-2 font-semibold" href={`/admin/tournaments/${tournament.id}/participants`}>
-                        选手
-                      </Link>
-                      <Link className="rounded-lg border border-wire px-3 py-2 font-semibold" href={`/admin/tournaments/${tournament.id}/schedule`}>
-                        分组赛程
-                      </Link>
-                      <Link className="rounded-lg border border-wire px-3 py-2 font-semibold" href={`/admin/tournaments/${tournament.id}/results`}>
-                        成绩
-                      </Link>
-                      <StatusForm tournamentId={tournament.id} status="registration_open" label="发布" />
-                      <StatusForm tournamentId={tournament.id} status="registration_closed" label="关闭报名" />
-                      <form action={deleteTournamentAction}>
-                        <input type="hidden" name="tournament_id" value={tournament.id} />
-                        <Button type="submit" variant="danger">删除</Button>
-                      </form>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {(tournaments || []).length === 0 ? (
-                <tr>
-                  <td className="py-4 text-slate-500" colSpan={5}>暂无赛事。</td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
-      </Card>
+
+      <div className="grid gap-3">
+        {(tournaments || []).map((tournament) => {
+          const gameLabel =
+            tournament.dart_mode === "steel"
+              ? `${tournament.dart_game}`
+              : tournament.dart_mode === "soft"
+                ? getGameVariantLabel({ dartMode: "soft", gameVariant: tournament.soft_game })
+                : "软硬轮换";
+
+          return (
+            <section key={tournament.id} className="rounded-lg border border-wire bg-surface p-4">
+              <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-center">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="text-xl font-black">{tournament.name}</h2>
+                    <span className="rounded-md bg-field px-2.5 py-1 text-xs font-bold text-muted">
+                      {statusLabels[tournament.status as TournamentStatus] || tournament.status}
+                    </span>
+                  </div>
+                  <div className="mt-3 grid gap-2 text-sm font-semibold text-muted sm:grid-cols-3">
+                    <span className="flex items-center gap-2">
+                      <MapPin className="h-4 w-4 text-board" aria-hidden />
+                      {tournament.location || "地点待定"}
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <CalendarDays className="h-4 w-4 text-board" aria-hidden />
+                      {formatDateTime(tournament.tournament_start_at)}
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <Target className="h-4 w-4 text-board" aria-hidden />
+                      {getDartModeLabel(tournament.dart_mode)} / {gameLabel}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <AdminLink href={`/admin/tournaments/${tournament.id}/edit`}>编辑</AdminLink>
+                  <AdminLink href={`/admin/tournaments/${tournament.id}/participants`}>选手</AdminLink>
+                  <AdminLink href={`/admin/tournaments/${tournament.id}/schedule`}>赛程</AdminLink>
+                  <AdminLink href={`/admin/tournaments/${tournament.id}/results`}>成绩</AdminLink>
+                  <StatusForm tournamentId={tournament.id} status="registration_open" label="发布" />
+                  <StatusForm tournamentId={tournament.id} status="registration_closed" label="关报名" />
+                  <form action={deleteTournamentAction}>
+                    <input type="hidden" name="tournament_id" value={tournament.id} />
+                    <Button type="submit" variant="danger">删除</Button>
+                  </form>
+                </div>
+              </div>
+            </section>
+          );
+        })}
+        {(tournaments || []).length === 0 ? (
+          <section className="rounded-lg border border-wire bg-surface p-5 text-sm font-semibold text-muted">
+            暂无赛事。
+          </section>
+        ) : null}
+      </div>
     </div>
+  );
+}
+
+function AdminLink({ href, children }: { href: string; children: React.ReactNode }) {
+  return (
+    <Link className="inline-flex min-h-12 touch-manipulation items-center gap-1 rounded-lg border border-wire px-4 text-sm font-bold hover:bg-field" href={href}>
+      {children}
+      <ChevronRight className="h-4 w-4" aria-hidden />
+    </Link>
   );
 }
 

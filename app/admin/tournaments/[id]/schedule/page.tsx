@@ -32,7 +32,7 @@ export default async function ScheduleAdminPage({
     <div className="grid gap-6">
       <div>
         <h1 className="text-2xl font-bold">分组与赛程</h1>
-        <p className="mt-2 text-sm text-slate-600">
+        <p className="mt-2 text-sm text-muted">
           {tournament?.name} · {tournament?.format} · 当前参赛主体 {(participants || []).length}
         </p>
       </div>
@@ -58,7 +58,7 @@ export default async function ScheduleAdminPage({
               return (
                 <div key={group.id} className="rounded-lg border border-wire p-4">
                   <div className="font-bold">{group.name} 组</div>
-                  <ul className="mt-2 grid gap-1 text-sm text-slate-600">
+                  <ul className="mt-2 grid gap-1 text-sm text-muted">
                     {members.map((member) => (
                       <li key={member.id}>{member.display_name} · {member.rating_snapshot}</li>
                     ))}
@@ -66,7 +66,7 @@ export default async function ScheduleAdminPage({
                 </div>
               );
             })}
-            {(groups || []).length === 0 ? <p className="text-sm text-slate-600">暂无分组。</p> : null}
+            {(groups || []).length === 0 ? <p className="text-sm text-muted">暂无分组。</p> : null}
           </div>
         </Card>
         <Card>
@@ -74,7 +74,7 @@ export default async function ScheduleAdminPage({
           <div className="mt-4 grid gap-3">
             {(matches || []).map((match) => (
               <div key={match.id} className="rounded-lg border border-wire p-4 text-sm">
-                <div className="font-semibold text-slate-500">
+                <div className="font-semibold text-muted">
                   {match.stage} · R{match.round_number} M{match.match_number} · {match.status}
                 </div>
                 <div className="mt-1 text-xs font-semibold text-board">
@@ -85,7 +85,7 @@ export default async function ScheduleAdminPage({
                 </div>
               </div>
             ))}
-            {(matches || []).length === 0 ? <p className="text-sm text-slate-600">暂无赛程。</p> : null}
+            {(matches || []).length === 0 ? <p className="text-sm text-muted">暂无赛程。</p> : null}
           </div>
         </Card>
       </section>

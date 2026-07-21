@@ -1,25 +1,28 @@
 import Link from "next/link";
-import { CalendarCheck, Swords, Trophy } from "lucide-react";
+import { ArrowRight, BarChart3, BookOpen, CalendarDays, Gauge, ShieldCheck, Trophy } from "lucide-react";
 import { SetupNotice } from "@/components/SetupNotice";
 import { TournamentCard } from "@/components/TournamentCard";
-import { Button } from "@/components/ui/Button";
-import { Card, StatCard } from "@/components/ui/Card";
+import { Card } from "@/components/ui/Card";
 import { getCurrentUserAndProfile } from "@/lib/auth/guards";
 import { hasSupabaseEnv } from "@/lib/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getSiteThemeSettings } from "@/lib/theme";
 import { formatDateTime } from "@/lib/utils";
 import type { Tournament } from "@/types/domain";
 
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
-  const { user, profile } = await getCurrentUserAndProfile();
+  const [{ user, profile }, theme] = await Promise.all([
+    getCurrentUserAndProfile(),
+    getSiteThemeSettings()
+  ]);
 
   if (!hasSupabaseEnv()) {
     return (
-      <div className="grid gap-6">
+      <div className="grid gap-5">
         <SetupNotice />
-        <Hero />
+        <Hero platformName={theme.platformName} isAdmin={profile?.role === "admin"} />
       </div>
     );
   }
@@ -73,115 +76,115 @@ export default async function HomePage() {
         : { data: [] };
   }
 
-  const profileHint = profile
-    ? "可报名、计分、查看个人段位和比赛记录"
-    : "登录后可报名、计分和记录切磋";
+  const activeTournaments = tournaments || [];
 
   return (
-    <div className="grid gap-6">
-      <Hero />
-      <div className="grid gap-4 md:grid-cols-3">
-        <StatCard label="当前用户" value={profile?.display_name || "游客"} hint={profileHint} />
-        <StatCard
-          label="开放赛事"
-          value={(tournaments || []).filter((item) => item.status === "registration_open").length}
-        />
-        <StatCard
-          label="进行中赛事"
-          value={(tournaments || []).filter((item) => item.status === "in_progress").length}
-        />
-      </div>
-      <section>
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <h2 className="text-xl font-bold">正在报名 / 进行中</h2>
-          <Link className="text-sm font-semibold text-board underline" href="/tournaments">
-            查看全部
-          </Link>
-        </div>
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {(tournaments || []).map((tournament) => (
-            <TournamentCard key={tournament.id} tournament={tournament as Tournament} />
-          ))}
-          {(tournaments || []).length === 0 ? (
-            <Card className="md:col-span-2 xl:col-span-3">
-              <p className="text-sm text-slate-600">暂时没有开放或进行中的赛事。</p>
-            </Card>
-          ) : null}
-        </div>
+    <div className="grid gap-5">
+      <Hero platformName={theme.platformName} isAdmin={profile?.role === "admin"} />
+
+      <section className="grid gap-3 md:grid-cols-3">
+        <MiniMetric label="用户" value={profile?.display_name || "访客"} />
+        <MiniMetric label="报名中" value={activeTournaments.filter((item) => item.status === "registration_open").length} />
+        <MiniMetric label="进行中" value={activeTournaments.filter((item) => item.status === "in_progress").length} />
       </section>
-      <section className="grid gap-4 lg:grid-cols-2">
+
+      <section className="grid gap-3 lg:grid-cols-[1fr_380px]">
+        <div className="grid gap-3">
+          <SectionTitle title="赛事" href="/tournaments" />
+          <div className="grid gap-3 md:grid-cols-2">
+            {activeTournaments.map((tournament) => (
+              <TournamentCard key={tournament.id} tournament={tournament as Tournament} />
+            ))}
+            {activeTournaments.length === 0 ? (
+              <Card>
+                <p className="text-sm text-muted">暂无开放赛事。</p>
+              </Card>
+            ) : null}
+          </div>
+        </div>
+
         <Card>
           <div className="flex items-center gap-2">
-            <CalendarCheck className="h-5 w-5 text-board" aria-hidden />
-            <h2 className="text-lg font-bold">我的下一场比赛</h2>
+            <Trophy className="h-5 w-5 text-board" aria-hidden />
+            <h2 className="text-lg font-black">下一场</h2>
           </div>
-          <div className="mt-4 grid gap-3">
+          <div className="mt-4 grid gap-2">
             {(nextMatches.data || []).length > 0 ? (
               nextMatches.data?.map((match) => (
                 <Link
                   key={match.id}
                   href={`/scorer/${match.id}`}
-                  className="rounded-lg border border-wire p-3 text-sm hover:bg-field"
+                  className="flex min-h-14 touch-manipulation items-center justify-between rounded-lg border border-wire px-3 text-sm font-bold hover:bg-field"
                 >
-                  Round {match.round_number} · Match {match.match_number} ·{" "}
-                  {match.scheduled_at ? formatDateTime(match.scheduled_at) : "待排期"}
+                  <span>R{match.round_number} / M{match.match_number}</span>
+                  <span className="text-xs text-muted">
+                    {match.scheduled_at ? formatDateTime(match.scheduled_at) : "待排期"}
+                  </span>
                 </Link>
               ))
             ) : (
-              <p className="text-sm text-slate-600">暂无待打比赛。</p>
+              <p className="text-sm text-muted">暂无待打比赛。</p>
             )}
           </div>
-        </Card>
-        <Card>
-          <div className="flex items-center gap-2">
-            <Trophy className="h-5 w-5 text-board" aria-hidden />
-            <h2 className="text-lg font-bold">最近战绩</h2>
-          </div>
-          <p className="mt-4 text-sm leading-6 text-slate-600">
-            完成正式比赛后会写入赛事数据和普通数据；平时切磋只会更新普通数据。
-          </p>
         </Card>
       </section>
     </div>
   );
 }
 
-function Hero() {
+function Hero({ platformName, isAdmin }: { platformName: string; isAdmin: boolean }) {
   return (
-    <section className="overflow-hidden rounded-lg border border-wire bg-white shadow-soft">
-      <div className="grid gap-6 p-6 md:grid-cols-[1.4fr_0.8fr] md:p-8">
-        <div>
-          <div className="inline-flex items-center gap-2 rounded-full bg-field px-3 py-1 text-sm font-semibold text-board">
-            <Swords className="h-4 w-4" aria-hidden />
-            Team-first darts events
-          </div>
-          <h1 className="mt-4 text-3xl font-bold leading-tight text-ink md:text-5xl">
-            小规模飞镖队制赛事管理系统
-          </h1>
-          <p className="mt-4 max-w-2xl text-base leading-7 text-slate-600">
-            支持双人赛、队制赛、实力均衡组队、分组赛程、内置 501 计分器、结果确认和长期数据统计。
-          </p>
-          <div className="mt-6 flex flex-wrap gap-3">
-            <Link href="/tournaments">
-              <Button type="button">浏览赛事</Button>
-            </Link>
-            <Link href="/scorer">
-              <Button type="button" variant="secondary">
-                打开计分器
-              </Button>
-            </Link>
-          </div>
-        </div>
-        <div className="grid content-center gap-3 rounded-lg bg-field p-5">
-          <div className="grid grid-cols-3 gap-2">
-            {["20", "T20", "Bull", "18", "T19", "D16", "Team", "BO5", "501"].map((label) => (
-              <div key={label} className="rounded-lg border border-wire bg-white py-4 text-center text-sm font-bold text-ink">
-                {label}
-              </div>
-            ))}
-          </div>
-        </div>
+    <section className="grid gap-4 rounded-lg bg-primary p-5 text-white sm:p-6 lg:grid-cols-[1fr_auto] lg:items-end">
+      <div>
+        <div className="text-sm font-bold text-white/60">DARTS EVENT OS</div>
+        <h1 className="mt-2 text-4xl font-black tracking-normal md:text-6xl">{platformName}</h1>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+        <HeroAction href="/tournaments" icon={<CalendarDays className="h-5 w-5" />} label="赛事" />
+        <HeroAction href="/scorer" icon={<Gauge className="h-5 w-5" />} label="计分" />
+        {isAdmin ? (
+          <HeroAction href="/admin" icon={<ShieldCheck className="h-5 w-5" />} label="后台" />
+        ) : (
+          <HeroAction href="/profile" icon={<BarChart3 className="h-5 w-5" />} label="数据" />
+        )}
+        <HeroAction href="/help" icon={<BookOpen className="h-5 w-5" />} label="说明" />
       </div>
     </section>
+  );
+}
+
+function HeroAction({ href, icon, label }: { href: string; icon: React.ReactNode; label: string }) {
+  return (
+    <Link
+      href={href}
+      className="flex min-h-16 touch-manipulation items-center justify-between gap-3 rounded-lg bg-white/10 px-4 text-sm font-black text-white transition-colors duration-75 hover:bg-white/15 active:bg-white/15"
+    >
+      <span className="flex items-center gap-2">
+        {icon}
+        {label}
+      </span>
+      <ArrowRight className="h-4 w-4" aria-hidden />
+    </Link>
+  );
+}
+
+function MiniMetric({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="rounded-lg border border-wire bg-surface p-4">
+      <div className="text-xs font-bold text-muted">{label}</div>
+      <div className="mt-1 truncate text-2xl font-black">{value}</div>
+    </div>
+  );
+}
+
+function SectionTitle({ title, href }: { title: string; href: string }) {
+  return (
+    <div className="flex items-center justify-between">
+      <h2 className="text-xl font-black">{title}</h2>
+      <Link className="inline-flex min-h-11 touch-manipulation items-center gap-1 rounded-lg px-3 text-sm font-bold text-board hover:bg-field" href={href}>
+        全部
+        <ArrowRight className="h-4 w-4" aria-hidden />
+      </Link>
+    </div>
   );
 }
