@@ -8,7 +8,7 @@ import {
 import { applyTurn, calculateDartStats, createScoringState } from "@/lib/algorithms/scoring";
 import { updateTournamentStandings } from "@/lib/algorithms/standings";
 import { updateUserRating } from "@/lib/algorithms/rating";
-import { calculatePlayerLevel } from "@/lib/algorithms/player-level";
+import { calculatePlayerLevel, ratingToSkillLevel } from "@/lib/algorithms/player-level";
 import { resolveMatchLegRules, validateMatchLegRules, getMatchDartMode, getMatchGameVariant } from "@/lib/darts/variants";
 
 const players = [
@@ -370,6 +370,13 @@ describe("team-first tournament algorithms", () => {
     expect(level.level).toBeLessThan(20);
     expect(level.level).toBeGreaterThanOrEqual(1);
     expect(level.level).toBeLessThanOrEqual(99);
+  });
+
+  it("maps rating tracks to the legacy coarse skill buckets consistently", () => {
+    expect(ratingToSkillLevel(1000)).toBe("Beginner");
+    expect(ratingToSkillLevel(1100)).toBe("Intermediate");
+    expect(ratingToSkillLevel(1400)).toBe("Advanced");
+    expect(ratingToSkillLevel(1700)).toBe("Pro");
   });
 
   it("promotes strong players with high averages and win rates", () => {

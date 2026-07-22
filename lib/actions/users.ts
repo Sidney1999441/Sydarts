@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireAdmin, requireUser } from "@/lib/auth/guards";
+import { ratingToSkillLevel } from "@/lib/algorithms/player-level";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { fromFormString } from "@/lib/utils";
@@ -20,6 +21,10 @@ function parseOption(value: string, allowed: Set<string>, fallback: string) {
   return allowed.has(value) ? value : fallback;
 }
 
+function parseSkillLevel(value: FormDataEntryValue | null, rating: number) {
+  return parseOption(fromFormString(value), skillLevels, ratingToSkillLevel(rating));
+}
+
 export async function updateUserAdminFieldsAction(formData: FormData) {
   await requireAdmin();
   const userId = fromFormString(formData.get("user_id"));
@@ -31,21 +36,9 @@ export async function updateUserAdminFieldsAction(formData: FormData) {
   const tournamentRating = parseRating(formData.get("tournament_rating"));
   const casualRating = parseRating(formData.get("casual_rating"), tournamentRating);
   const softRating = parseRating(formData.get("soft_rating"), tournamentRating);
-  const tournamentSkillLevel = parseOption(
-    fromFormString(formData.get("tournament_skill_level")),
-    skillLevels,
-    "Beginner"
-  );
-  const casualSkillLevel = parseOption(
-    fromFormString(formData.get("casual_skill_level")),
-    skillLevels,
-    tournamentSkillLevel
-  );
-  const softSkillLevel = parseOption(
-    fromFormString(formData.get("soft_skill_level")),
-    skillLevels,
-    casualSkillLevel
-  );
+  const tournamentSkillLevel = parseSkillLevel(formData.get("tournament_skill_level"), tournamentRating);
+  const casualSkillLevel = parseSkillLevel(formData.get("casual_skill_level"), casualRating);
+  const softSkillLevel = parseSkillLevel(formData.get("soft_skill_level"), softRating);
   const supabase = createSupabaseAdminClient();
 
   if (!userId) throw new Error("缺少用户 ID。");

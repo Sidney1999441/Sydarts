@@ -34,6 +34,7 @@ export type SoftPlayerLevelStats = {
 };
 
 export type MajorRank = "白丁" | "镖人" | "镖侠" | "镖王" | "镖仙" | "镖神" | "归一";
+export type CoarseSkillLevel = "Beginner" | "Intermediate" | "Advanced" | "Pro";
 
 export type PlayerLevelResult = {
   majorRank: MajorRank;
@@ -63,6 +64,14 @@ const rankBands: Array<{ name: MajorRank; minLevel: number }> = [
   { name: "镖神", minLevel: 83 },
   { name: "归一", minLevel: 95 }
 ];
+
+export function ratingToSkillLevel(rating?: number | null): CoarseSkillLevel {
+  const value = numberOrZero(rating);
+  if (value >= 1700) return "Pro";
+  if (value >= 1400) return "Advanced";
+  if (value >= 1100) return "Intermediate";
+  return "Beginner";
+}
 
 function numberOrZero(value: number | null | undefined) {
   return Number.isFinite(value) ? Number(value) : 0;
