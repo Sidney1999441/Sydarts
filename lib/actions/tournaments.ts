@@ -500,10 +500,10 @@ export async function adminAddRegistrationByUserIdAction(formData: FormData) {
   const tournamentId = fromFormString(formData.get("tournament_id"));
   const userIdentifier =
     fromFormString(formData.get("user_identifier")) || fromFormString(formData.get("user_id"));
-  const supabase = await createSupabaseServerClient();
+  const admin = createSupabaseAdminClient();
   const profile = await resolveProfileByIdentifier(userIdentifier);
 
-  const { error } = await supabase.from("tournament_registrations").upsert(
+  const { error } = await admin.from("tournament_registrations").upsert(
     {
       tournament_id: tournamentId,
       user_id: profile.id,
