@@ -1,8 +1,18 @@
-import { adminAddRegistrationByUserIdAction, generateTeamsAction, updateRegistrationStatusAction } from "@/lib/actions/tournaments";
+import {
+  addTournamentTeamMemberAction,
+  adminAddRegistrationByUserIdAction,
+  generateTeamsAction,
+  registerSavedTeamForTournamentAction,
+  removeTournamentTeamMemberAction,
+  saveTournamentTeamAsSavedAction,
+  updateRegistrationStatusAction,
+  updateTournamentTeamAction
+} from "@/lib/actions/tournaments";
 import { requireAdmin } from "@/lib/auth/guards";
 import { hasSupabaseEnv } from "@/lib/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { SetupNotice } from "@/components/SetupNotice";
+import { AvatarUploader } from "@/components/ui/AvatarUploader";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 
@@ -18,7 +28,14 @@ export default async function ParticipantsAdminPage({
   await requireAdmin();
   const supabase = await createSupabaseServerClient();
 
-  const [{ data: tournament }, { data: registrations }, { data: participants }, { data: teams }, { data: members }] =
+  const [
+    { data: tournament },
+    { data: registrations },
+    { data: participants },
+    { data: teams },
+    { data: members },
+    { data: savedTeams }
+  ] =
     await Promise.all([
       supabase.from("tournaments").select("*").eq("id", id).single(),
       supabase
@@ -32,7 +49,8 @@ export default async function ParticipantsAdminPage({
         .eq("tournament_id", id)
         .order("seed"),
       supabase.from("teams").select("*").eq("tournament_id", id).order("created_at"),
-      supabase.from("team_members").select("*")
+      supabase.from("team_members").select("*"),
+      supabase.from("saved_teams").select("*").eq("status", "active").order("updated_at", { ascending: false })
     ]);
 
   const userIds = [
@@ -41,14 +59,16 @@ export default async function ParticipantsAdminPage({
       ...(registrations || [])
         .map((registration) => registration.preferred_partner_user_id)
         .filter(Boolean),
-      ...(members || []).map((member) => member.user_id)
+      ...(members || []).map((member) => member.user_id),
+      ...(teams || []).map((team) => team.captain_user_id).filter(Boolean),
+      ...(savedTeams || []).map((team) => team.captain_user_id).filter(Boolean)
     ])
   ];
   const { data: profiles } =
     userIds.length > 0
       ? await supabase
           .from("profiles")
-          .select("id, display_name, rating, skill_level")
+          .select("id, uid, display_name, rating, skill_level")
           .in("id", userIds)
       : { data: [] };
   const profileById = new Map((profiles || []).map((profile) => [profile.id, profile]));
@@ -57,7 +77,7 @@ export default async function ParticipantsAdminPage({
     <div className="grid gap-6">
       <div>
         <h1 className="text-2xl font-bold">参赛选手管理</h1>
-        <p className="mt-2 text-sm text-slate-600">
+        <p className="mt-2 text-sm text-muted">
           {tournament?.name} · {tournament?.tournament_type} · 每队 {tournament?.team_size} 人
         </p>
       </div>
@@ -73,7 +93,7 @@ export default async function ParticipantsAdminPage({
           </div>
           <div className="mt-4 overflow-x-auto">
             <table className="w-full min-w-[760px] text-left text-sm">
-              <thead className="text-slate-500">
+              <thead className="text-muted">
                 <tr>
                   <th className="py-2">用户</th>
                   <th>Rating</th>
@@ -90,14 +110,17 @@ export default async function ParticipantsAdminPage({
                     <tr key={registration.id} className="border-t border-wire">
                       <td className="py-3">
                         <div className="font-semibold">{profile?.display_name || registration.user_id}</div>
-                        <div className="text-xs text-slate-500">{registration.user_id}</div>
+                        <div className="text-xs text-muted">UID {profile?.uid || "------"}</div>
+                        <div className="text-xs text-muted">{registration.user_id}</div>
                       </td>
                       <td>{registration.rating_snapshot}</td>
                       <td>{registration.skill_level_snapshot}</td>
                       <td>
                         {registration.preferred_partner_user_id
-                          ? profileById.get(registration.preferred_partner_user_id)?.display_name ||
-                            registration.preferred_partner_user_id
+                          ? `${profileById.get(registration.preferred_partner_user_id)?.display_name ||
+                              registration.preferred_partner_user_id} · UID ${
+                              profileById.get(registration.preferred_partner_user_id)?.uid || "------"
+                            }`
                           : "-"}
                       </td>
                       <td>{registration.status}</td>
@@ -112,7 +135,7 @@ export default async function ParticipantsAdminPage({
                 })}
                 {(registrations || []).length === 0 ? (
                   <tr>
-                    <td className="py-4 text-slate-500" colSpan={6}>暂无报名。</td>
+                    <td className="py-4 text-muted" colSpan={6}>暂无报名。</td>
                   </tr>
                 ) : null}
               </tbody>
@@ -126,12 +149,49 @@ export default async function ParticipantsAdminPage({
             <input type="hidden" name="tournament_id" value={id} />
             <label className="label">
               用户 ID
-              <input className="form-input" name="user_id" placeholder="profiles.id" required />
+              <input className="form-input" name="user_identifier" placeholder="UID 或用户 ID" required />
             </label>
             <Button type="submit" variant="secondary">添加到报名并确认</Button>
           </form>
         </Card>
       </section>
+
+      {Number(tournament?.team_size || 1) > 1 ? (
+        <Card>
+          <div className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
+            <div>
+              <h2 className="text-lg font-bold">长期队伍复用</h2>
+              <p className="mt-2 text-sm text-muted">
+                长期队伍只复用名称、头像和队长；本次赛事队员请用 UID 逐个填写。
+              </p>
+            </div>
+            <form action={registerSavedTeamForTournamentAction} className="grid gap-3">
+              <input type="hidden" name="tournament_id" value={id} />
+              <label className="label">
+                长期队伍
+                <select className="form-input" name="saved_team_id" required>
+                  <option value="">选择长期队伍</option>
+                  {(savedTeams || []).map((team) => (
+                    <option key={team.id} value={team.id}>
+                      {team.name} · 队长 {profileById.get(team.captain_user_id)?.display_name || team.captain_user_id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="label">
+                本次队员 UID
+                <textarea
+                  className="form-input min-h-24"
+                  name="member_identifiers"
+                  placeholder={`每行一个 UID，本赛事每队 ${tournament?.team_size || 2} 人，必须包含队长`}
+                  required
+                />
+              </label>
+              <Button type="submit" variant="secondary">使用长期队伍报名</Button>
+            </form>
+          </div>
+        </Card>
+      ) : null}
 
       <Card>
         <h2 className="text-lg font-bold">已生成队伍/参赛主体</h2>
@@ -139,24 +199,86 @@ export default async function ParticipantsAdminPage({
           {(participants || []).map((participant) => {
             const team = (teams || []).find((item) => item.id === participant.team_id);
             const teamMembers = (members || []).filter((member) => member.team_id === participant.team_id);
+            const captain = team?.captain_user_id ? profileById.get(team.captain_user_id) : null;
+            const linkedSavedTeam = team?.saved_team_id
+              ? (savedTeams || []).find((item) => item.id === team.saved_team_id)
+              : null;
             return (
-              <div key={participant.id} className="rounded-lg border border-wire p-4">
-                <div className="font-bold">{participant.display_name}</div>
-                <div className="mt-1 text-sm text-slate-600">Rating {participant.rating_snapshot}</div>
-                {team ? <div className="mt-1 text-xs text-slate-500">{team.name}</div> : null}
+              <div key={participant.id} className="grid gap-4 rounded-lg border border-wire p-4">
+                <div>
+                  <div className="font-bold">{participant.display_name}</div>
+                  <div className="mt-1 text-sm text-muted">Rating {participant.rating_snapshot}</div>
+                  {team ? (
+                    <div className="mt-1 text-xs text-muted">
+                      队长 {captain?.display_name || team.captain_user_id || "未设置"}
+                      {captain?.uid ? ` · UID ${captain.uid}` : ""}
+                      {linkedSavedTeam ? ` · 已保存：${linkedSavedTeam.name}` : ""}
+                    </div>
+                  ) : null}
+                </div>
+                {team ? (
+                  <form action={updateTournamentTeamAction} className="grid gap-2 rounded-lg bg-field p-3">
+                    <input type="hidden" name="tournament_id" value={id} />
+                    <input type="hidden" name="team_id" value={team.id} />
+                    <AvatarUploader
+                      entityType="tournament_team"
+                      entityId={team.id}
+                      initialUrl={team.avatar_url}
+                      fallback={team.name}
+                      label="上传头像"
+                      size="sm"
+                    />
+                    <label className="label">
+                      队伍名称
+                      <input className="form-input" name="name" defaultValue={team.name} required />
+                    </label>
+                    <label className="label">
+                      队长 UID
+                      <input className="form-input" name="captain_identifier" defaultValue={captain?.uid || ""} placeholder="6 位 UID" />
+                    </label>
+                    <Button type="submit" variant="secondary">保存队伍</Button>
+                  </form>
+                ) : null}
                 {teamMembers.length > 0 ? (
-                  <ul className="mt-3 grid gap-1 text-xs text-slate-500">
+                  <ul className="mt-3 grid gap-1 text-xs text-muted">
                     {teamMembers.map((member) => (
-                      <li key={member.id}>
+                      <li key={member.id} className="flex flex-wrap items-center justify-between gap-2 rounded bg-field px-3 py-2">
                         {profileById.get(member.user_id)?.display_name || member.user_id} · {member.rating_snapshot} · {member.role}
+                        <span className="ml-2">UID {profileById.get(member.user_id)?.uid || "------"}</span>
+                        {team ? (
+                          <form action={removeTournamentTeamMemberAction}>
+                            <input type="hidden" name="tournament_id" value={id} />
+                            <input type="hidden" name="team_id" value={team.id} />
+                            <input type="hidden" name="user_id" value={member.user_id} />
+                            <Button type="submit" variant="secondary">移除</Button>
+                          </form>
+                        ) : null}
                       </li>
                     ))}
                   </ul>
                 ) : null}
+                {team ? (
+                  <div className="grid gap-2">
+                    <form action={addTournamentTeamMemberAction} className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-end">
+                      <input type="hidden" name="tournament_id" value={id} />
+                      <input type="hidden" name="team_id" value={team.id} />
+                      <label className="label">
+                        添加队员 UID
+                        <input className="form-input" name="user_identifier" placeholder="例如 123456" required />
+                      </label>
+                      <Button type="submit" variant="secondary">添加</Button>
+                    </form>
+                    <form action={saveTournamentTeamAsSavedAction}>
+                      <input type="hidden" name="tournament_id" value={id} />
+                      <input type="hidden" name="team_id" value={team.id} />
+                      <Button type="submit">{team.saved_team_id ? "同步长期队伍" : "保存为长期队伍"}</Button>
+                    </form>
+                  </div>
+                ) : null}
               </div>
             );
           })}
-          {(participants || []).length === 0 ? <p className="text-sm text-slate-600">尚未生成参赛主体。</p> : null}
+          {(participants || []).length === 0 ? <p className="text-sm text-muted">尚未生成参赛主体。</p> : null}
         </div>
       </Card>
     </div>

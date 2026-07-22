@@ -50,9 +50,14 @@ export default async function MatchScorerPage({
   const memberUserIds = [...new Set([...(teamMembers || []).map((member) => member.user_id), ...userIds])] as string[];
   const { data: profiles } =
     memberUserIds.length > 0
-      ? await supabase.from("profiles").select("id, display_name").in("id", memberUserIds)
+      ? await supabase.from("profiles").select("id, uid, display_name").in("id", memberUserIds)
       : { data: [] };
-  const profileById = new Map((profiles || []).map((profile) => [profile.id, profile.display_name || profile.id]));
+  const profileById = new Map(
+    (profiles || []).map((profile) => [
+      profile.id,
+      `${profile.display_name || profile.id}${profile.uid ? ` · UID ${profile.uid}` : ""}`
+    ])
+  );
   const membersByTeamId = new Map<string, Array<{ userId: string; name: string }>>();
   for (const member of teamMembers || []) {
     const members = membersByTeamId.get(member.team_id) || [];
@@ -102,19 +107,19 @@ export default async function MatchScorerPage({
     <div className="grid gap-6">
       <div>
         <h1 className="text-2xl font-bold">{tournamentData?.name || "比赛计分"}</h1>
-        <p className="mt-2 text-sm text-slate-600">
+        <p className="mt-2 text-sm text-muted">
           {participantA.name} vs {participantB.name} · {getDartModeLabel(matchDartMode)} · {getGameVariantLabel({ dartMode: matchDartMode, gameVariant })} · {legRules.length} 局模板
         </p>
       </div>
       {match.status === "completed" ? (
         <Card>
-          <p className="text-sm font-semibold text-slate-700">
+          <p className="text-sm font-semibold text-muted">
             这场比赛已完成，比分 {match.score_a}:{match.score_b}。
           </p>
         </Card>
       ) : matchDartMode === "soft" ? (
         <Card>
-          <p className="text-sm font-semibold text-slate-700">
+          <p className="text-sm font-semibold text-muted">
             这场是软镖比赛，目前软镖仅支持在赛事页手动录入结果和个人数据。
           </p>
         </Card>

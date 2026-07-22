@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
 import { BarChart3, Check, Eye, EyeOff, ListChecks, RotateCcw, Save, Trophy, Undo2 } from "lucide-react";
 import {
   applyTurn,
@@ -11,6 +11,7 @@ import {
   type ScoringState
 } from "@/lib/algorithms/scoring";
 import { getLegRuleLabel, getLegStartingScore } from "@/lib/darts/variants";
+import { createResultSubmissionId } from "@/lib/results/submission";
 import { Button } from "@/components/ui/Button";
 import type { MatchFinishMode, MatchLegLineup, MatchLegResult, MatchLegRule } from "@/types/domain";
 
@@ -18,8 +19,14 @@ type GameScore = 301 | 501 | 701;
 type BestOf = 3 | 5 | 7;
 type PlayerOption = { userId: string; name: string };
 type ParticipantInfo = { id: string; name: string; members?: PlayerOption[] };
+type ThrowerByParticipant = Record<string, string>;
+type ScoringHistoryEntry = {
+  state: ScoringState;
+  throwers: ThrowerByParticipant;
+};
 
 export type ScoringCompletePayload = {
+  submissionId: string;
   winnerParticipantId: string;
   scoreA: number;
   scoreB: number;
@@ -45,6 +52,23 @@ function defaultLineups(rules: MatchLegRule[], participantA: ParticipantInfo, pa
     participantAUserIds: rule.participantMode === "singles" ? allA.slice(0, 1) : allA,
     participantBUserIds: rule.participantMode === "singles" ? allB.slice(0, 1) : allB
   }));
+}
+
+function firstThrower(lineupUserIds: string[], members?: PlayerOption[]) {
+  return lineupUserIds[0] || members?.[0]?.userId || "";
+}
+
+function defaultThrowers(
+  lineups: MatchLegLineup[],
+  participantA: ParticipantInfo,
+  participantB: ParticipantInfo,
+  legNumber = 1
+): ThrowerByParticipant {
+  const lineup = lineups.find((item) => item.legNumber === legNumber);
+  return {
+    [participantA.id]: firstThrower(lineup?.participantAUserIds || [], participantA.members),
+    [participantB.id]: firstThrower(lineup?.participantBUserIds || [], participantB.members)
+  };
 }
 
 export function TouchScoreboard({
@@ -76,6 +100,9 @@ export function TouchScoreboard({
   const hasSinglesLeg = rules.some((rule) => rule.participantMode === "singles");
   const [lineups, setLineups] = useState<MatchLegLineup[]>(initialLineups);
   const [lineupConfirmed, setLineupConfirmed] = useState(!hasSinglesLeg);
+  const [activeThrowerByParticipant, setActiveThrowerByParticipant] = useState<ThrowerByParticipant>(() =>
+    defaultThrowers(initialLineups, participantA, participantB)
+  );
   const [state, setState] = useState(() =>
     createScoringState({
       participantAId: participantA.id,
@@ -87,13 +114,14 @@ export function TouchScoreboard({
       legLineups: initialLineups
     })
   );
-  const [history, setHistory] = useState<ScoringState[]>([]);
+  const [history, setHistory] = useState<ScoringHistoryEntry[]>([]);
   const [scoreInput, setScoreInput] = useState("");
   const [checkoutScore, setCheckoutScore] = useState<number | null>(null);
   const [showDetails, setShowDetails] = useState(false);
   const [message, setMessage] = useState("");
   const [isSaved, setIsSaved] = useState(false);
   const [isPending, startTransition] = useTransition();
+  const submissionIdRef = useRef(createResultSubmissionId());
 
   const names = useMemo(
     () => ({
@@ -115,6 +143,41 @@ export function TouchScoreboard({
   const currentRule = state.legRules[state.currentLeg - 1] || state.legRules[0];
   const quickScores = [180, 140, 100, 85, 81, 60, 45, 41, 26, 0];
 
+  function lineupUserIds(participantId: string, legNumber = state.currentLeg) {
+    const lineup = lineups.find((item) => item.legNumber === legNumber);
+    if (!lineup) return [];
+    return participantId === participantA.id
+      ? lineup.participantAUserIds || []
+      : participantId === participantB.id
+        ? lineup.participantBUserIds || []
+        : [];
+  }
+
+  function currentThrowerUserId(participantId: string, legNumber = state.currentLeg) {
+    const userIds = lineupUserIds(participantId, legNumber);
+    const selected = activeThrowerByParticipant[participantId];
+    if (selected && userIds.includes(selected)) return selected;
+    return userIds[0] || "";
+  }
+
+  function rotateThrower(current: ThrowerByParticipant, participantId: string, legNumber = state.currentLeg) {
+    const userIds = lineupUserIds(participantId, legNumber);
+    if (userIds.length <= 1) return current;
+    const selected = current[participantId];
+    const selectedIndex = Math.max(0, userIds.indexOf(selected));
+    return {
+      ...current,
+      [participantId]: userIds[(selectedIndex + 1) % userIds.length]
+    };
+  }
+
+  function selectThrower(participantId: string, userId: string) {
+    setActiveThrowerByParticipant((current) => ({
+      ...current,
+      [participantId]: userId
+    }));
+  }
+
   function displayName(participantId: string, legNumber = state.currentLeg) {
     const rule = state.legRules[legNumber - 1];
     const lineup = lineups.find((item) => item.legNumber === legNumber);
@@ -124,6 +187,12 @@ export function TouchScoreboard({
       : lineup.participantBUserIds[0];
     const playerName = userId ? memberNames.get(userId) : null;
     return playerName ? `${names[participantId]} · ${playerName}` : names[participantId];
+  }
+
+  function turnDisplayName(turn: ScoreTurn) {
+    const playerName = turn.userId ? memberNames.get(turn.userId) : null;
+    if (playerName) return `${names[turn.participantId]} · ${playerName}`;
+    return displayName(turn.participantId, turn.legNumber);
   }
 
   function updateLineup(legNumber: number, side: "A" | "B", userId: string) {
@@ -138,6 +207,7 @@ export function TouchScoreboard({
           : lineup
       )
     );
+    selectThrower(side === "A" ? participantA.id : participantB.id, userId);
   }
 
   function confirmLineups() {
@@ -162,14 +232,19 @@ export function TouchScoreboard({
       })
     );
     setLineupConfirmed(true);
+    setActiveThrowerByParticipant(defaultThrowers(lineups, participantA, participantB));
     setMessage("");
+    submissionIdRef.current = createResultSubmissionId();
   }
 
   function recordScore(value: number, darts = 3) {
     try {
-      const next = applyTurn(state, value, darts);
-      setHistory((current) => [...current, state]);
+      const participantId = state.activeParticipantId;
+      const throwerUserId = currentThrowerUserId(participantId);
+      const next = applyTurn(state, value, darts, throwerUserId || undefined);
+      setHistory((current) => [...current, { state, throwers: activeThrowerByParticipant }]);
       setState(next);
+      setActiveThrowerByParticipant((current) => rotateThrower(current, participantId, state.currentLeg));
       setScoreInput("");
       setCheckoutScore(null);
       setMessage("");
@@ -203,12 +278,14 @@ export function TouchScoreboard({
   function undoLast() {
     const previous = history.at(-1);
     if (!previous) return;
-    setState(previous);
+    setState(previous.state);
+    setActiveThrowerByParticipant(previous.throwers);
     setHistory((current) => current.slice(0, -1));
     setScoreInput("");
     setCheckoutScore(null);
     setMessage("");
     setIsSaved(false);
+    submissionIdRef.current = createResultSubmissionId();
   }
 
   function resetMatch() {
@@ -223,18 +300,21 @@ export function TouchScoreboard({
         legLineups: lineups
       })
     );
+    setActiveThrowerByParticipant(defaultThrowers(lineups, participantA, participantB));
     setHistory([]);
     setScoreInput("");
     setCheckoutScore(null);
     setMessage("");
     setIsSaved(false);
+    submissionIdRef.current = createResultSubmissionId();
   }
 
   function saveResult() {
-    if (!state.winnerParticipantId || isSaved) return;
+    if (!state.winnerParticipantId || isSaved || isPending) return;
     startTransition(async () => {
       try {
         await onComplete({
+          submissionId: submissionIdRef.current,
           winnerParticipantId: state.winnerParticipantId!,
           scoreA: state.participants[0].legsWon,
           scoreB: state.participants[1].legsWon,
@@ -252,17 +332,17 @@ export function TouchScoreboard({
 
   if (!lineupConfirmed) {
     return (
-      <div className="grid gap-4 rounded-lg border border-wire bg-white p-4 shadow-soft">
+      <div className="grid gap-4 rounded-lg border border-wire bg-surface p-4 shadow-soft">
         <div>
           <h2 className="text-xl font-black">赛前出场名单</h2>
-          <p className="mt-1 text-sm text-slate-600">单人局需要先选择双方出场选手，保存后会随本场成绩记录。</p>
+          <p className="mt-1 text-sm text-muted">单人局需要先选择双方出场选手，保存后会随本场成绩记录。</p>
         </div>
         <div className="grid gap-3">
           {rules.map((rule) => (
             <div key={rule.legNumber} className="grid gap-3 rounded-lg bg-field p-3 lg:grid-cols-[1fr_220px_220px] lg:items-end">
               <div>
                 <div className="font-bold">{getLegRuleLabel(rule)}</div>
-                <div className="mt-1 text-xs text-slate-500">
+                <div className="mt-1 text-xs text-muted">
                   {rule.participantMode === "singles" ? "请选择本局单人出场选手" : "本局默认记录双方全部队员"}
                 </div>
               </div>
@@ -309,9 +389,20 @@ export function TouchScoreboard({
         onSave={saveResult}
         onReset={resetMatch}
         displayName={displayName}
+        turnDisplayName={turnDisplayName}
       />
     );
   }
+
+  const activeThrowerOptions = activeParticipant
+    ? lineupUserIds(activeParticipant.participantId)
+        .map((userId) => ({
+          userId,
+          name: memberNames.get(userId) || userId
+        }))
+    : [];
+  const activeThrowerId = activeParticipant ? currentThrowerUserId(activeParticipant.participantId) : "";
+  const activeThrowerName = activeThrowerId ? memberNames.get(activeThrowerId) : null;
 
   return (
     <div className="relative h-[calc(100dvh-14rem)] min-h-[500px] overflow-hidden rounded-lg lg:h-[calc(100dvh-7rem)] lg:min-h-[560px]">
@@ -348,25 +439,34 @@ export function TouchScoreboard({
           </div>
         </section>
 
-        <section className="grid min-h-0 grid-rows-[auto_auto_1fr_auto] gap-2 rounded-lg border border-wire bg-white p-3 shadow-soft">
+        <section className="grid min-h-0 grid-rows-[auto_auto_1fr_auto] gap-2 rounded-lg border border-wire bg-surface p-3 shadow-soft">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <div className="text-xs font-bold text-slate-500">本轮输入</div>
+              <div className="text-xs font-bold text-muted">本轮输入</div>
               <div className="text-4xl font-black leading-none text-ink">{scoreInput || "0"}</div>
               <div className="mt-1 text-xs font-semibold text-board">{getLegRuleLabel(currentRule)}</div>
             </div>
-            <div className="text-right text-sm text-slate-600">
+            <div className="text-right text-sm text-muted">
               <div className="font-bold text-ink">{activeParticipant ? displayName(activeParticipant.participantId) : "已结束"}</div>
+              {activeThrowerName ? <div>出镖 {activeThrowerName}</div> : null}
               <div>剩余 {activeParticipant?.remaining ?? 0}</div>
             </div>
           </div>
+
+          {activeParticipant && activeThrowerOptions.length > 1 ? (
+            <ThrowerPicker
+              options={activeThrowerOptions}
+              value={activeThrowerId}
+              onChange={(userId) => selectThrower(activeParticipant.participantId, userId)}
+            />
+          ) : null}
 
           <div className="grid grid-cols-5 gap-1.5">
             {quickScores.map((quickScore) => (
               <button
                 key={quickScore}
                 type="button"
-                className="min-h-8 rounded-lg border border-wire bg-field px-2 text-sm font-black text-ink active:scale-[0.98]"
+                className="min-h-8 touch-manipulation select-none rounded-lg border border-wire bg-field px-2 text-sm font-black text-ink transition-colors duration-75 active:bg-board/10"
                 onClick={() => requestScore(quickScore)}
               >
                 {quickScore}
@@ -393,7 +493,7 @@ export function TouchScoreboard({
 
           <button
             type="button"
-            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-board px-4 text-base font-bold text-white active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex min-h-10 touch-manipulation select-none items-center justify-center gap-2 rounded-lg bg-board px-4 text-base font-bold text-white transition-colors duration-75 active:bg-board/90 disabled:cursor-not-allowed disabled:opacity-50"
             onClick={confirmInput}
             disabled={scoreInput.length === 0}
           >
@@ -410,21 +510,22 @@ export function TouchScoreboard({
           names={names}
           participantA={participantA}
           participantB={participantB}
+          turnDisplayName={turnDisplayName}
           onClose={() => setShowDetails(false)}
         />
       ) : null}
 
       {checkoutScore !== null ? (
         <div className="fixed inset-0 z-50 grid place-items-end bg-slate-950/45 p-3 sm:place-items-center">
-          <div className="w-full max-w-sm rounded-lg bg-white p-5 shadow-soft">
+          <div className="w-full max-w-sm rounded-lg bg-surface p-5 shadow-soft">
             <h3 className="text-lg font-bold">结镖确认</h3>
-            <p className="mt-2 text-sm text-slate-600">本轮 {checkoutScore} 分结镖，用几镖完成？</p>
+            <p className="mt-2 text-sm text-muted">本轮 {checkoutScore} 分结镖，用几镖完成？</p>
             <div className="mt-4 grid grid-cols-3 gap-2">
               {[1, 2, 3].map((darts) => (
                 <button
                   key={darts}
                   type="button"
-                  className="min-h-14 rounded-lg bg-board text-lg font-black text-white"
+                  className="min-h-14 touch-manipulation select-none rounded-lg bg-board text-lg font-black text-white transition-colors duration-75 active:bg-board/90"
                   onClick={() => recordScore(checkoutScore, darts)}
                 >
                   {darts} 镖
@@ -433,7 +534,7 @@ export function TouchScoreboard({
             </div>
             <button
               type="button"
-              className="mt-3 w-full rounded-lg border border-wire bg-white px-4 py-3 text-sm font-semibold"
+              className="mt-3 w-full touch-manipulation select-none rounded-lg border border-wire bg-surface px-4 py-3 text-sm font-semibold transition-colors duration-75 active:bg-field"
               onClick={() => setCheckoutScore(null)}
             >
               取消
@@ -469,6 +570,38 @@ function LineupSelect({
   );
 }
 
+function ThrowerPicker({
+  options,
+  value,
+  onChange
+}: {
+  options: PlayerOption[];
+  value: string;
+  onChange: (userId: string) => void;
+}) {
+  return (
+    <div className="grid gap-1.5 rounded-lg bg-field p-2">
+      <div className="text-xs font-bold text-muted">本轮出镖人</div>
+      <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+        {options.map((option) => (
+          <button
+            key={option.userId}
+            type="button"
+            className={`min-h-9 touch-manipulation select-none rounded-lg border px-2 text-xs font-bold transition-colors duration-75 ${
+              value === option.userId
+                ? "border-board bg-board text-white"
+                : "border-wire bg-surface text-ink active:bg-field"
+            }`}
+            onClick={() => onChange(option.userId)}
+          >
+            <span className="block truncate">{option.name}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function PlayerPanel({
   name,
   isActive,
@@ -486,19 +619,19 @@ function PlayerPanel({
 }) {
   return (
     <div
-      className={`min-h-0 rounded-lg border bg-white p-2 shadow-soft sm:p-3 ${
+      className={`min-h-0 rounded-lg border bg-surface p-2 shadow-soft sm:p-3 ${
         isActive ? "border-board ring-2 ring-board/15" : "border-wire"
       }`}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-xs font-bold text-slate-500">{isActive ? "当前出镖" : "等待"}</div>
+          <div className="text-xs font-bold text-muted">{isActive ? "当前出镖" : "等待"}</div>
           <h2 className="mt-1 truncate text-lg font-bold">{name}</h2>
-          <div className="mt-1 text-xs text-slate-500">{getLegRuleLabel(rule)}</div>
+          <div className="mt-1 text-xs text-muted">{getLegRuleLabel(rule)}</div>
         </div>
         <div className="text-right">
           <div className="text-4xl font-black leading-none text-board sm:text-5xl">{remaining}</div>
-          <div className="mt-1 text-xs font-semibold text-slate-600">Legs {legsWon}</div>
+          <div className="mt-1 text-xs font-semibold text-muted">Legs {legsWon}</div>
         </div>
       </div>
       <dl className="mt-2 grid grid-cols-4 gap-1 text-xs">
@@ -522,7 +655,8 @@ function SettlementView({
   isSaved,
   onSave,
   onReset,
-  displayName
+  displayName,
+  turnDisplayName
 }: {
   state: ScoringState;
   names: Record<string, string>;
@@ -535,6 +669,7 @@ function SettlementView({
   onSave: () => void;
   onReset: () => void;
   displayName: (participantId: string, legNumber?: number) => string;
+  turnDisplayName: (turn: ScoreTurn) => string;
 }) {
   const winnerName = names[state.winnerParticipantId || ""] || "胜者";
   const playerRows = state.participants.map((participant) => ({
@@ -542,17 +677,24 @@ function SettlementView({
     name: names[participant.participantId],
     stats: calculateDartStats(participant.turns)
   }));
+  const memberRows = [participantA, participantB].flatMap((participant) =>
+    (participant.members || []).map((member) => ({
+      participantName: participant.name,
+      member,
+      stats: calculateDartStats(state.turns.filter((turn) => turn.userId === member.userId))
+    }))
+  ).filter((row) => row.stats.turnsThrown > 0);
 
   return (
     <div className="grid h-[calc(100dvh-7rem)] min-h-[560px] grid-rows-[auto_1fr_auto] gap-2 overflow-hidden rounded-lg">
-      <section className="rounded-lg border border-board bg-white p-4 shadow-soft">
+      <section className="rounded-lg border border-board bg-surface p-4 shadow-soft">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
             <div className="rounded-lg bg-board p-2 text-white">
               <Trophy className="h-5 w-5" aria-hidden />
             </div>
             <div>
-              <div className="text-sm font-semibold text-slate-500">胜利结算</div>
+              <div className="text-sm font-semibold text-muted">胜利结算</div>
               <h2 className="text-xl font-black">{winnerName} 获胜</h2>
             </div>
           </div>
@@ -565,10 +707,10 @@ function SettlementView({
       <section className="grid min-h-0 gap-2 lg:grid-cols-[1fr_1fr]">
         <div className="grid min-h-0 gap-2">
           {playerRows.map(({ participant, name, stats }) => (
-            <div key={participant.participantId} className="rounded-lg border border-wire bg-white p-3 shadow-soft">
+            <div key={participant.participantId} className="rounded-lg border border-wire bg-surface p-3 shadow-soft">
               <div className="flex items-center justify-between gap-3">
                 <h3 className="truncate font-bold">{name}</h3>
-                <span className="text-sm font-semibold text-slate-600">Legs {participant.legsWon}</span>
+                <span className="text-sm font-semibold text-muted">Legs {participant.legsWon}</span>
               </div>
               <dl className="mt-3 grid grid-cols-4 gap-1.5 text-xs">
                 <Stat label="Avg" value={stats.averagePer3Darts} />
@@ -586,8 +728,28 @@ function SettlementView({
               </dl>
             </div>
           ))}
+          {memberRows.length > 0 ? (
+            <div className="rounded-lg border border-wire bg-surface p-3 shadow-soft">
+              <div className="mb-2 font-bold">个人出镖统计</div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {memberRows.map((row) => (
+                  <div key={row.member.userId} className="rounded-lg bg-field p-2">
+                    <div className="truncate text-xs font-bold text-muted">
+                      {row.participantName} / {row.member.name}
+                    </div>
+                    <dl className="mt-2 grid grid-cols-4 gap-1 text-xs">
+                      <Stat label="Avg" value={row.stats.averagePer3Darts} />
+                      <Stat label="High" value={row.stats.highestTurnScore} />
+                      <Stat label="180" value={row.stats.count180} />
+                      <Stat label="镖数" value={row.stats.totalDarts} />
+                    </dl>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </div>
-        <div className="min-h-0 rounded-lg border border-wire bg-white p-3 shadow-soft">
+        <div className="min-h-0 rounded-lg border border-wire bg-surface p-3 shadow-soft">
           <div className="mb-2 flex items-center gap-2">
             <ListChecks className="h-4 w-4 text-board" aria-hidden />
             <h3 className="font-bold">战局回顾</h3>
@@ -598,12 +760,13 @@ function SettlementView({
             participantA={participantA}
             participantB={participantB}
             displayName={displayName}
+            turnDisplayName={turnDisplayName}
           />
         </div>
       </section>
 
-      <section className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-wire bg-white p-3 shadow-soft">
-        <div className="text-sm font-semibold text-slate-600">{message || "确认无误后保存本场结果。"}</div>
+      <section className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-wire bg-surface p-3 shadow-soft">
+        <div className="text-sm font-semibold text-muted">{message || "确认无误后保存本场结果。"}</div>
         <div className="flex flex-wrap gap-2">
           <Button type="button" variant="secondary" onClick={onReset}>
             重开
@@ -623,16 +786,18 @@ function TurnDetails({
   names,
   participantA,
   participantB,
+  turnDisplayName,
   onClose
 }: {
   turns: ScoreTurn[];
   names: Record<string, string>;
   participantA: ParticipantInfo;
   participantB: ParticipantInfo;
+  turnDisplayName: (turn: ScoreTurn) => string;
   onClose: () => void;
 }) {
   return (
-    <div className="absolute inset-0 z-40 grid rounded-lg border border-wire bg-white/95 p-3 shadow-soft backdrop-blur">
+    <div className="absolute inset-0 z-40 grid rounded-lg border border-wire bg-surface/95 p-3 shadow-soft backdrop-blur">
       <div className="mb-2 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <BarChart3 className="h-4 w-4 text-board" aria-hidden />
@@ -642,7 +807,13 @@ function TurnDetails({
           隐藏
         </Button>
       </div>
-      <TurnTimeline turns={turns} names={names} participantA={participantA} participantB={participantB} />
+      <TurnTimeline
+        turns={turns}
+        names={names}
+        participantA={participantA}
+        participantB={participantB}
+        turnDisplayName={turnDisplayName}
+      />
     </div>
   );
 }
@@ -652,30 +823,36 @@ function TurnTimeline({
   names,
   participantA,
   participantB,
-  displayName
+  displayName,
+  turnDisplayName
 }: {
   turns: ScoreTurn[];
   names: Record<string, string>;
   participantA: ParticipantInfo;
   participantB: ParticipantInfo;
   displayName?: (participantId: string, legNumber?: number) => string;
+  turnDisplayName?: (turn: ScoreTurn) => string;
 }) {
   const columns = [participantA, participantB];
 
   return (
     <div className="min-h-0 overflow-y-auto pr-1">
       {turns.length === 0 ? (
-        <p className="rounded-lg bg-field p-3 text-sm text-slate-600">暂无回合记录。</p>
+        <p className="rounded-lg bg-field p-3 text-sm text-muted">暂无回合记录。</p>
       ) : (
         <div className="grid gap-2">
           {turns.map((turn, index) => (
             <div key={`${turn.participantId}-${index}`} className="grid grid-cols-[42px_1fr_80px] items-center gap-2 rounded-lg bg-field p-2 text-sm">
-              <div className="font-black text-slate-500">#{index + 1}</div>
+              <div className="font-black text-muted">#{index + 1}</div>
               <div className="min-w-0">
                 <div className="truncate font-bold">
-                  {displayName ? displayName(turn.participantId, turn.legNumber) : names[turn.participantId]}
+                  {turnDisplayName
+                    ? turnDisplayName(turn)
+                    : displayName
+                      ? displayName(turn.participantId, turn.legNumber)
+                      : names[turn.participantId]}
                 </div>
-                <div className="text-xs text-slate-500">
+                <div className="text-xs text-muted">
                   L{turn.legNumber} · {turn.remainingBefore} → {turn.remainingAfter} · {turn.darts || 3} 镖
                   {turn.isBust ? " · 爆镖" : ""}
                   {turn.isCheckout ? " · 结镖" : ""}
@@ -686,8 +863,8 @@ function TurnTimeline({
           ))}
           <div className="grid grid-cols-2 gap-2">
             {columns.map((participant) => (
-              <div key={participant.id} className="rounded-lg border border-wire bg-white p-2">
-                <div className="truncate text-xs font-bold text-slate-500">{participant.name}</div>
+              <div key={participant.id} className="rounded-lg border border-wire bg-surface p-2">
+                <div className="truncate text-xs font-bold text-muted">{participant.name}</div>
                 <div className="mt-1 flex flex-wrap gap-1">
                   {turns
                     .filter((turn) => turn.participantId === participant.id)
@@ -709,7 +886,7 @@ function TurnTimeline({
 function Stat({ label, value }: { label: string; value: string | number }) {
   return (
     <div className="rounded-lg bg-field p-2">
-      <dt className="truncate text-[11px] text-slate-500">{label}</dt>
+      <dt className="truncate text-[11px] text-muted">{label}</dt>
       <dd className="font-black">{value}</dd>
     </div>
   );
@@ -727,7 +904,7 @@ function SmallAction({
   return (
     <button
       type="button"
-      className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg border border-wire bg-white px-2 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50"
+      className="inline-flex min-h-10 touch-manipulation select-none items-center justify-center gap-1.5 rounded-lg border border-wire bg-surface px-2 text-sm font-bold transition-colors duration-75 active:bg-field disabled:cursor-not-allowed disabled:opacity-50"
       disabled={disabled}
       onClick={onClick}
     >
@@ -748,7 +925,7 @@ function KeyButton({
   return (
     <button
       type="button"
-      className="min-h-10 rounded-lg border border-wire bg-white text-xl font-black text-ink shadow-sm active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+      className="min-h-10 touch-manipulation select-none rounded-lg border border-wire bg-surface text-xl font-black text-ink shadow-sm transition-colors duration-75 active:bg-field disabled:cursor-not-allowed disabled:opacity-50"
       disabled={disabled}
       onClick={onClick}
     >

@@ -22,6 +22,7 @@ coverage/
 .turbo/
 
 # logs and generated files
+tmp/
 *.log
 *.tsbuildinfo
 npm-debug.log*

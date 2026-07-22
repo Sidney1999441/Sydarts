@@ -12,12 +12,38 @@ import {
   legParticipantModeOptions,
   matchFinishModeOptions,
   matchRuleModeOptions,
+  normalizeMatchLegRuleTemplates,
+  normalizeMatchLegRules,
   softGameOptions,
   steelLegGameOptions,
   validateMatchLegRules
 } from "@/lib/darts/variants";
 import { toDatetimeLocal } from "@/lib/utils";
-import type { LegGameVariant, MatchDartMode, MatchLegRule, MatchRuleMode, Tournament } from "@/types/domain";
+import type {
+  DartMode,
+  LegGameVariant,
+  MatchDartMode,
+  MatchLegRule,
+  MatchRuleMode,
+  Tournament
+} from "@/types/domain";
+
+type RuleTemplateKey = MatchDartMode;
+
+function defaultGameVariant(mode: RuleTemplateKey, tournament?: Partial<Tournament>) {
+  return (mode === "soft"
+    ? tournament?.soft_game || "soft_501"
+    : String(tournament?.dart_game || 501)) as LegGameVariant;
+}
+
+function normalizeRulesForMode(rules: MatchLegRule[], mode: RuleTemplateKey) {
+  return rules.map((rule, index) => ({
+    ...rule,
+    legNumber: index + 1,
+    dartMode: mode,
+    gameVariant: rule.gameVariant || (mode === "soft" ? "soft_501" : "501")
+  }));
+}
 
 export function TournamentForm({
   action,
@@ -26,91 +52,194 @@ export function TournamentForm({
   action: (formData: FormData) => void | Promise<void>;
   tournament?: Partial<Tournament>;
 }) {
-  const type = tournament?.tournament_type || "doubles";
-  const teamSize = tournament?.team_size || (type === "individual" ? 1 : 2);
-  const initialDartMode: MatchDartMode = tournament?.dart_mode === "soft" ? "soft" : "steel";
-  const [dartMode, setDartMode] = useState<MatchDartMode>(initialDartMode);
+  const [tournamentType, setTournamentType] = useState(tournament?.tournament_type || "doubles");
+  const [teamSize, setTeamSize] = useState(tournament?.team_size || (tournamentType === "individual" ? 1 : 2));
+  const type = tournamentType;
+  const initialDartMode: DartMode =
+    tournament?.dart_mode === "soft" || tournament?.dart_mode === "mixed_alternating"
+      ? tournament.dart_mode
+      : "steel";
+  const [dartMode, setDartMode] = useState<DartMode>(initialDartMode);
+  const [mixedFirstDartMode, setMixedFirstDartMode] = useState<MatchDartMode>(
+    tournament?.mixed_first_dart_mode === "steel" ? "steel" : "soft"
+  );
   const [matchRuleMode, setMatchRuleMode] = useState<MatchRuleMode>(
     tournament?.match_rule_mode === "custom_legs" ? "custom_legs" : "standard"
   );
   const [matchFinishMode, setMatchFinishMode] = useState(tournament?.match_finish_mode || "majority");
-  const [rules, setRules] = useState<MatchLegRule[]>(() => {
-    if (tournament?.match_leg_rules?.length) {
-      return tournament.match_leg_rules.map((rule, index) => ({
-        ...rule,
-        legNumber: index + 1,
-        dartMode: initialDartMode
-      }));
-    }
+
+  const storedTemplates = useMemo(() => normalizeMatchLegRuleTemplates(tournament?.match_leg_rules), [tournament?.match_leg_rules]);
+  const storedArray = useMemo(() => normalizeMatchLegRules(tournament?.match_leg_rules), [tournament?.match_leg_rules]);
+
+  function initialRulesFor(mode: RuleTemplateKey) {
+    const templateRules = storedTemplates[mode];
+    const arrayRules = storedArray.filter((rule) => rule.dartMode === mode);
+    const existingRules = templateRules.length > 0 ? templateRules : arrayRules;
+    if (existingRules.length > 0) return normalizeRulesForMode(existingRules, mode);
 
     return [
       {
         legNumber: 1,
         participantMode: getDefaultParticipantMode({ tournamentType: type, teamSize }),
-        dartMode: initialDartMode,
-        gameVariant: (initialDartMode === "soft" ? tournament?.soft_game || "soft_501" : String(tournament?.dart_game || 501)) as LegGameVariant
+        dartMode: mode,
+        gameVariant: defaultGameVariant(mode, tournament)
       }
     ];
-  });
-
-  const visibleRules = useMemo(
-    () => rules.map((rule, index) => ({ ...rule, legNumber: index + 1, dartMode })),
-    [rules, dartMode]
-  );
-  const ruleError = matchRuleMode === "custom_legs"
-    ? validateMatchLegRules({ dartMode, rules: visibleRules, finishMode: matchFinishMode })
-    : null;
-  const firstRule = visibleRules[0];
-
-  function updateDartMode(nextMode: MatchDartMode) {
-    setDartMode(nextMode);
-    setRules((current) =>
-      current.map((rule) => ({
-        ...rule,
-        dartMode: nextMode,
-        gameVariant: (nextMode === "soft" ? "soft_501" : "501") as LegGameVariant
-      }))
-    );
   }
 
-  function updateRule(index: number, patch: Partial<MatchLegRule>) {
-    setRules((current) =>
+  const [steelRules, setSteelRules] = useState<MatchLegRule[]>(() => initialRulesFor("steel"));
+  const [softRules, setSoftRules] = useState<MatchLegRule[]>(() => initialRulesFor("soft"));
+
+  const normalizedSteelRules = useMemo(() => normalizeRulesForMode(steelRules, "steel"), [steelRules]);
+  const normalizedSoftRules = useMemo(() => normalizeRulesForMode(softRules, "soft"), [softRules]);
+  const activeTemplateKey: RuleTemplateKey = dartMode === "soft" ? "soft" : "steel";
+  const activeRules = activeTemplateKey === "soft" ? normalizedSoftRules : normalizedSteelRules;
+  const serializedRules = useMemo(() => {
+    if (dartMode === "mixed_alternating") {
+      return JSON.stringify({
+        steel: normalizedSteelRules,
+        soft: normalizedSoftRules
+      });
+    }
+
+    return JSON.stringify(activeRules);
+  }, [activeRules, dartMode, normalizedSoftRules, normalizedSteelRules]);
+
+  const templateKeys: RuleTemplateKey[] = dartMode === "mixed_alternating" ? ["steel", "soft"] : [activeTemplateKey];
+  const ruleErrors = useMemo<Record<RuleTemplateKey, string | null>>(() => {
+    const nextErrors: Record<RuleTemplateKey, string | null> = { steel: null, soft: null };
+    if (matchRuleMode !== "custom_legs") return nextErrors;
+    for (const key of templateKeys) {
+      const rules = key === "soft" ? normalizedSoftRules : normalizedSteelRules;
+      nextErrors[key] = validateMatchLegRules({ dartMode: key, rules, finishMode: matchFinishMode });
+    }
+    return nextErrors;
+  }, [matchFinishMode, matchRuleMode, normalizedSoftRules, normalizedSteelRules, templateKeys]);
+  const firstRule = activeRules[0];
+
+  function setRulesFor(key: RuleTemplateKey, updater: (current: MatchLegRule[]) => MatchLegRule[]) {
+    const setter = key === "soft" ? setSoftRules : setSteelRules;
+    setter((current) => normalizeRulesForMode(updater(current), key));
+  }
+
+  function updateRule(key: RuleTemplateKey, index: number, patch: Partial<MatchLegRule>) {
+    setRulesFor(key, (current) =>
       current.map((rule, ruleIndex) =>
         ruleIndex === index
           ? {
               ...rule,
               ...patch,
-              dartMode
+              dartMode: key
             }
           : rule
       )
     );
   }
 
-  function addRule() {
-    setRules((current) => [
+  function addRule(key: RuleTemplateKey) {
+    setRulesFor(key, (current) => [
       ...current,
       {
         legNumber: current.length + 1,
         participantMode: getDefaultParticipantMode({ tournamentType: type, teamSize }),
-        dartMode,
-        gameVariant: (dartMode === "soft" ? "soft_501" : "501") as LegGameVariant
+        dartMode: key,
+        gameVariant: defaultGameVariant(key, tournament)
       }
     ]);
   }
 
-  function removeRule(index: number) {
-    setRules((current) =>
-      current
-        .filter((_, ruleIndex) => ruleIndex !== index)
-        .map((rule, ruleIndex) => ({ ...rule, legNumber: ruleIndex + 1 }))
+  function removeRule(key: RuleTemplateKey, index: number) {
+    setRulesFor(key, (current) => current.filter((_, ruleIndex) => ruleIndex !== index));
+  }
+
+  function renderRuleEditor(key: RuleTemplateKey) {
+    const rules = key === "soft" ? normalizedSoftRules : normalizedSteelRules;
+    const title =
+      dartMode === "mixed_alternating"
+        ? key === "soft"
+          ? "软式轮次模板"
+          : "硬式轮次模板"
+        : "每局比赛模板";
+    const description =
+      dartMode === "mixed_alternating"
+        ? `${key === "soft" ? "软式" : "硬式"}轮次会复制这套 BO 模板；另一种镖种使用自己的模板。`
+        : "当前模板会复制到每一场比赛。建议使用奇数局，避免平局。";
+
+    return (
+      <div key={key} className="grid gap-3 rounded-lg border border-wire bg-surface p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="font-bold">{title}</h3>
+            <p className="text-xs text-muted">{description}</p>
+            {matchRuleMode !== "custom_legs" ? (
+              <p className="mt-1 text-xs font-semibold text-muted">
+                当前为标准 BO 赛制；下方模板会保留显示，切换到自定义每局赛制后生效。
+              </p>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-wire bg-surface px-3 text-sm font-bold"
+            onClick={() => addRule(key)}
+          >
+            <Plus className="h-4 w-4" aria-hidden />
+            添加一局
+          </button>
+        </div>
+
+        <div className="grid gap-2">
+          {rules.map((rule, index) => (
+            <div key={`${key}-${rule.legNumber}`} className="grid gap-2 rounded-lg bg-field p-3 lg:grid-cols-[80px_1fr_1fr_auto] lg:items-end">
+              <div className="text-sm font-black text-board">第 {index + 1} 局</div>
+              <label className="label">
+                参与模式
+                <select
+                  className="form-input"
+                  value={rule.participantMode}
+                  onChange={(event) => updateRule(key, index, { participantMode: event.target.value as MatchLegRule["participantMode"] })}
+                >
+                  {legParticipantModeOptions.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="label">
+                项目
+                <select
+                  className="form-input"
+                  value={rule.gameVariant}
+                  onChange={(event) => updateRule(key, index, { gameVariant: event.target.value as LegGameVariant })}
+                >
+                  {(key === "soft" ? softGameOptions : steelLegGameOptions).map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}{("doublesOnly" in option && option.doublesOnly) ? "（仅双人）" : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-wire bg-surface px-3 text-sm font-bold disabled:opacity-50"
+                disabled={rules.length <= 1}
+                onClick={() => removeRule(key, index)}
+              >
+                <Trash2 className="h-4 w-4" aria-hidden />
+                删除
+              </button>
+            </div>
+          ))}
+        </div>
+        {ruleErrors[key] ? <p className="text-sm font-semibold text-red-600">{ruleErrors[key]}</p> : null}
+        <div className="rounded-lg bg-field p-3 text-xs font-semibold text-muted">
+          预览：{rules.map(getLegRuleLabel).join(" / ")}
+        </div>
+      </div>
     );
   }
 
   return (
     <form action={action} className="grid gap-5">
-      <input type="hidden" name="match_leg_rules" value={JSON.stringify(visibleRules)} />
-      <input type="hidden" name="mixed_first_dart_mode" value="soft" />
+      <input type="hidden" name="match_leg_rules" value={serializedRules} />
       <div className="grid gap-4 lg:grid-cols-2">
         <label className="label">
           赛事名称
@@ -146,7 +275,17 @@ export function TournamentForm({
         </label>
         <label className="label">
           比赛类型
-          <select className="form-input" name="tournament_type" defaultValue={type}>
+          <select
+            className="form-input"
+            name="tournament_type"
+            value={tournamentType}
+            onChange={(event) => {
+              const nextType = event.target.value as typeof tournamentType;
+              setTournamentType(nextType);
+              if (nextType === "individual") setTeamSize(1);
+              if (nextType !== "individual" && teamSize < 2) setTeamSize(2);
+            }}
+          >
             <option value="doubles">双人赛</option>
             <option value="team">队制赛</option>
             <option value="individual">个人赛</option>
@@ -154,14 +293,22 @@ export function TournamentForm({
         </label>
         <label className="label">
           每队人数
-          <input className="form-input" type="number" min={1} max={8} name="team_size" defaultValue={teamSize} />
+          <input
+            className="form-input"
+            type="number"
+            min={1}
+            max={8}
+            name="team_size"
+            value={teamSize}
+            onChange={(event) => setTeamSize(Number(event.target.value || 1))}
+          />
         </label>
         <label className="label">
           赛制
           <select className="form-input" name="format" defaultValue={tournament?.format || "round_robin"}>
-            <option value="round_robin">小组循环赛</option>
+            <option value="round_robin">小组循环</option>
             <option value="single_elimination">单淘汰赛</option>
-            <option value="double_elimination">双淘汰赛预留</option>
+            <option value="double_elimination" disabled>双淘汰赛开发中</option>
           </select>
         </label>
       </div>
@@ -174,14 +321,14 @@ export function TournamentForm({
               className="form-input"
               name="dart_mode"
               value={dartMode}
-              onChange={(event) => updateDartMode(event.target.value as MatchDartMode)}
+              onChange={(event) => setDartMode(event.target.value as DartMode)}
             >
               {dartModeOptions.map((option) => (
                 <option key={option.value} value={option.value}>{option.label}</option>
               ))}
             </select>
-            <span className="text-xs font-normal text-slate-500">
-              软硬式不能混合；软镖目前仅支持手动录入。
+            <span className="text-xs font-normal text-muted">
+              联赛可按轮次软硬交替；同一场 BO 内只使用一种镖种。
             </span>
           </label>
           <label className="label">
@@ -220,9 +367,26 @@ export function TournamentForm({
           </label>
         </div>
 
+        {dartMode === "mixed_alternating" ? (
+          <label className="label max-w-sm">
+            交替首轮
+            <select
+              className="form-input"
+              name="mixed_first_dart_mode"
+              value={mixedFirstDartMode}
+              onChange={(event) => setMixedFirstDartMode(event.target.value as MatchDartMode)}
+            >
+              <option value="soft">第 1 轮软镖，第 2 轮硬镖</option>
+              <option value="steel">第 1 轮硬镖，第 2 轮软镖</option>
+            </select>
+          </label>
+        ) : (
+          <input type="hidden" name="mixed_first_dart_mode" value={mixedFirstDartMode} />
+        )}
+
         <div className="grid gap-4 lg:grid-cols-2">
           <label className="label">
-            硬镖标准局制
+            硬镖标准局
             <select className="form-input" name="dart_game" defaultValue={tournament?.dart_game || 501}>
               {steelLegGameOptions.map((option) => (
                 <option key={option.value} value={option.value}>{option.label}</option>
@@ -241,78 +405,11 @@ export function TournamentForm({
           </label>
         </div>
 
-        <div className="grid gap-3 rounded-lg border border-wire bg-white p-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h3 className="font-bold">每局比赛模板</h3>
-                <p className="text-xs text-slate-500">
-                  当前模板会复制到每一场比赛。建议使用奇数局，避免平局。
-                </p>
-                {matchRuleMode !== "custom_legs" ? (
-                  <p className="mt-1 text-xs font-semibold text-slate-500">
-                    当前为标准 BO 赛制；下方模板会保留显示，切换到自定义每局赛制后生效。
-                  </p>
-                ) : null}
-              </div>
-              <button
-                type="button"
-                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-wire bg-white px-3 text-sm font-bold"
-                onClick={addRule}
-              >
-                <Plus className="h-4 w-4" aria-hidden />
-                添加一局
-              </button>
-            </div>
-
-            <div className="grid gap-2">
-              {visibleRules.map((rule, index) => (
-                <div key={rule.legNumber} className="grid gap-2 rounded-lg bg-field p-3 lg:grid-cols-[80px_1fr_1fr_auto] lg:items-end">
-                  <div className="text-sm font-black text-board">第{index + 1}局</div>
-                  <label className="label">
-                    参与模式
-                    <select
-                      className="form-input"
-                      value={rule.participantMode}
-                      onChange={(event) => updateRule(index, { participantMode: event.target.value as MatchLegRule["participantMode"] })}
-                    >
-                      {legParticipantModeOptions.map((option) => (
-                        <option key={option.value} value={option.value}>{option.label}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="label">
-                    项目
-                    <select
-                      className="form-input"
-                      value={rule.gameVariant}
-                      onChange={(event) => updateRule(index, { gameVariant: event.target.value as LegGameVariant })}
-                    >
-                      {(dartMode === "soft" ? softGameOptions : steelLegGameOptions).map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}{("doublesOnly" in option && option.doublesOnly) ? "（仅双人）" : ""}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <button
-                    type="button"
-                    className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-wire bg-white px-3 text-sm font-bold disabled:opacity-50"
-                    disabled={visibleRules.length <= 1}
-                    onClick={() => removeRule(index)}
-                  >
-                    <Trash2 className="h-4 w-4" aria-hidden />
-                    删除
-                  </button>
-                </div>
-              ))}
-            </div>
-            {ruleError ? <p className="text-sm font-semibold text-red-600">{ruleError}</p> : null}
-            <div className="rounded-lg bg-field p-3 text-xs font-semibold text-slate-600">
-              预览：{visibleRules.map(getLegRuleLabel).join(" / ")}
-            </div>
+        <div className="grid gap-3">
+          {templateKeys.map((key) => renderRuleEditor(key))}
         </div>
-        <div className="rounded-lg border border-wire bg-white p-4 text-sm text-slate-600">
-          标准模式会按 BO 规则生成同项目局，例如：{getLegParticipantModeLabel(firstRule?.participantMode)} · {getGameVariantLabel({ dartMode, gameVariant: dartMode === "soft" ? tournament?.soft_game || "soft_501" : tournament?.dart_game || 501 })}。
+        <div className="rounded-lg border border-wire bg-surface p-4 text-sm text-muted">
+          标准模式会按 BO 规则生成同项目局，例如：{getLegParticipantModeLabel(firstRule?.participantMode)} / {getGameVariantLabel({ dartMode: activeTemplateKey, gameVariant: activeTemplateKey === "soft" ? tournament?.soft_game || "soft_501" : tournament?.dart_game || 501 })}。
         </div>
       </div>
 

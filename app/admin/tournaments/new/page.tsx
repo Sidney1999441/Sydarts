@@ -15,7 +15,7 @@ export default async function NewTournamentPage() {
     <div className="grid gap-6">
       <div>
         <h1 className="text-2xl font-bold">创建赛事</h1>
-        <p className="mt-2 text-sm text-slate-600">默认创建双人赛，后续可以调整为多人队制。</p>
+        <p className="mt-2 text-sm text-muted">默认创建双人赛，后续可以调整为多人队制。</p>
       </div>
       <Card>
         <TournamentForm action={createTournamentAction} />

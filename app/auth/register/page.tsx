@@ -14,7 +14,7 @@ export default async function RegisterPage({
     <div className="mx-auto max-w-md">
       <Card>
         <h1 className="text-2xl font-bold">注册</h1>
-        <p className="mt-2 text-sm text-slate-600">创建选手账号，登录后即可报名、计分和查看个人段位。</p>
+        <p className="mt-2 text-sm text-muted">创建选手账号后即可报名、计分和查看个人段位。</p>
         {params.message ? (
           <p className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">{params.message}</p>
         ) : null}
@@ -33,7 +33,7 @@ export default async function RegisterPage({
           </label>
           <Button type="submit">注册</Button>
         </form>
-        <p className="mt-5 text-sm text-slate-600">
+        <p className="mt-5 text-sm text-muted">
           已有账号？{" "}
           <Link className="font-semibold text-board underline" href="/auth/login">
             去登录

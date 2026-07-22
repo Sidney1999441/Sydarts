@@ -1,4 +1,8 @@
-import type { GeneratedMatch, ParticipantSeed } from "@/types/domain";
+import type { GeneratedMatch, MatchDartMode, ParticipantSeed } from "@/types/domain";
+
+export type GeneratedMatchWithDartMode = GeneratedMatch & {
+  forceDartMode?: MatchDartMode;
+};
 
 function nextPowerOfTwo(value: number) {
   let result = 1;
@@ -41,6 +45,23 @@ export function generateRoundRobinMatches(
   }
 
   return matches;
+}
+
+export function expandMixedDartRoundRobinMatches(
+  matches: GeneratedMatch[],
+  options: { firstDartMode?: MatchDartMode | string | null } = {}
+): GeneratedMatchWithDartMode[] {
+  const firstMode: MatchDartMode = options.firstDartMode === "steel" ? "steel" : "soft";
+  const order: MatchDartMode[] = [firstMode, firstMode === "soft" ? "steel" : "soft"];
+
+  return matches.flatMap((match) =>
+    order.map((forceDartMode, modeIndex) => ({
+      ...match,
+      forceDartMode,
+      roundNumber: (match.roundNumber - 1) * 2 + modeIndex + 1,
+      matchNumber: (match.matchNumber - 1) * 2 + modeIndex + 1
+    }))
+  );
 }
 
 export function generateSingleEliminationBracket(participants: ParticipantSeed[]) {

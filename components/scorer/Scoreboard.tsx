@@ -33,6 +33,7 @@ export function Scoreboard({
   async function saveOfficialResult(payload: ScoringCompletePayload) {
     await completeScoredMatchAction({
       matchId,
+      submissionId: payload.submissionId,
       winnerParticipantId: payload.winnerParticipantId,
       scoreA: payload.scoreA,
       scoreB: payload.scoreB,

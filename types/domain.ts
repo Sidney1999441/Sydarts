@@ -12,7 +12,10 @@ export type MatchFinishMode = "majority" | "play_all";
 export type SoftGameVariant =
   | "soft_301"
   | "soft_501"
+  | "soft_701"
   | "soft_cricket"
+  | "soft_half_it"
+  | "soft_high_score"
   | "snow_501"
   | "snow_701";
 export type MixedFirstDartMode = "soft" | "steel";
@@ -30,6 +33,13 @@ export type MatchLegRule = {
   dartMode: MatchDartMode;
   gameVariant: LegGameVariant;
 };
+
+export type MatchLegRuleTemplateSet = {
+  steel?: MatchLegRule[];
+  soft?: MatchLegRule[];
+};
+
+export type MatchLegRuleConfig = MatchLegRule[] | MatchLegRuleTemplateSet;
 
 export type MatchLegLineup = {
   legNumber: number;
@@ -76,6 +86,7 @@ export type ResultConfirmationStatus =
 
 export type Profile = {
   id: string;
+  uid: string;
   display_name: string | null;
   avatar_url: string | null;
   role: UserRole;
@@ -87,6 +98,30 @@ export type Profile = {
   tournament_skill_level?: SkillLevel | null;
   casual_skill_level?: SkillLevel | null;
   soft_skill_level?: SkillLevel | null;
+};
+
+export type SavedTeamStatus = "active" | "archived";
+
+export type SavedTeam = {
+  id: string;
+  name: string;
+  avatar_url: string | null;
+  captain_user_id: string;
+  created_by: string | null;
+  status: SavedTeamStatus;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TournamentTeam = {
+  id: string;
+  tournament_id: string;
+  saved_team_id: string | null;
+  captain_user_id: string | null;
+  name: string;
+  avatar_url: string | null;
+  total_rating: number;
+  status: "active" | "removed";
 };
 
 export type Tournament = {
@@ -110,7 +145,7 @@ export type Tournament = {
   soft_machine_event_ref: string | null;
   soft_machine_sync_enabled: boolean;
   match_rule_mode: MatchRuleMode;
-  match_leg_rules: MatchLegRule[];
+  match_leg_rules: MatchLegRuleConfig;
   match_finish_mode: MatchFinishMode;
   best_of: 3 | 5 | 7;
   auto_grouping_enabled: boolean;

@@ -9,14 +9,17 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        ink: "#17202a",
-        field: "#f4f7fb",
-        board: "#0f766e",
-        wire: "#d7dee8",
-        accent: "#c2410c"
+        ink: "rgb(var(--color-ink) / <alpha-value>)",
+        field: "rgb(var(--color-field) / <alpha-value>)",
+        board: "rgb(var(--color-board) / <alpha-value>)",
+        wire: "rgb(var(--color-wire) / <alpha-value>)",
+        accent: "rgb(var(--color-accent) / <alpha-value>)",
+        surface: "rgb(var(--color-surface) / <alpha-value>)",
+        muted: "rgb(var(--color-muted) / <alpha-value>)",
+        primary: "rgb(var(--color-primary) / <alpha-value>)"
       },
       boxShadow: {
-        soft: "0 18px 50px rgba(23, 32, 42, 0.08)"
+        soft: "0 12px 32px rgb(var(--color-primary) / 0.08)"
       }
     }
   },

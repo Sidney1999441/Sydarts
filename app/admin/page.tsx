@@ -1,10 +1,9 @@
 import Link from "next/link";
-import { CalendarRange, ShieldCheck, Swords, UsersRound } from "lucide-react";
+import { BookOpen, CalendarRange, ChevronRight, Palette, ShieldCheck, Swords, UserRound, UsersRound } from "lucide-react";
 import { requireAdmin } from "@/lib/auth/guards";
 import { hasSupabaseEnv } from "@/lib/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { SetupNotice } from "@/components/SetupNotice";
-import { Card, StatCard } from "@/components/ui/Card";
 
 export const dynamic = "force-dynamic";
 
@@ -13,52 +12,85 @@ export default async function AdminHomePage() {
   await requireAdmin();
   const supabase = await createSupabaseServerClient();
 
-  const [{ count: tournamentCount }, { count: registrationCount }, { count: activeMatchCount }] =
-    await Promise.all([
-      supabase.from("tournaments").select("*", { count: "exact", head: true }),
-      supabase.from("tournament_registrations").select("*", { count: "exact", head: true }),
-      supabase.from("matches").select("*", { count: "exact", head: true }).in("status", ["not_started", "in_progress", "pending_confirmation", "disputed"])
-    ]);
+  const [
+    { count: tournamentCount },
+    { count: registrationCount },
+    { count: savedTeamCount }
+  ] = await Promise.all([
+    supabase.from("tournaments").select("*", { count: "exact", head: true }),
+    supabase.from("tournament_registrations").select("*", { count: "exact", head: true }),
+    supabase.from("saved_teams").select("*", { count: "exact", head: true })
+  ]);
 
   return (
-    <div className="grid gap-6">
-      <div>
-        <div className="inline-flex items-center gap-2 rounded-full bg-field px-3 py-1 text-sm font-semibold text-board">
-          <ShieldCheck className="h-4 w-4" aria-hidden />
-          Admin
+    <div className="grid gap-5">
+      <section className="rounded-lg bg-primary p-5 text-white sm:p-6">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <div className="inline-flex items-center gap-2 text-sm font-bold text-white/70">
+              <ShieldCheck className="h-4 w-4 text-accent" aria-hidden />
+              Admin
+            </div>
+            <h1 className="mt-3 text-3xl font-black tracking-normal">赛事后台</h1>
+          </div>
+          <Link
+            className="inline-flex min-h-12 touch-manipulation items-center gap-2 rounded-lg bg-board px-4 text-sm font-bold text-white"
+            href="/admin/tournaments/new"
+          >
+            创建赛事
+            <ChevronRight className="h-4 w-4" aria-hidden />
+          </Link>
         </div>
-        <h1 className="mt-3 text-2xl font-bold">赛事后台</h1>
-      </div>
-      <div className="grid gap-4 md:grid-cols-3">
-        <StatCard label="赛事数量" value={tournamentCount || 0} />
-        <StatCard label="报名记录" value={registrationCount || 0} />
-        <StatCard label="待处理比赛" value={activeMatchCount || 0} />
-      </div>
-      <div className="grid gap-4 md:grid-cols-3">
-        <AdminLink href="/admin/tournaments" icon={<CalendarRange className="h-5 w-5" />} title="赛事管理" text="创建、发布、关闭报名、删除赛事" />
-        <AdminLink href="/admin/users" icon={<UsersRound className="h-5 w-5" />} title="用户管理" text="调整角色、rating 和等级" />
-        <AdminLink href="/scorer" icon={<Swords className="h-5 w-5" />} title="比赛计分" text="进入当前账号关联的计分器" />
-      </div>
+      </section>
+
+      <section className="grid grid-cols-3 gap-3">
+        <Metric label="赛事" value={tournamentCount || 0} />
+        <Metric label="报名" value={registrationCount || 0} />
+        <Metric label="队伍" value={savedTeamCount || 0} />
+      </section>
+
+      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+        <AdminAction href="/admin/tournaments" icon={<CalendarRange className="h-6 w-6" />} title="赛事" />
+        <AdminAction href="/admin/users" icon={<UserRound className="h-6 w-6" />} title="用户" />
+        <AdminAction href="/admin/teams" icon={<UsersRound className="h-6 w-6" />} title="队伍" />
+        <AdminAction href="/admin/theme" icon={<Palette className="h-6 w-6" />} title="主题" />
+        <AdminAction href="/scorer" icon={<Swords className="h-6 w-6" />} title="计分" />
+        <AdminAction href="/help" icon={<BookOpen className="h-6 w-6" />} title="说明" />
+      </section>
     </div>
   );
 }
 
-function AdminLink({
+function Metric({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-lg border border-wire bg-surface p-4">
+      <div className="text-xs font-bold text-muted">{label}</div>
+      <div className="mt-1 text-3xl font-black">{value}</div>
+    </div>
+  );
+}
+
+function AdminAction({
   href,
   icon,
-  title,
-  text
+  title
 }: {
   href: string;
   icon: React.ReactNode;
   title: string;
-  text: string;
 }) {
   return (
-    <Link href={href} className="rounded-lg border border-wire bg-white p-5 shadow-soft hover:bg-field">
-      <div className="text-board">{icon}</div>
-      <h2 className="mt-3 font-bold">{title}</h2>
-      <p className="mt-2 text-sm leading-6 text-slate-600">{text}</p>
+    <Link
+      href={href}
+      className="group flex min-h-32 touch-manipulation items-center justify-between rounded-lg border border-wire bg-surface p-5 transition-colors duration-75 active:bg-field sm:min-h-36"
+    >
+      <div>
+        <div className="grid h-12 w-12 place-items-center rounded-lg bg-field text-board group-hover:bg-board group-hover:text-white">
+          {icon}
+        </div>
+        <h2 className="mt-4 text-xl font-black">{title}</h2>
+      </div>
+      <ChevronRight className="h-5 w-5 text-muted" aria-hidden />
     </Link>
   );
 }

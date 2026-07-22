@@ -8,6 +8,7 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:dongkang": "node scripts/dongkang-league-smoke-test.mjs",
     "db:wake": "node scripts/wake-supabase.mjs",
     "db:test": "node scripts/wake-supabase.mjs --check-schema"
   },

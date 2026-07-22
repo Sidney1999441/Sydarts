@@ -23,7 +23,7 @@ export default async function TournamentsPage() {
     <div className="grid gap-6">
       <div>
         <h1 className="text-2xl font-bold">赛事列表</h1>
-        <p className="mt-2 text-sm text-slate-600">支持硬镖、软镖和软硬交替赛事；软镖当前通过手动录入结算。</p>
+        <p className="mt-2 text-sm text-muted">支持硬镖、软镖和软硬交替赛事；软镖当前通过手动录入结算。</p>
       </div>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {(tournaments || []).map((tournament) => (
@@ -32,7 +32,7 @@ export default async function TournamentsPage() {
       </div>
       {(tournaments || []).length === 0 ? (
         <Card>
-          <p className="text-sm text-slate-600">暂无已发布赛事。</p>
+          <p className="text-sm text-muted">暂无已发布赛事。</p>
         </Card>
       ) : null}
     </div>

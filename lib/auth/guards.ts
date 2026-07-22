@@ -19,7 +19,7 @@ export async function getCurrentUserAndProfile() {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("id, display_name, avatar_url, role, rating, skill_level, tournament_rating, casual_rating, soft_rating, tournament_skill_level, casual_skill_level, soft_skill_level")
+    .select("id, uid, display_name, avatar_url, role, rating, skill_level, tournament_rating, casual_rating, soft_rating, tournament_skill_level, casual_skill_level, soft_skill_level")
     .eq("id", user.id)
     .maybeSingle();
 
@@ -54,10 +54,21 @@ export async function getCurrentUserAndProfile() {
       current_rating: 1000
     });
 
+    const { data: createdProfile } = await supabase
+      .from("profiles")
+      .select("id, uid, display_name, avatar_url, role, rating, skill_level, tournament_rating, casual_rating, soft_rating, tournament_skill_level, casual_skill_level, soft_skill_level")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (createdProfile) {
+      return { user, profile: createdProfile as Profile };
+    }
+
     return {
       user,
       profile: {
         id: user.id,
+        uid: "000000",
         display_name: fallbackName,
         avatar_url: null,
         role: "user" as UserRole,

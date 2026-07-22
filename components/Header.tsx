@@ -1,80 +1,148 @@
 import Link from "next/link";
-import { Shield, Target, UserRound } from "lucide-react";
+import {
+  CalendarDays,
+  Gauge,
+  HelpCircle,
+  Home,
+  LogIn,
+  LogOut,
+  Shield,
+  Target,
+  UserPlus,
+  UserRound
+} from "lucide-react";
 import { signOutAction } from "@/app/auth/actions";
 import { Button } from "@/components/ui/Button";
+import type { SiteThemeSettings } from "@/lib/theme";
 import type { Profile } from "@/types/domain";
+
+const primaryNav = [
+  { href: "/", label: "首页", icon: Home },
+  { href: "/tournaments", label: "赛事", icon: CalendarDays },
+  { href: "/scorer", label: "计分", icon: Gauge },
+  { href: "/profile", label: "个人", icon: UserRound },
+  { href: "/help", label: "说明", icon: HelpCircle }
+];
 
 export function Header({
   userEmail,
-  profile
+  profile,
+  theme
 }: {
   userEmail: string | null;
   profile: Profile | null;
+  theme: SiteThemeSettings;
+}) {
+  const displayName = profile?.display_name || userEmail;
+  const nav = profile?.role === "admin"
+    ? [...primaryNav, { href: "/admin", label: "后台", icon: Shield }]
+    : primaryNav;
+  const dockNav = profile?.role === "admin"
+    ? [primaryNav[1], primaryNav[2], primaryNav[3], { href: "/admin", label: "后台", icon: Shield }, primaryNav[4]]
+    : [primaryNav[1], primaryNav[2], primaryNav[3], primaryNav[4]];
+
+  return (
+    <>
+      <header className="sticky top-0 z-40 border-b border-white/10 bg-primary text-white shadow-[0_10px_30px_rgb(0_0_0/0.12)]">
+        <div className="mx-auto flex min-h-16 w-full max-w-7xl items-center gap-3 px-4 sm:px-6 lg:px-8">
+          <Link className="flex min-h-12 shrink-0 touch-manipulation items-center gap-3 rounded-lg pr-2" href="/">
+            {theme.logoUrl ? (
+              <img
+                src={theme.logoUrl}
+                alt={`${theme.platformName} logo`}
+                className="h-9 w-9 rounded-md bg-white object-contain"
+              />
+            ) : (
+              <span className="grid h-9 w-9 place-items-center rounded-md bg-accent text-white">
+                <Target className="h-5 w-5" aria-hidden />
+              </span>
+            )}
+            <span className="text-lg font-black tracking-[0.16em]">{theme.platformName}</span>
+          </Link>
+
+          <nav className="hidden flex-1 items-center justify-center gap-1 lg:flex">
+            {nav.map((item) => (
+              <TopNavLink key={item.href} {...item} />
+            ))}
+          </nav>
+
+          <div className="ml-auto flex items-center gap-2">
+            {userEmail ? (
+              <>
+                <div className="hidden max-w-[220px] truncate text-sm font-semibold text-white/70 md:block">
+                  {displayName}
+                </div>
+                <form action={signOutAction}>
+                  <Button className="border-white/15 bg-white/10 text-white hover:bg-white/15" variant="secondary" type="submit">
+                    <LogOut className="h-4 w-4" aria-hidden />
+                    退出
+                  </Button>
+                </form>
+              </>
+            ) : (
+              <>
+                <Link className="hidden min-h-12 touch-manipulation items-center gap-2 rounded-lg px-4 text-sm font-bold text-white/80 hover:bg-white/10 md:inline-flex" href="/auth/login">
+                  <LogIn className="h-4 w-4" aria-hidden />
+                  登录
+                </Link>
+                <Link className="inline-flex min-h-12 touch-manipulation items-center gap-2 rounded-lg bg-board px-4 text-sm font-bold text-white hover:brightness-95" href="/auth/register">
+                  <UserPlus className="h-4 w-4" aria-hidden />
+                  注册
+                </Link>
+              </>
+            )}
+          </div>
+        </div>
+      </header>
+
+      <nav
+        className="fixed inset-x-3 bottom-3 z-40 grid gap-1 rounded-lg border border-wire bg-surface/95 p-1 shadow-[0_18px_45px_rgb(15_23_42/0.18)] backdrop-blur lg:hidden"
+        style={{ gridTemplateColumns: `repeat(${dockNav.length}, minmax(0, 1fr))` }}
+      >
+        {dockNav.map((item) => (
+          <DockLink key={item.href} {...item} />
+        ))}
+      </nav>
+    </>
+  );
+}
+
+function TopNavLink({
+  href,
+  label,
+  icon: Icon
+}: {
+  href: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string; "aria-hidden"?: boolean }>;
 }) {
   return (
-    <header className="sticky top-0 z-30 border-b border-wire bg-white/95 backdrop-blur">
-      <div className="mx-auto grid w-full max-w-7xl gap-3 px-4 py-3 sm:px-6 lg:grid-cols-[auto_1fr_auto] lg:items-center lg:px-8">
-        <div className="flex items-center justify-between gap-3">
-        <Link className="flex min-h-11 touch-manipulation items-center gap-2 text-lg font-bold text-ink" href="/">
-          <Target className="h-6 w-6 text-board" aria-hidden />
-          Darts League
-        </Link>
-        <div className="flex items-center gap-2 lg:hidden">
-          {userEmail ? (
-            <form action={signOutAction}>
-              <Button className="px-3" variant="secondary" type="submit">
-                退出
-              </Button>
-            </form>
-          ) : (
-            <Link className="inline-flex min-h-11 touch-manipulation items-center rounded-lg bg-board px-3 text-sm font-semibold text-white" href="/auth/login">
-              登录
-            </Link>
-          )}
-        </div>
-        </div>
-        <nav className="-mx-1 flex snap-x items-center gap-1 overflow-x-auto px-1 text-sm font-semibold text-slate-600 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          <Link className="inline-flex min-h-11 shrink-0 snap-start touch-manipulation items-center rounded-lg px-3 hover:bg-field" href="/tournaments">
-            赛事
-          </Link>
-          <Link className="inline-flex min-h-11 shrink-0 snap-start touch-manipulation items-center rounded-lg px-3 hover:bg-field" href="/scorer">
-            计分器
-          </Link>
-          <Link className="inline-flex min-h-11 shrink-0 snap-start touch-manipulation items-center rounded-lg px-3 hover:bg-field" href="/profile">
-            个人中心
-          </Link>
-          {profile?.role === "admin" ? (
-            <Link className="inline-flex min-h-11 shrink-0 snap-start touch-manipulation items-center gap-1 rounded-lg px-3 hover:bg-field" href="/admin">
-              <Shield className="h-4 w-4" aria-hidden />
-              后台
-            </Link>
-          ) : null}
-        </nav>
-        <div className="hidden items-center justify-end gap-2 lg:flex">
-          {userEmail ? (
-            <>
-              <div className="flex items-center gap-2 text-sm text-slate-600">
-                <UserRound className="h-4 w-4" aria-hidden />
-                {profile?.display_name || userEmail}
-              </div>
-              <form action={signOutAction}>
-                <Button variant="secondary" type="submit">
-                  退出
-                </Button>
-              </form>
-            </>
-          ) : (
-            <>
-              <Link className="inline-flex min-h-11 touch-manipulation items-center rounded-lg px-3 text-sm font-semibold hover:bg-field" href="/auth/login">
-                登录
-              </Link>
-              <Link className="inline-flex min-h-11 touch-manipulation items-center rounded-lg bg-board px-3 text-sm font-semibold text-white hover:bg-teal-800" href="/auth/register">
-                注册
-              </Link>
-            </>
-          )}
-        </div>
-      </div>
-    </header>
+    <Link
+      className="inline-flex min-h-12 touch-manipulation items-center gap-2 rounded-lg px-4 text-sm font-bold text-white/75 transition-colors duration-75 hover:bg-white/10 hover:text-white active:bg-white/10"
+      href={href}
+    >
+      <Icon className="h-4 w-4" aria-hidden />
+      {label}
+    </Link>
+  );
+}
+
+function DockLink({
+  href,
+  label,
+  icon: Icon
+}: {
+  href: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string; "aria-hidden"?: boolean }>;
+}) {
+  return (
+    <Link
+      className="grid min-h-14 touch-manipulation place-items-center rounded-md px-1 py-1 text-[11px] font-bold text-muted transition-colors duration-75 active:bg-field"
+      href={href}
+    >
+      <Icon className="h-5 w-5 text-board" aria-hidden />
+      <span>{label}</span>
+    </Link>
   );
 }

@@ -18,6 +18,7 @@ type OpponentMode = "local" | "linked";
 type SetupStep = "setup" | "scoring";
 type PlayerSearchResult = {
   id: string;
+  uid?: string;
   displayName: string;
 };
 
@@ -48,7 +49,7 @@ export function CasualScoreboard({ playerName }: { playerName: string }) {
         const results = await searchPlayerProfilesAction(opponentQuery);
         setSearchResults(results);
         if (results.length === 0) {
-          setSetupMessage("没有找到匹配的账号，可以让对手在个人中心确认显示名或 profile id。");
+          setSetupMessage("没有找到匹配的账号，请输入对手的 6 位 UID 或显示名。");
         }
       } catch (error) {
         setSetupMessage(error instanceof Error ? error.message : "搜索失败，请稍后重试。");
@@ -66,6 +67,7 @@ export function CasualScoreboard({ playerName }: { playerName: string }) {
 
   async function saveCasualResult(payload: ScoringCompletePayload) {
     await completeCasualMatchAction({
+      submissionId: payload.submissionId,
       opponentName: opponentDisplayName,
       opponentUserId: opponentMode === "linked" ? selectedOpponent?.id : undefined,
       startingScore,
@@ -80,14 +82,14 @@ export function CasualScoreboard({ playerName }: { playerName: string }) {
   if (step === "scoring") {
     return (
       <div className="grid gap-2">
-        <section className="rounded-lg border border-wire bg-white px-3 py-2 shadow-soft">
+        <section className="rounded-lg border border-wire bg-surface px-3 py-2 shadow-soft">
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
-              <div className="text-xs font-semibold text-slate-500">平时切磋</div>
+              <div className="text-xs font-semibold text-muted">平时切磋</div>
               <h1 className="truncate text-base font-black">
                 {playerName} vs {opponentDisplayName}
               </h1>
-              <p className="truncate text-xs text-slate-600">
+              <p className="truncate text-xs text-muted">
                 {startingScore} · BO{bestOf} · {opponentMode === "linked" ? "双方确认后同步" : "只记录到我的普通数据"}
               </p>
             </div>
@@ -115,7 +117,7 @@ export function CasualScoreboard({ playerName }: { playerName: string }) {
 
   return (
     <div className="grid gap-5">
-      <section className="rounded-lg border border-wire bg-white p-5 shadow-soft">
+      <section className="rounded-lg border border-wire bg-surface p-5 shadow-soft">
         <Link className="text-sm font-semibold text-board underline" href="/scorer">
           返回计分器
         </Link>
@@ -124,16 +126,16 @@ export function CasualScoreboard({ playerName }: { playerName: string }) {
           创建切磋对战
         </div>
         <h1 className="mt-3 text-2xl font-bold">先选择双方和规则</h1>
-        <p className="mt-2 text-sm leading-6 text-slate-600">
+        <p className="mt-2 text-sm leading-6 text-muted">
           对手只想临时打一局时，用“只记录我”；对手也想累计普通数据时，用“同步双方”，搜索并选择对手账号后再开始。
         </p>
       </section>
 
-      <section className="rounded-lg border border-wire bg-white p-5 shadow-soft">
+      <section className="rounded-lg border border-wire bg-surface p-5 shadow-soft">
         <h2 className="text-lg font-bold">对阵双方</h2>
         <div className="mt-4 grid gap-3 md:grid-cols-2">
           <div className="rounded-lg border border-wire bg-field p-4">
-            <div className="text-sm font-semibold text-slate-500">我方</div>
+            <div className="text-sm font-semibold text-muted">我方</div>
             <div className="mt-1 text-lg font-bold">{playerName}</div>
           </div>
           <div className="grid gap-3">
@@ -178,7 +180,7 @@ export function CasualScoreboard({ playerName }: { playerName: string }) {
                       className="form-input"
                       value={opponentQuery}
                       onChange={(event) => setOpponentQuery(event.target.value)}
-                      placeholder="输入显示名或 profile id"
+                      placeholder="输入 6 位 UID 或显示名"
                     />
                     <Button
                       type="button"
@@ -201,10 +203,10 @@ export function CasualScoreboard({ playerName }: { playerName: string }) {
                     <button
                       key={result.id}
                       type="button"
-                      className={`rounded-lg border p-3 text-left transition ${
+                      className={`touch-manipulation select-none rounded-lg border p-3 text-left transition-colors duration-75 ${
                         selectedOpponent?.id === result.id
                           ? "border-board bg-emerald-50"
-                          : "border-wire bg-white hover:bg-field"
+                          : "border-wire bg-surface hover:bg-field active:bg-field"
                       }`}
                       onClick={() => {
                         setSelectedOpponent(result);
@@ -212,7 +214,7 @@ export function CasualScoreboard({ playerName }: { playerName: string }) {
                       }}
                     >
                       <div className="font-bold">{result.displayName}</div>
-                      <div className="mt-1 text-xs text-slate-500">{result.id}</div>
+                      <div className="mt-1 text-xs text-muted">UID {result.uid || "------"} · {result.id}</div>
                     </button>
                   ))}
                 </div>
@@ -222,7 +224,7 @@ export function CasualScoreboard({ playerName }: { playerName: string }) {
         </div>
       </section>
 
-      <section className="rounded-lg border border-wire bg-white p-5 shadow-soft">
+      <section className="rounded-lg border border-wire bg-surface p-5 shadow-soft">
         <h2 className="text-lg font-bold">游戏和规则</h2>
         <div className="mt-4 grid gap-4 md:grid-cols-2">
           <OptionGroup label="局制">
@@ -261,7 +263,7 @@ export function CasualScoreboard({ playerName }: { playerName: string }) {
 function OptionGroup({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div>
-      <div className="text-sm font-semibold text-slate-600">{label}</div>
+      <div className="text-sm font-semibold text-muted">{label}</div>
       <div className="mt-2 grid grid-cols-3 gap-2">{children}</div>
     </div>
   );
@@ -281,8 +283,8 @@ function ModeButton({
   return (
     <button
       type="button"
-      className={`inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-bold transition ${
-        active ? "border-board bg-board text-white" : "border-wire bg-white text-ink hover:bg-field"
+      className={`inline-flex min-h-12 touch-manipulation select-none items-center justify-center gap-2 rounded-lg border px-3 text-sm font-bold transition-colors duration-75 ${
+        active ? "border-board bg-board text-white" : "border-wire bg-surface text-ink hover:bg-field active:bg-field"
       }`}
       onClick={onClick}
     >
@@ -304,8 +306,8 @@ function SelectButton({
   return (
     <button
       type="button"
-      className={`min-h-12 rounded-lg border px-4 text-base font-black transition ${
-        active ? "border-board bg-board text-white" : "border-wire bg-field text-ink hover:bg-white"
+      className={`min-h-12 touch-manipulation select-none rounded-lg border px-4 text-base font-black transition-colors duration-75 ${
+        active ? "border-board bg-board text-white" : "border-wire bg-field text-ink hover:bg-surface active:bg-surface"
       }`}
       onClick={onClick}
     >
