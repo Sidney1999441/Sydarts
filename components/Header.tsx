@@ -12,6 +12,7 @@ import {
   UserRound
 } from "lucide-react";
 import { signOutAction } from "@/app/auth/actions";
+import { BackButton } from "@/components/BackButton";
 import { Button } from "@/components/ui/Button";
 import type { SiteThemeSettings } from "@/lib/theme";
 import type { Profile } from "@/types/domain";
@@ -45,6 +46,7 @@ export function Header({
     <>
       <header className="sticky top-0 z-40 border-b border-white/10 bg-primary text-white shadow-[0_10px_30px_rgb(0_0_0/0.12)]">
         <div className="mx-auto flex min-h-16 w-full max-w-7xl items-center gap-3 px-4 sm:px-6 lg:px-8">
+          <BackButton />
           <Link className="flex min-h-12 shrink-0 touch-manipulation items-center gap-3 rounded-lg pr-2" href="/">
             {theme.logoUrl ? (
               <img
