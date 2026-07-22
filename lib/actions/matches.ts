@@ -15,6 +15,33 @@ import type { MatchDartMode, MatchLegLineup, MatchLegResult, MatchLegRule } from
 const SOFT_RATING_WEIGHT = 0.45;
 const resultSubmissionIdSchema = z.string().uuid();
 
+const manualStatsSchema = z.object({
+  averageScore: z.number().min(0).optional(),
+  averageMpr: z.number().min(0).optional(),
+  countTon80: z.number().int().min(0).optional(),
+  countHatTrick: z.number().int().min(0).optional(),
+  highestCheckout: z.number().int().min(0).optional(),
+  countHighCheckout: z.number().int().min(0).optional(),
+  countWhiteHorse: z.number().int().min(0).optional(),
+  totalMarks: z.number().int().min(0).optional(),
+  count5Marks: z.number().int().min(0).optional(),
+  count6Marks: z.number().int().min(0).optional(),
+  count7Marks: z.number().int().min(0).optional(),
+  count9Marks: z.number().int().min(0).optional(),
+  averagePer3Darts: z.number().min(0).optional(),
+  totalScoredPoints: z.number().int().min(0).optional(),
+  totalDarts: z.number().int().min(0).optional(),
+  highestTurnScore: z.number().int().min(0).optional(),
+  bustCount: z.number().int().min(0).optional(),
+  checkoutCount: z.number().int().min(0).optional(),
+  count60Plus: z.number().int().min(0).optional(),
+  count80Plus: z.number().int().min(0).optional(),
+  count180: z.number().int().min(0).optional(),
+  count100Plus: z.number().int().min(0).optional(),
+  count140Plus: z.number().int().min(0).optional(),
+  count170Plus: z.number().int().min(0).optional()
+});
+
 type ManualSoftStats = {
   averageScore?: number;
   averageMpr?: number;
@@ -27,6 +54,7 @@ type ManualSoftStats = {
   count5Marks?: number;
   count6Marks?: number;
   count7Marks?: number;
+  count9Marks?: number;
   averagePer3Darts?: number;
   totalScoredPoints?: number;
   totalDarts?: number;
@@ -85,6 +113,7 @@ type SettlementStatEvent = {
   count5Marks?: number;
   count6Marks?: number;
   count7Marks?: number;
+  count9Marks?: number;
 };
 
 function submissionIdFromForm(formData: FormData) {
@@ -120,7 +149,10 @@ const completeMatchSchema = z.object({
       gameVariant: z.string(),
       participantAUserIds: z.array(z.string().uuid()).default([]),
       participantBUserIds: z.array(z.string().uuid()).default([]),
-      checkoutScore: z.number().nullable().optional()
+      checkoutScore: z.number().nullable().optional(),
+      scoreA: z.number().nullable().optional(),
+      scoreB: z.number().nullable().optional(),
+      userStats: z.record(z.string().uuid(), manualStatsSchema).optional()
     })
   ).default([]),
   legLineups: z.array(
@@ -129,7 +161,8 @@ const completeMatchSchema = z.object({
       participantAUserIds: z.array(z.string().uuid()).default([]),
       participantBUserIds: z.array(z.string().uuid()).default([])
     })
-  ).default([])
+  ).default([]),
+  userStats: z.record(z.string().uuid(), manualStatsSchema).default({})
 });
 
 const completeCasualMatchSchema = z.object({
@@ -284,6 +317,7 @@ function parseManualStatsForUsers(formData: FormData, userIds: string[]): Manual
         count5Marks: optionalIntegerFromForm(formData, `stats_${userId}_count_5_marks`),
         count6Marks: optionalIntegerFromForm(formData, `stats_${userId}_count_6_marks`),
         count7Marks: optionalIntegerFromForm(formData, `stats_${userId}_count_7_marks`),
+        count9Marks: optionalIntegerFromForm(formData, `stats_${userId}_count_9_marks`),
         count60Plus: optionalIntegerFromForm(formData, `stats_${userId}_count_60_plus`),
         count80Plus: optionalIntegerFromForm(formData, `stats_${userId}_count_80_plus`),
         count180:
@@ -319,7 +353,8 @@ function buildSoftStatsRpcPayload(input: {
     p_total_marks: input.stats?.totalMarks || 0,
     p_count_5_marks: input.stats?.count5Marks || 0,
     p_count_6_marks: input.stats?.count6Marks || 0,
-    p_count_7_marks: input.stats?.count7Marks || 0
+    p_count_7_marks: input.stats?.count7Marks || 0,
+    p_count_9_marks: input.stats?.count9Marks || 0
   };
 }
 
@@ -458,7 +493,10 @@ function buildSoftStatEvent(input: {
     totalMarks: payload.p_total_marks,
     count5Marks: payload.p_count_5_marks,
     count6Marks: payload.p_count_6_marks,
-    count7Marks: payload.p_count_7_marks
+    count7Marks: payload.p_count_7_marks,
+    count9Marks: payload.p_count_9_marks,
+    totalScoredPoints: input.stats?.totalScoredPoints || 0,
+    highestTurnScore: input.stats?.highestTurnScore || 0
   };
 }
 
@@ -534,7 +572,10 @@ function buildParticipantManualStats(userIds: string[], userStats: ManualStatsBy
     totalMarks: stats.reduce((total, stat) => total + (stat.totalMarks || 0), 0),
     count5Marks: stats.reduce((total, stat) => total + (stat.count5Marks || 0), 0),
     count6Marks: stats.reduce((total, stat) => total + (stat.count6Marks || 0), 0),
-    count7Marks: stats.reduce((total, stat) => total + (stat.count7Marks || 0), 0)
+    count7Marks: stats.reduce((total, stat) => total + (stat.count7Marks || 0), 0),
+    count9Marks: stats.reduce((total, stat) => total + (stat.count9Marks || 0), 0),
+    totalScoredPoints: stats.reduce((total, stat) => total + (stat.totalScoredPoints || 0), 0),
+    highestTurnScore: Math.max(0, ...stats.map((stat) => stat.highestTurnScore || 0))
   });
 }
 
@@ -878,30 +919,54 @@ export async function completeScoredMatchAction(payload: unknown) {
   if (!match.participant_a_id || !match.participant_b_id) {
     throw new Error("Match does not have two participants.");
   }
-  if ((match.dart_mode || "steel") === "soft") {
-    throw new Error("Soft dart matches are manual-entry only for now.");
+  const dartMode = ((match.dart_mode || "steel") === "soft" ? "soft" : "steel") as MatchDartMode;
+  const userStats = values.userStats as ManualStatsById;
+  if (values.turns.length > 0) {
+    assertTurnUsersInLineups({
+      turns: values.turns,
+      participantAId: match.participant_a_id,
+      participantBId: match.participant_b_id,
+      lineups: values.legLineups as MatchLegLineup[]
+    });
   }
-  assertTurnUsersInLineups({
-    turns: values.turns,
+
+  const participantAUserIds = await getTeamUserIds(admin, match.participant_a_id);
+  const participantBUserIds = await getTeamUserIds(admin, match.participant_b_id);
+  const participantAPlayedUserIds = userIdsFromLineups({
+    participantId: match.participant_a_id,
     participantAId: match.participant_a_id,
     participantBId: match.participant_b_id,
+    fallbackUserIds: participantAUserIds,
+    lineups: values.legLineups as MatchLegLineup[]
+  });
+  const participantBPlayedUserIds = userIdsFromLineups({
+    participantId: match.participant_b_id,
+    participantAId: match.participant_a_id,
+    participantBId: match.participant_b_id,
+    fallbackUserIds: participantBUserIds,
     lineups: values.legLineups as MatchLegLineup[]
   });
 
   const details = buildManualResultDetails({
-    source: "scorer",
-    dartMode: "steel",
+    source: dartMode === "soft" ? "soft_scorer" : "scorer",
+    dartMode,
     gameVariant: match.game_variant,
     legRules: (match.leg_rules || []) as MatchLegRule[],
     legLineups: values.legLineups as MatchLegLineup[],
     legResults: values.legResults as MatchLegResult[],
     submissionId: values.submissionId,
-    participantStats: buildParticipantStatsFromTurns({
-      participantAId: match.participant_a_id,
-      participantBId: match.participant_b_id,
-      turns: values.turns
-    }),
-    userStats: buildUserStatsFromTurns(values.turns)
+    participantStats:
+      dartMode === "soft"
+        ? {
+            [match.participant_a_id]: buildParticipantManualStats(participantAPlayedUserIds, userStats),
+            [match.participant_b_id]: buildParticipantManualStats(participantBPlayedUserIds, userStats)
+          }
+        : buildParticipantStatsFromTurns({
+            participantAId: match.participant_a_id,
+            participantBId: match.participant_b_id,
+            turns: values.turns
+          }),
+    userStats: dartMode === "soft" ? userStats : buildUserStatsFromTurns(values.turns)
   });
 
   const settlement = await buildSettlementSideEffects({
@@ -914,7 +979,8 @@ export async function completeScoredMatchAction(payload: unknown) {
     scoreA: values.scoreA,
     scoreB: values.scoreB,
     turns: values.turns,
-    dartMode: "steel",
+    dartMode,
+    userStats: dartMode === "soft" ? userStats : undefined,
     legLineups: values.legLineups as MatchLegLineup[]
   });
   await settleTournamentMatch({

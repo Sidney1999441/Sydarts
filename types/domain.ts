@@ -53,6 +53,9 @@ export type MatchLegResult = MatchLegLineup & {
   dartMode: MatchDartMode;
   gameVariant: LegGameVariant;
   checkoutScore?: number | null;
+  scoreA?: number | null;
+  scoreB?: number | null;
+  userStats?: Record<string, unknown>;
 };
 export type TournamentStatus =
   | "draft"

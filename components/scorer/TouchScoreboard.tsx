@@ -11,6 +11,7 @@ import {
   type ScoringState
 } from "@/lib/algorithms/scoring";
 import { getLegRuleLabel, getLegStartingScore } from "@/lib/darts/variants";
+import type { ManualMatchStats } from "@/lib/darts/soft-stats";
 import { createResultSubmissionId } from "@/lib/results/submission";
 import { Button } from "@/components/ui/Button";
 import type { MatchFinishMode, MatchLegLineup, MatchLegResult, MatchLegRule } from "@/types/domain";
@@ -33,6 +34,7 @@ export type ScoringCompletePayload = {
   turns: ScoreTurn[];
   legResults: MatchLegResult[];
   legLineups: MatchLegLineup[];
+  userStats?: Record<string, ManualMatchStats>;
 };
 
 function defaultRules(startingScore: GameScore, bestOf: BestOf): MatchLegRule[] {

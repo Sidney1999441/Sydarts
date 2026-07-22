@@ -198,6 +198,7 @@ function ManualStatsFields({
                 <input className="form-input" type="number" min={0} name={`stats_${member.userId}_count_5_marks`} placeholder="5标" />
                 <input className="form-input" type="number" min={0} name={`stats_${member.userId}_count_6_marks`} placeholder="6标" />
                 <input className="form-input" type="number" min={0} name={`stats_${member.userId}_count_7_marks`} placeholder="7标" />
+                <input className="form-input" type="number" min={0} name={`stats_${member.userId}_count_9_marks`} placeholder="9 Mark" />
                 <input className="form-input" type="number" min={0} name={`stats_${member.userId}_count_ton80`} placeholder="TON80" />
                 <input className="form-input" type="number" min={0} name={`stats_${member.userId}_count_hat_trick`} placeholder="帽子戏法" />
                 <input className="form-input" type="number" min={0} name={`stats_${member.userId}_count_white_horse`} placeholder="白马" />

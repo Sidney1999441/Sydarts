@@ -56,6 +56,7 @@ type DbSoftStats = {
   count_5_marks?: number | null;
   count_6_marks?: number | null;
   count_7_marks?: number | null;
+  count_9_marks?: number | null;
   current_rating?: number | null;
 };
 
@@ -69,6 +70,7 @@ type SoftDisplayStats = {
   count5Marks?: number;
   count6Marks?: number;
   count7Marks?: number;
+  count9Marks?: number;
 };
 
 type DartStats = ReturnType<typeof calculateDartStats> & SoftDisplayStats;
@@ -177,6 +179,7 @@ function normalizeDartStats(value?: Partial<DartStats> | null): DartStats {
     count5Marks: toNumber(value?.count5Marks),
     count6Marks: toNumber(value?.count6Marks),
     count7Marks: toNumber(value?.count7Marks),
+    count9Marks: toNumber(value?.count9Marks),
     checkoutScore: value?.checkoutScore ?? null
   };
 }
@@ -720,6 +723,7 @@ function CombinedStatsPanel({
           <Metric label="5标" value={toNumber(softStats?.count_5_marks)} />
           <Metric label="6标" value={toNumber(softStats?.count_6_marks)} />
           <Metric label="7标" value={toNumber(softStats?.count_7_marks)} />
+          <Metric label="9 Mark" value={toNumber(softStats?.count_9_marks)} />
           <Metric label="TON80" value={toNumber(softStats?.count_ton80)} />
           <Metric label="帽子戏法" value={toNumber(softStats?.count_hat_trick)} />
           <Metric label="白马" value={toNumber(softStats?.count_white_horse)} />

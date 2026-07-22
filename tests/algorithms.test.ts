@@ -10,6 +10,7 @@ import { updateTournamentStandings } from "@/lib/algorithms/standings";
 import { updateUserRating } from "@/lib/algorithms/rating";
 import { calculatePlayerLevel, ratingToSkillLevel } from "@/lib/algorithms/player-level";
 import { resolveMatchLegRules, validateMatchLegRules, getMatchDartMode, getMatchGameVariant } from "@/lib/darts/variants";
+import { getSoftStatFields, mergeManualStats } from "@/lib/darts/soft-stats";
 
 const players = [
   { id: "u1", name: "A", rating: 1600 },
@@ -355,6 +356,43 @@ describe("team-first tournament algorithms", () => {
     ]);
     expect(new Set(roundTwo.map((rule) => rule.dartMode))).toEqual(new Set(["steel"]));
     expect(roundTwo.map((rule) => rule.gameVariant)).toEqual(["501", "501", "301"]);
+  });
+
+  it("shows only variant-specific soft dart stat fields", () => {
+    expect(getSoftStatFields("soft_501").map((field) => field.key)).toEqual([
+      "averageScore",
+      "countHatTrick",
+      "countTon80",
+      "highestCheckout",
+      "countHighCheckout"
+    ]);
+    expect(getSoftStatFields("soft_cricket").map((field) => field.key)).toEqual([
+      "averageMpr",
+      "totalMarks",
+      "count5Marks",
+      "count6Marks",
+      "count7Marks",
+      "count9Marks",
+      "countWhiteHorse"
+    ]);
+    expect(getSoftStatFields("soft_high_score").map((field) => field.key)).toEqual([
+      "highestTurnScore",
+      "countHatTrick",
+      "countTon80"
+    ]);
+  });
+
+  it("aggregates soft dart per-leg stats without losing 9 Mark", () => {
+    expect(
+      mergeManualStats([
+        { averageMpr: 3, count9Marks: 1, countWhiteHorse: 0 },
+        { averageMpr: 4, count9Marks: 2, countWhiteHorse: 1 }
+      ])
+    ).toMatchObject({
+      averageMpr: 3.5,
+      count9Marks: 3,
+      countWhiteHorse: 1
+    });
   });
 
   it("keeps new players in the entry rank until enough data exists", () => {

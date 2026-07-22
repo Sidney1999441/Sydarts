@@ -31,7 +31,7 @@ const REQUIRED_TABLES = [
 
 const REQUIRED_COLUMN_SELECTS = [
   { table: "match_turns", select: "user_id" },
-  { table: "soft_user_stats", select: "total_marks,count_5_marks,count_6_marks,count_7_marks" }
+  { table: "soft_user_stats", select: "total_marks,count_5_marks,count_6_marks,count_7_marks,count_9_marks" }
 ];
 
 const SERVICE_ROLE_TABLES = [

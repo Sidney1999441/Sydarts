@@ -6,6 +6,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { SetupNotice } from "@/components/SetupNotice";
 import { Card } from "@/components/ui/Card";
 import { Scoreboard } from "@/components/scorer/Scoreboard";
+import { SoftScoreboard } from "@/components/scorer/SoftScoreboard";
 import type { MatchFinishMode, MatchLegRule, Tournament } from "@/types/domain";
 
 export const dynamic = "force-dynamic";
@@ -55,7 +56,7 @@ export default async function MatchScorerPage({
   const profileById = new Map(
     (profiles || []).map((profile) => [
       profile.id,
-      `${profile.display_name || profile.id}${profile.uid ? ` · UID ${profile.uid}` : ""}`
+      `${profile.display_name || profile.id}${profile.uid ? ` / UID ${profile.uid}` : ""}`
     ])
   );
   const membersByTeamId = new Map<string, Array<{ userId: string; name: string }>>();
@@ -81,8 +82,8 @@ export default async function MatchScorerPage({
     };
   }
 
-  const participantA = toParticipantInfo(match.participant_a_id, "Team A");
-  const participantB = toParticipantInfo(match.participant_b_id, "Team B");
+  const participantA = toParticipantInfo(match.participant_a_id, "A");
+  const participantB = toParticipantInfo(match.participant_b_id, "B");
   const tournamentData = tournament as Tournament | null;
   const legRules = (Array.isArray(match.leg_rules) && match.leg_rules.length > 0
     ? match.leg_rules
@@ -106,9 +107,11 @@ export default async function MatchScorerPage({
   return (
     <div className="grid gap-6">
       <div>
-        <h1 className="text-2xl font-bold">{tournamentData?.name || "比赛计分"}</h1>
+        <h1 className="text-2xl font-bold">
+          第 {match.round_number} 轮，{participantA.name} 对 {participantB.name}
+        </h1>
         <p className="mt-2 text-sm text-muted">
-          {participantA.name} vs {participantB.name} · {getDartModeLabel(matchDartMode)} · {getGameVariantLabel({ dartMode: matchDartMode, gameVariant })} · {legRules.length} 局模板
+          {tournamentData?.name || "比赛计分"} / {getDartModeLabel(matchDartMode)} / {getGameVariantLabel({ dartMode: matchDartMode, gameVariant })} / {legRules.length} 局
         </p>
       </div>
       {match.status === "completed" ? (
@@ -118,11 +121,13 @@ export default async function MatchScorerPage({
           </p>
         </Card>
       ) : matchDartMode === "soft" ? (
-        <Card>
-          <p className="text-sm font-semibold text-muted">
-            这场是软镖比赛，目前软镖仅支持在赛事页手动录入结果和个人数据。
-          </p>
-        </Card>
+        <SoftScoreboard
+          matchId={match.id}
+          participantA={participantA}
+          participantB={participantB}
+          legRules={legRules}
+          matchFinishMode={matchFinishMode}
+        />
       ) : (
         <Scoreboard
           matchId={match.id}

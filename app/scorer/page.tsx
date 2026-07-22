@@ -36,9 +36,26 @@ export default async function ScorerPage() {
           .select("*")
           .or(`participant_a_id.in.(${participantIds.join(",")}),participant_b_id.in.(${participantIds.join(",")})`)
           .neq("status", "completed")
+          .neq("status", "bye")
           .order("round_number")
           .order("match_number")
       : { data: [] };
+
+  const allMatchParticipantIds = [
+    ...new Set(
+      (matches || [])
+        .flatMap((match) => [match.participant_a_id, match.participant_b_id])
+        .filter(Boolean)
+    )
+  ] as string[];
+  const { data: matchParticipants } =
+    allMatchParticipantIds.length > 0
+      ? await supabase
+          .from("tournament_participants")
+          .select("id, display_name")
+          .in("id", allMatchParticipantIds)
+      : { data: [] };
+  const participantById = new Map((matchParticipants || []).map((participant) => [participant.id, participant]));
 
   return (
     <div className="grid gap-5">
@@ -74,31 +91,24 @@ export default async function ScorerPage() {
         <h2 className="text-lg font-black">正式比赛</h2>
         <div className="mt-4 grid gap-3">
           {(matches || []).map((match) => {
-            const isSoft = (match.dart_mode || "steel") === "soft";
-            const content = (
-              <>
-                <div className="text-xs font-bold text-muted">
-                  {match.stage} / R{match.round_number} M{match.match_number}
-                </div>
-                <div className="mt-1 font-black">Match #{match.id.slice(0, 8)}</div>
-                <div className="mt-1 text-xs font-bold text-board">
-                  {getDartModeLabel(match.dart_mode)} / {getGameVariantLabel({ dartMode: match.dart_mode, gameVariant: match.game_variant })}
-                </div>
-              </>
-            );
+            const participantAName = participantById.get(match.participant_a_id || "")?.display_name || "TBD";
+            const participantBName = participantById.get(match.participant_b_id || "")?.display_name || "TBD";
 
-            return isSoft ? (
-              <div key={match.id} className="rounded-lg border border-wire p-4">
-                {content}
-                <div className="mt-2 text-xs font-semibold text-muted">软式请在赛事页手动录入。</div>
-              </div>
-            ) : (
+            return (
               <Link
                 key={match.id}
                 href={`/scorer/${match.id}`}
                 className="block min-h-20 touch-manipulation rounded-lg border border-wire p-4 transition-colors duration-75 hover:bg-field active:bg-field"
               >
-                {content}
+                <div className="text-xs font-bold text-muted">
+                  第 {match.round_number} 轮 / 第 {match.match_number} 场 / {match.status}
+                </div>
+                <div className="mt-1 font-black">
+                  第 {match.round_number} 轮，{participantAName} 对 {participantBName}
+                </div>
+                <div className="mt-1 text-xs font-bold text-board">
+                  {getDartModeLabel(match.dart_mode)} / {getGameVariantLabel({ dartMode: match.dart_mode, gameVariant: match.game_variant })}
+                </div>
               </Link>
             );
           })}

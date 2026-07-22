@@ -47,6 +47,7 @@ type DbSoftStats = {
   count_ton80?: number | null;
   count_hat_trick?: number | null;
   count_white_horse?: number | null;
+  count_9_marks?: number | null;
   total_marks?: number | null;
 };
 
@@ -132,14 +133,12 @@ export default async function AdminUsersPage({
   const userIds = (users || []).map((user) => user.id);
   const statsSelect =
     "user_id,matches_played,wins,losses,legs_played,legs_won,total_scored_points,total_darts,average_per_3_darts,highest_turn_score,highest_checkout,bust_count,count_high_checkout,count_80_plus,count_100_plus,count_140_plus,count_170_plus,count_180";
-  const softStatsSelect =
-    "user_id,matches_played,wins,losses,legs_played,legs_won,average_score,average_mpr,highest_checkout,count_high_checkout,count_ton80,count_hat_trick,count_white_horse,total_marks";
   const [{ data: tournamentStatsRows }, { data: generalStatsRows }, { data: softStatsRows }] =
     userIds.length > 0
       ? await Promise.all([
           supabase.from("user_stats").select(statsSelect).in("user_id", userIds),
           supabase.from("general_user_stats").select(statsSelect).in("user_id", userIds),
-          supabase.from("soft_user_stats").select(softStatsSelect).in("user_id", userIds)
+          supabase.from("soft_user_stats").select("*").in("user_id", userIds)
         ])
       : [{ data: [] }, { data: [] }, { data: [] }];
   const tournamentStatsByUser = new Map((tournamentStatsRows || []).map((stats) => [stats.user_id, stats as DbStats]));
@@ -383,6 +382,7 @@ function SoftStatsCard({ rating, stats }: { rating: number; stats: DbSoftStats |
         <MiniMetric label="TON80" value={toNumber(stats?.count_ton80)} />
         <MiniMetric label="帽子戏法" value={toNumber(stats?.count_hat_trick)} />
         <MiniMetric label="白马" value={toNumber(stats?.count_white_horse)} />
+        <MiniMetric label="9 Mark" value={toNumber(stats?.count_9_marks)} />
       </dl>
     </div>
   );

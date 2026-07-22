@@ -4,18 +4,16 @@ import {
   registerForTournamentAction,
   registerSavedTeamForTournamentAction
 } from "@/lib/actions/tournaments";
-import { submitManualResultAction } from "@/lib/actions/matches";
 import { getCurrentUserAndProfile } from "@/lib/auth/guards";
 import { hasSupabaseEnv } from "@/lib/env";
 import { updateTournamentStandings } from "@/lib/algorithms/standings";
-import { getDartModeLabel, getGameVariantLabel, getLegRuleLabel } from "@/lib/darts/variants";
-import { createResultSubmissionId } from "@/lib/results/submission";
+import { getDartModeLabel, getGameVariantLabel } from "@/lib/darts/variants";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { formatDateTime } from "@/lib/utils";
 import { SetupNotice } from "@/components/SetupNotice";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
-import type { MatchDartMode, MatchLegRule, MatchSummary, ParticipantSeed, Tournament } from "@/types/domain";
+import type { MatchDartMode, MatchSummary, ParticipantSeed, Tournament } from "@/types/domain";
 
 export const dynamic = "force-dynamic";
 
@@ -51,39 +49,38 @@ export default async function TournamentDetailPage({
     { data: matches },
     { data: registration },
     { data: savedTeams }
-  ] =
-    await Promise.all([
-      supabase
-        .from("tournament_participants")
-        .select("id, display_name, rating_snapshot, user_id, team_id, participant_type")
-        .eq("tournament_id", id)
-        .eq("status", "active")
-        .order("seed"),
-      supabase.from("groups").select("*").eq("tournament_id", id).order("group_index"),
-      supabase.from("group_members").select("*"),
-      supabase
-        .from("matches")
-        .select("*")
-        .eq("tournament_id", id)
-        .order("round_number")
-        .order("match_number"),
-      user
-        ? supabase
-            .from("tournament_registrations")
-            .select("*")
-            .eq("tournament_id", id)
-            .eq("user_id", user.id)
-            .maybeSingle()
-        : Promise.resolve({ data: null }),
-      user
-        ? supabase
-            .from("saved_teams")
-            .select("id, name, avatar_url")
-            .eq("captain_user_id", user.id)
-            .eq("status", "active")
-            .order("updated_at", { ascending: false })
-        : Promise.resolve({ data: [] })
-    ]);
+  ] = await Promise.all([
+    supabase
+      .from("tournament_participants")
+      .select("id, display_name, rating_snapshot, user_id, team_id, participant_type")
+      .eq("tournament_id", id)
+      .eq("status", "active")
+      .order("seed"),
+    supabase.from("groups").select("*").eq("tournament_id", id).order("group_index"),
+    supabase.from("group_members").select("*"),
+    supabase
+      .from("matches")
+      .select("*")
+      .eq("tournament_id", id)
+      .order("round_number")
+      .order("match_number"),
+    user
+      ? supabase
+          .from("tournament_registrations")
+          .select("*")
+          .eq("tournament_id", id)
+          .eq("user_id", user.id)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
+    user
+      ? supabase
+          .from("saved_teams")
+          .select("id, name, avatar_url")
+          .eq("captain_user_id", user.id)
+          .eq("status", "active")
+          .order("updated_at", { ascending: false })
+      : Promise.resolve({ data: [] })
+  ]);
 
   const participantSeeds: ParticipantSeed[] = (participants || []).map((participant) => ({
     id: participant.id,
@@ -114,29 +111,28 @@ export default async function TournamentDetailPage({
   const teamMembersByTeamId = new Map<string, Array<{ userId: string; name: string }>>();
   for (const member of teamMembers || []) {
     const members = teamMembersByTeamId.get(member.team_id) || [];
+    const profileRow = statProfileById.get(member.user_id);
     members.push({
       userId: member.user_id,
-      name: `${statProfileById.get(member.user_id)?.display_name || member.user_id}${
-        statProfileById.get(member.user_id)?.uid ? ` · UID ${statProfileById.get(member.user_id)?.uid}` : ""
-      }`
+      name: `${profileRow?.display_name || member.user_id}${profileRow?.uid ? ` / UID ${profileRow.uid}` : ""}`
     });
     teamMembersByTeamId.set(member.team_id, members);
   }
   const participantMembersById = new Map<string, Array<{ userId: string; name: string }>>();
   for (const participant of participants || []) {
     if (participant.participant_type === "user" && participant.user_id) {
+      const profileRow = statProfileById.get(participant.user_id);
       participantMembersById.set(participant.id, [
         {
           userId: participant.user_id,
-          name: `${statProfileById.get(participant.user_id)?.display_name || participant.display_name}${
-            statProfileById.get(participant.user_id)?.uid ? ` · UID ${statProfileById.get(participant.user_id)?.uid}` : ""
-          }`
+          name: `${profileRow?.display_name || participant.display_name}${profileRow?.uid ? ` / UID ${profileRow.uid}` : ""}`
         }
       ]);
     } else if (participant.team_id) {
       participantMembersById.set(participant.id, teamMembersByTeamId.get(participant.team_id) || []);
     }
   }
+
   const currentUserId = user?.id || null;
   const isAdmin = profile?.role === "admin";
   const isUserInParticipant = (participantId?: string | null) =>
@@ -242,51 +238,45 @@ export default async function TournamentDetailPage({
       </section>
 
       <Card>
-        <h2 className="text-lg font-bold">对阵</h2>
+        <h2 className="text-lg font-bold">赛程</h2>
         <div className="mt-4 grid gap-3">
           {(matches || []).map((match) => {
             const dartMode = ((match.dart_mode || "steel") === "soft" ? "soft" : "steel") as MatchDartMode;
+            const participantAName = participantById.get(match.participant_a_id || "")?.name || "TBD";
+            const participantBName = participantById.get(match.participant_b_id || "")?.name || "TBD";
+            const canScore =
+              match.status !== "completed" &&
+              match.status !== "bye" &&
+              Boolean(match.participant_a_id && match.participant_b_id) &&
+              (isAdmin || isUserInParticipant(match.participant_a_id) || isUserInParticipant(match.participant_b_id));
 
             return (
               <div key={match.id} className="grid gap-3 rounded-lg border border-wire p-4 md:grid-cols-[1fr_auto] md:items-center">
                 <div>
                   <div className="text-xs font-semibold uppercase tracking-wide text-muted">
-                    {match.stage} / R{match.round_number} M{match.match_number} / {match.status}
+                    第 {match.round_number} 轮 / 第 {match.match_number} 场 / {match.status}
                   </div>
                   <div className="mt-1 text-xs font-semibold text-board">
                     {getDartModeLabel(dartMode)} / {getGameVariantLabel({ dartMode, gameVariant: match.game_variant })}
                   </div>
                   <div className="mt-1 text-base font-bold">
-                    {participantById.get(match.participant_a_id || "")?.name || "TBD"}{" "}
-                    <span className="text-muted">vs</span>{" "}
-                    {participantById.get(match.participant_b_id || "")?.name || "TBD"}
+                    第 {match.round_number} 轮，{participantAName} 对 {participantBName}
                   </div>
                   <div className="mt-1 text-sm text-muted">
                     比分 {match.score_a}:{match.score_b}
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {dartMode === "steel" && match.status !== "completed" ? (
+                  {canScore ? (
                     <Link className="rounded-lg bg-board px-3 py-2 text-sm font-semibold text-white" href={`/scorer/${match.id}`}>
                       计分
                     </Link>
-                  ) : null}
-                  {tournamentData.manual_result_allowed &&
-                  match.status !== "completed" &&
-                  (isAdmin ||
-                    isUserInParticipant(match.participant_a_id) ||
-                    isUserInParticipant(match.participant_b_id)) ? (
-                    <ManualResultMiniForm
-                      match={match}
-                      participantById={participantById}
-                      participantMembersById={participantMembersById}
-                    />
                   ) : null}
                 </div>
               </div>
             );
           })}
-          {(matches || []).length === 0 ? <p className="text-sm text-muted">暂未生成赛程。</p> : null}
+          {(matches || []).length === 0 ? <p className="text-sm text-muted">暂无赛程。</p> : null}
         </div>
       </Card>
     </div>
@@ -355,176 +345,6 @@ function RegistrationPanel({
           </form>
         </details>
       ) : null}
-    </div>
-  );
-}
-
-function ManualResultMiniForm({
-  match,
-  participantById,
-  participantMembersById
-}: {
-  match: {
-    id: string;
-    participant_a_id: string | null;
-    participant_b_id: string | null;
-    dart_mode?: string | null;
-    game_variant?: string | null;
-    leg_rules?: MatchLegRule[] | null;
-  };
-  participantById: Map<string, ParticipantSeed>;
-  participantMembersById: Map<string, Array<{ userId: string; name: string }>>;
-}) {
-  const dartMode = ((match.dart_mode || "steel") === "soft" ? "soft" : "steel") as MatchDartMode;
-  const legRules = Array.isArray(match.leg_rules) ? match.leg_rules : [];
-
-  return (
-    <details className="rounded-lg border border-wire bg-surface px-3 py-2 text-sm">
-      <summary className="cursor-pointer font-semibold">手动录入</summary>
-      <form action={submitManualResultAction} className="mt-3 grid gap-2">
-        <input type="hidden" name="match_id" value={match.id} />
-        <input type="hidden" name="submission_id" value={createResultSubmissionId()} />
-        <select className="form-input" name="winner_participant_id" required>
-          <option value="">选择胜者</option>
-          {match.participant_a_id ? (
-            <option value={match.participant_a_id}>{participantById.get(match.participant_a_id)?.name}</option>
-          ) : null}
-          {match.participant_b_id ? (
-            <option value={match.participant_b_id}>{participantById.get(match.participant_b_id)?.name}</option>
-          ) : null}
-        </select>
-        <div className="grid grid-cols-2 gap-2">
-          <input className="form-input" type="number" name="score_a" min={0} placeholder="A" />
-          <input className="form-input" type="number" name="score_b" min={0} placeholder="B" />
-        </div>
-        {legRules.length > 0 ? (
-          <LegLineupFields
-            legRules={legRules}
-            participantAName={match.participant_a_id ? participantById.get(match.participant_a_id)?.name || "A" : "A"}
-            participantBName={match.participant_b_id ? participantById.get(match.participant_b_id)?.name || "B" : "B"}
-            participantAMembers={match.participant_a_id ? participantMembersById.get(match.participant_a_id) || [] : []}
-            participantBMembers={match.participant_b_id ? participantMembersById.get(match.participant_b_id) || [] : []}
-          />
-        ) : null}
-        <div className="grid gap-3 rounded-lg bg-field p-3">
-          <div className="text-xs font-bold text-muted">个人数据</div>
-          {match.participant_a_id ? (
-            <ManualStatsFields
-              title={`A / ${participantById.get(match.participant_a_id)?.name || "A"}`}
-              dartMode={dartMode}
-              members={participantMembersById.get(match.participant_a_id) || []}
-            />
-          ) : null}
-          {match.participant_b_id ? (
-            <ManualStatsFields
-              title={`B / ${participantById.get(match.participant_b_id)?.name || "B"}`}
-              dartMode={dartMode}
-              members={participantMembersById.get(match.participant_b_id) || []}
-            />
-          ) : null}
-        </div>
-        <Button type="submit" variant="secondary">提交待确认</Button>
-      </form>
-    </details>
-  );
-}
-
-function ManualStatsFields({
-  title,
-  dartMode,
-  members
-}: {
-  title: string;
-  dartMode: "steel" | "soft";
-  members: Array<{ userId: string; name: string }>;
-}) {
-  if (members.length === 0) return null;
-
-  return (
-    <div className="grid gap-2 rounded-lg border border-wire bg-surface p-3">
-      <div className="text-xs font-bold text-muted">{title}</div>
-      <div className="text-[11px] font-semibold text-muted">
-        {dartMode === "soft"
-          ? "软镖 01 录均分和拆分；米老鼠录 MPR、总标数、5/6/7 标、帽子戏法和白马。"
-          : "可录入三镖均分、180、100+、140+、最高拆和高拆。"}
-      </div>
-      {members.map((member) => (
-        <div key={member.userId} className="grid gap-2">
-          <div className="text-xs font-semibold text-muted">{member.name}</div>
-          <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-            <input className="form-input" type="number" step="0.01" min={0} name={`stats_${member.userId}_average_score`} placeholder={dartMode === "soft" ? "01均分" : "三镖均分"} />
-            {dartMode === "steel" ? (
-              <>
-                <input className="form-input" type="number" min={0} name={`stats_${member.userId}_count_100_plus`} placeholder="100+" />
-                <input className="form-input" type="number" min={0} name={`stats_${member.userId}_count_140_plus`} placeholder="140+" />
-                <input className="form-input" type="number" min={0} name={`stats_${member.userId}_count_180`} placeholder="180" />
-              </>
-            ) : (
-              <>
-                <input className="form-input" type="number" step="0.01" min={0} name={`stats_${member.userId}_average_mpr`} placeholder="MPR" />
-                <input className="form-input" type="number" min={0} name={`stats_${member.userId}_total_marks`} placeholder="总标数" />
-                <input className="form-input" type="number" min={0} name={`stats_${member.userId}_count_5_marks`} placeholder="5标" />
-                <input className="form-input" type="number" min={0} name={`stats_${member.userId}_count_6_marks`} placeholder="6标" />
-                <input className="form-input" type="number" min={0} name={`stats_${member.userId}_count_7_marks`} placeholder="7标" />
-                <input className="form-input" type="number" min={0} name={`stats_${member.userId}_count_ton80`} placeholder="TON80" />
-                <input className="form-input" type="number" min={0} name={`stats_${member.userId}_count_hat_trick`} placeholder="帽子戏法" />
-                <input className="form-input" type="number" min={0} name={`stats_${member.userId}_count_white_horse`} placeholder="白马" />
-              </>
-            )}
-            <input className="form-input" type="number" min={0} name={`stats_${member.userId}_highest_checkout`} placeholder="最高拆" />
-            <input className="form-input" type="number" min={0} name={`stats_${member.userId}_count_high_checkout`} placeholder="高拆次数" />
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function LegLineupFields({
-  legRules,
-  participantAName,
-  participantBName,
-  participantAMembers,
-  participantBMembers
-}: {
-  legRules: MatchLegRule[];
-  participantAName: string;
-  participantBName: string;
-  participantAMembers: Array<{ userId: string; name: string }>;
-  participantBMembers: Array<{ userId: string; name: string }>;
-}) {
-  return (
-    <div className="grid gap-2 rounded-lg bg-field p-3">
-      <div className="text-xs font-bold text-muted">每局出场</div>
-      {legRules.map((rule) => (
-        <div key={rule.legNumber} className="grid gap-2 rounded-lg border border-wire bg-surface p-2">
-          <div className="text-xs font-bold text-muted">{getLegRuleLabel(rule)}</div>
-          {rule.participantMode === "singles" ? (
-            <div className="grid gap-2 md:grid-cols-2">
-              <label className="label">
-                {participantAName}
-                <select className="form-input" name={`leg_${rule.legNumber}_participant_a_user_id`} required>
-                  <option value="">选择选手</option>
-                  {participantAMembers.map((member) => (
-                    <option key={member.userId} value={member.userId}>{member.name}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="label">
-                {participantBName}
-                <select className="form-input" name={`leg_${rule.legNumber}_participant_b_user_id`} required>
-                  <option value="">选择选手</option>
-                  {participantBMembers.map((member) => (
-                    <option key={member.userId} value={member.userId}>{member.name}</option>
-                  ))}
-                </select>
-              </label>
-            </div>
-          ) : (
-            <p className="text-xs text-muted">本局默认记录双方全部队员。</p>
-          )}
-        </div>
-      ))}
     </div>
   );
 }
