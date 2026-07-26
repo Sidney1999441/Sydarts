@@ -1,4 +1,4 @@
-import { Search } from "lucide-react";
+import { Search, UserRound } from "lucide-react";
 import { updateUserAdminFieldsAction } from "@/lib/actions/users";
 import { calculatePlayerLevel, ratingToSkillLevel, type PlayerLevelStats, type SoftPlayerLevelStats } from "@/lib/algorithms/player-level";
 import { requireAdmin } from "@/lib/auth/guards";
@@ -6,6 +6,7 @@ import { hasSupabaseEnv } from "@/lib/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { formatDateTime } from "@/lib/utils";
 import { SetupNotice } from "@/components/SetupNotice";
+import { CodlPageHeader } from "@/components/CodlPageHeader";
 import { AvatarUploader } from "@/components/ui/AvatarUploader";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -147,12 +148,14 @@ export default async function AdminUsersPage({
 
   return (
     <div className="grid gap-5">
-      <section className="rounded-lg bg-primary p-5 text-white sm:p-6">
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <div className="text-sm font-bold text-white/60">Admin</div>
-            <h1 className="mt-2 text-3xl font-black">用户管理</h1>
-          </div>
+      <CodlPageHeader
+        dark
+        kicker="CODL Admin"
+        title="用户管理"
+        description="统一维护选手资料、权限、评级和软硬镖个人数据。"
+        icon={<UserRound className="h-6 w-6" aria-hidden />}
+        poster="white"
+        actions={
           <form className="flex w-full gap-2 sm:w-auto" action="/admin/users">
             <input
               className="form-input min-w-0 bg-white text-ink sm:w-72"
@@ -165,8 +168,8 @@ export default async function AdminUsersPage({
               筛选
             </Button>
           </form>
-        </div>
-      </section>
+        }
+      />
 
       <Card>
         <div className="grid gap-3">

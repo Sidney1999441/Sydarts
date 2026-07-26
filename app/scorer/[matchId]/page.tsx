@@ -1,9 +1,11 @@
 import { notFound } from "next/navigation";
+import { Gauge } from "lucide-react";
 import { requireUser } from "@/lib/auth/guards";
 import { getLegStartingScore, getMatchRulesSummary, resolveMatchLegRules } from "@/lib/darts/variants";
 import { hasSupabaseEnv } from "@/lib/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { SetupNotice } from "@/components/SetupNotice";
+import { CodlPageHeader } from "@/components/CodlPageHeader";
 import { Card } from "@/components/ui/Card";
 import { Scoreboard } from "@/components/scorer/Scoreboard";
 import { SoftScoreboard } from "@/components/scorer/SoftScoreboard";
@@ -105,18 +107,18 @@ export default async function MatchScorerPage({
 
   return (
     <div className="grid gap-6">
-      <div>
-        <h1 className="text-2xl font-bold">
-          第 {match.round_number} 轮，{participantA.name} 对 {participantB.name}
-        </h1>
-        <p className="mt-2 text-sm text-muted">
-          {tournamentData?.name || "比赛计分"} / {getMatchRulesSummary({
+      <CodlPageHeader
+        dark
+        kicker={tournamentData?.name || "比赛计分"}
+        title={`第 ${match.round_number} 轮，${participantA.name} 对 ${participantB.name}`}
+        description={getMatchRulesSummary({
             dartMode: matchDartMode,
             gameVariant: match.game_variant,
             legRules
           })}
-        </p>
-      </div>
+        icon={<Gauge className="h-6 w-6" aria-hidden />}
+        poster="white"
+      />
       {match.status === "completed" ? (
         <Card>
           <p className="text-sm font-semibold text-muted">

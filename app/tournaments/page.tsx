@@ -1,4 +1,6 @@
+import { CalendarDays } from "lucide-react";
 import { SetupNotice } from "@/components/SetupNotice";
+import { CodlPageHeader } from "@/components/CodlPageHeader";
 import { TournamentCard } from "@/components/TournamentCard";
 import { Card } from "@/components/ui/Card";
 import { hasSupabaseEnv } from "@/lib/env";
@@ -21,10 +23,13 @@ export default async function TournamentsPage() {
 
   return (
     <div className="grid gap-6">
-      <div>
-        <h1 className="text-2xl font-bold">赛事列表</h1>
-        <p className="mt-2 text-sm text-muted">支持硬镖、软镖和软硬交替赛事；软镖当前通过手动录入结算。</p>
-      </div>
+      <CodlPageHeader
+        kicker="CODL Tournaments"
+        title="赛事列表"
+        description="支持硬镖、软镖和软硬交替赛事；软镖使用手机手动录入，个人数据随正式比赛自动沉淀。"
+        icon={<CalendarDays className="h-6 w-6" aria-hidden />}
+        poster="white"
+      />
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {(tournaments || []).map((tournament) => (
           <TournamentCard key={tournament.id} tournament={tournament as Tournament} />

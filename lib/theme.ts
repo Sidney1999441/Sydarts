@@ -16,16 +16,16 @@ export type SiteThemeSettings = {
 };
 
 export const defaultSiteTheme: SiteThemeSettings = {
-  platformName: "SYDARTS",
-  logoUrl: null,
-  primaryColor: "#0b1220",
-  boardColor: "#2563eb",
-  accentColor: "#f97316",
-  backgroundColor: "#f7f9fc",
+  platformName: "CODL",
+  logoUrl: "/codl/codl-logo-lockup.jpg",
+  primaryColor: "#202020",
+  boardColor: "#0879b8",
+  accentColor: "#0879b8",
+  backgroundColor: "#f5faff",
   surfaceColor: "#ffffff",
-  textColor: "#0b1220",
-  mutedTextColor: "#64748b",
-  borderColor: "#d8e0ec"
+  textColor: "#202020",
+  mutedTextColor: "#5d6a78",
+  borderColor: "#d8e8f3"
 };
 
 type ThemeRow = {

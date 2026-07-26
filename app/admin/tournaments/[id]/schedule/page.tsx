@@ -1,9 +1,11 @@
+import { CalendarRange } from "lucide-react";
 import { generateGroupsAndScheduleAction } from "@/lib/actions/tournaments";
 import { requireAdmin } from "@/lib/auth/guards";
 import { getMatchRulesSummary } from "@/lib/darts/variants";
 import { hasSupabaseEnv } from "@/lib/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { SetupNotice } from "@/components/SetupNotice";
+import { CodlPageHeader } from "@/components/CodlPageHeader";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 
@@ -30,12 +32,13 @@ export default async function ScheduleAdminPage({
 
   return (
     <div className="grid gap-6">
-      <div>
-        <h1 className="text-2xl font-bold">分组与赛程</h1>
-        <p className="mt-2 text-sm text-muted">
-          {tournament?.name} / {tournament?.format} / 当前参赛主体 {(participants || []).length}
-        </p>
-      </div>
+      <CodlPageHeader
+        kicker="CODL Admin"
+        title="分组与赛程"
+        description={`${tournament?.name} / ${tournament?.format} / 当前参赛主体 ${(participants || []).length}`}
+        icon={<CalendarRange className="h-6 w-6" aria-hidden />}
+        poster="white"
+      />
       <Card>
         <form action={generateGroupsAndScheduleAction} className="flex flex-wrap items-end gap-3">
           <input type="hidden" name="tournament_id" value={id} />

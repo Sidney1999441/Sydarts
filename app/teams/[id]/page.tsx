@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { UsersRound } from "lucide-react";
 import { requireUser } from "@/lib/auth/guards";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { formatDateTime } from "@/lib/utils";
+import { CodlPageHeader } from "@/components/CodlPageHeader";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 
@@ -87,7 +89,19 @@ export default async function SavedTeamDetailPage({
 
   return (
     <div className="grid gap-5">
-      <section className="rounded-lg border border-wire bg-surface p-5 shadow-soft">
+      <CodlPageHeader
+        kicker="Saved Team"
+        title={savedTeam.name}
+        description={`长期队伍 · 状态 ${savedTeam.status}`}
+        icon={<UsersRound className="h-6 w-6" aria-hidden />}
+        poster="white"
+        actions={
+          <Link className="inline-flex min-h-11 items-center rounded-lg bg-board px-4 text-sm font-black text-white" href="/profile">
+            返回个人中心
+          </Link>
+        }
+      />
+      <Card>
         <Link className="text-sm font-semibold text-board underline" href="/profile">
           返回个人中心
         </Link>
@@ -105,7 +119,7 @@ export default async function SavedTeamDetailPage({
           )}
           <div>
             <div className="text-sm font-bold text-board">长期队伍</div>
-            <h1 className="text-3xl font-black">{savedTeam.name}</h1>
+            <h2 className="text-3xl font-black">{savedTeam.name}</h2>
             <p className="mt-1 text-sm text-muted">状态 {savedTeam.status}</p>
           </div>
         </div>
@@ -114,7 +128,7 @@ export default async function SavedTeamDetailPage({
           <Metric label="胜场" value={wins} />
           <Metric label="负场" value={losses} />
         </dl>
-      </section>
+      </Card>
 
       <Card>
         <h2 className="text-lg font-bold">历史参赛</h2>

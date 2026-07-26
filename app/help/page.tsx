@@ -19,8 +19,9 @@ import {
   UserRound,
   UsersRound
 } from "lucide-react";
+import { CodlPageHeader } from "@/components/CodlPageHeader";
 import { Card } from "@/components/ui/Card";
-import { getSiteThemeSettings } from "@/lib/theme";
+import { defaultSiteTheme } from "@/lib/theme";
 
 export const dynamic = "force-dynamic";
 
@@ -228,10 +229,10 @@ const featureGroups: Array<{ title: string; icon: IconType; items: string[]; che
     checks: ["双人/队制里的单人局必须选择上场选手。", "比分与胜方必须一致。", "争议结果不应直接进入最终统计。"]
   },
   {
-    title: "主题、LOGO 与触摸体验",
+    title: "CODL 视觉与触摸体验",
     icon: Palette,
     items: [
-      "后台主题可改平台名称、LOGO 和全站配色。",
+      "全站已固定为 CODL 黑白蓝视觉，后台主题保留为维护入口。",
       "默认视觉为黑、蓝、橙极简风格。",
       "移动端底部导航覆盖赛事、计分、个人、说明和后台。"
     ],
@@ -303,7 +304,7 @@ const releaseChecks = [
     title: "P0 阻断项",
     items: [
       "首页、登录、注册、赛事列表、计分器、个人中心、帮助页必须可访问。",
-      "管理员登录后能进入后台、赛事、用户、队伍、主题页面。",
+      "管理员登录后能进入后台、赛事、用户、队伍和主题维护页面。",
       "创建赛事、生成赛程、硬式计分、手动录入、个人统计不能出现阻断错误。",
       "数据库迁移必须已应用，关键表和字段存在。"
     ]
@@ -382,8 +383,8 @@ const qa = [
     a: "涉及保存、上传、生成赛程等服务端操作时会等待数据库响应。普通导航和计分按钮已尽量做触摸优化，若持续卡顿应检查网络和开发服务日志。"
   },
   {
-    q: "管理员可以在哪里改平台名称和 LOGO？",
-    a: "进入后台的主题页面，可以修改平台名称、LOGO 地址和黑蓝橙等主题色。保存后会应用到全站导航和页面样式。"
+    q: "CODL 视觉还能在哪里维护？",
+    a: "后台主题页面保留为维护入口；当前程序已固定采用 CODL 黑白蓝专属风格。"
   },
   {
     q: "上线前最重要的人工测试是什么？",
@@ -392,30 +393,26 @@ const qa = [
 ];
 
 export default async function HelpPage() {
-  const theme = await getSiteThemeSettings();
+  const platformName = defaultSiteTheme.platformName;
 
   return (
     <div className="grid gap-5 pb-20 lg:pb-0">
-      <section className="rounded-lg bg-primary p-5 text-white sm:p-6">
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <div className="inline-flex items-center gap-2 text-sm font-bold text-white/65">
-              <BookOpen className="h-4 w-4 text-accent" aria-hidden />
-              Help Center
-            </div>
-            <h1 className="mt-3 text-3xl font-black md:text-5xl">{theme.platformName} 全功能说明</h1>
-            <p className="mt-3 max-w-4xl text-sm font-semibold leading-6 text-white/72">
-              这是一份面向真实赛事现场的操作手册。它覆盖选手、队长、计分员和管理员的完整路径，也列出上线前必须复核的功能点。
-            </p>
-          </div>
+      <CodlPageHeader
+        dark
+        kicker="Help Center"
+        title={`${platformName} 全功能说明`}
+        description="这是一份面向真实赛事现场的操作手册。它覆盖选手、队长、计分员和管理员的完整路径，也列出上线前必须复核的功能点。"
+        icon={<BookOpen className="h-6 w-6" aria-hidden />}
+        poster="pattern"
+        actions={
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             <Shortcut href="#quick" label="快速开始" />
             <Shortcut href="#workflows" label="流程 SOP" />
             <Shortcut href="#checks" label="上线检查" />
             <Shortcut href="#qa" label="QA" />
           </div>
-        </div>
-      </section>
+        }
+      />
 
       <section id="quick" className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {quickStart.map((item, index) => (

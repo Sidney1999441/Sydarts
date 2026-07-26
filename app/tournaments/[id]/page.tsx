@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Trophy } from "lucide-react";
 import {
   cancelRegistrationAction,
   registerForTournamentAction,
@@ -11,6 +12,7 @@ import { getDartModeLabel, getGameVariantLabel, getMatchRulesSummary } from "@/l
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { formatDateTime } from "@/lib/utils";
 import { SetupNotice } from "@/components/SetupNotice";
+import { CodlPageHeader } from "@/components/CodlPageHeader";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import type { MatchDartMode, MatchSummary, ParticipantSeed, Tournament } from "@/types/domain";
@@ -144,22 +146,23 @@ export default async function TournamentDetailPage({
 
   return (
     <div className="grid gap-6">
-      <section className="rounded-lg border border-wire bg-surface p-6 shadow-soft">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <div className="text-sm font-semibold text-board">{tournamentData.status}</div>
-            <h1 className="mt-1 text-3xl font-bold">{tournamentData.name}</h1>
-            <p className="mt-3 max-w-3xl text-sm leading-6 text-muted">
-              {tournamentData.description || "暂无赛事说明"}
-            </p>
-          </div>
+      <CodlPageHeader
+        kicker={tournamentData.status}
+        title={tournamentData.name}
+        description={tournamentData.description || "暂无赛事说明"}
+        icon={<Trophy className="h-6 w-6" aria-hidden />}
+        poster="pattern"
+        actions={
           <RegistrationPanel
             tournament={tournamentData}
             registration={registration}
             savedTeams={savedTeams || []}
           />
-        </div>
-        <dl className="mt-6 grid gap-3 text-sm md:grid-cols-4">
+        }
+      />
+
+      <Card>
+        <dl className="grid gap-3 text-sm md:grid-cols-4">
           <Info label="地点" value={tournamentData.location || "待定"} />
           <Info label="比赛开始" value={formatDateTime(tournamentData.tournament_start_at)} />
           <Info label="赛制" value={tournamentData.format === "round_robin" ? "小组循环" : "淘汰赛"} />
@@ -171,7 +174,7 @@ export default async function TournamentDetailPage({
           <Info label="报名开始" value={formatDateTime(tournamentData.registration_start_at)} />
           <Info label="报名截止" value={formatDateTime(tournamentData.registration_end_at)} />
         </dl>
-      </section>
+      </Card>
 
       <section className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
         <Card>
@@ -251,9 +254,9 @@ export default async function TournamentDetailPage({
               (isAdmin || isUserInParticipant(match.participant_a_id) || isUserInParticipant(match.participant_b_id));
 
             return (
-              <div key={match.id} className="grid gap-3 rounded-lg border border-wire p-4 md:grid-cols-[1fr_auto] md:items-center">
+              <div key={match.id} className="grid gap-3 rounded-lg border border-wire bg-surface/90 p-4 md:grid-cols-[1fr_auto] md:items-center">
                 <div>
-                  <div className="text-xs font-semibold uppercase tracking-wide text-muted">
+                  <div className="text-xs font-black uppercase text-muted">
                     第 {match.round_number} 轮 / 第 {match.match_number} 场 / {match.status}
                   </div>
                   <div className="mt-1 text-xs font-semibold text-board">
@@ -272,7 +275,7 @@ export default async function TournamentDetailPage({
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {canScore ? (
-                    <Link className="rounded-lg bg-board px-3 py-2 text-sm font-semibold text-white" href={`/scorer/${match.id}`}>
+                    <Link className="rounded-lg bg-board px-3 py-2 text-sm font-black text-white" href={`/scorer/${match.id}`}>
                       计分
                     </Link>
                   ) : null}
@@ -289,9 +292,9 @@ export default async function TournamentDetailPage({
 
 function Info({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg bg-field p-3">
-      <dt className="text-xs font-semibold text-muted">{label}</dt>
-      <dd className="mt-1 font-semibold">{value}</dd>
+    <div className="rounded-lg border border-wire bg-field/80 p-3">
+      <dt className="text-xs font-black text-muted">{label}</dt>
+      <dd className="mt-1 font-black">{value}</dd>
     </div>
   );
 }
@@ -316,7 +319,7 @@ function RegistrationPanel({
   }
 
   if (tournament.status !== "registration_open") {
-    return <div className="rounded-lg bg-field px-4 py-3 text-sm font-semibold">当前不可报名</div>;
+    return <div className="rounded-lg border border-wire bg-surface/95 px-4 py-3 text-sm font-black">当前不可报名</div>;
   }
 
   return (

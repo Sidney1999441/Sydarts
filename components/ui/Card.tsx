@@ -9,7 +9,7 @@ export function Card({
   className?: string;
 }) {
   return (
-    <section className={cn("rounded-lg border border-wire bg-surface p-4 shadow-none sm:p-5", className)}>
+    <section className={cn("rounded-lg border border-wire bg-surface/95 p-4 shadow-[0_18px_45px_rgb(17_24_39/0.06)] sm:p-5", className)}>
       {children}
     </section>
   );
@@ -25,8 +25,8 @@ export function StatCard({
   hint?: string;
 }) {
   return (
-    <div className="rounded-lg border border-wire bg-surface p-4">
-      <div className="text-xs font-bold uppercase tracking-wide text-muted">{label}</div>
+    <div className="rounded-lg border border-wire bg-surface/95 p-4 shadow-[0_14px_34px_rgb(17_24_39/0.05)]">
+      <div className="text-xs font-black uppercase text-muted">{label}</div>
       <div className="mt-2 text-3xl font-black text-ink">{value}</div>
       {hint ? <div className="mt-1 text-xs text-muted">{hint}</div> : null}
     </div>

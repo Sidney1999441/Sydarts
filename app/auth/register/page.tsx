@@ -1,5 +1,7 @@
 import Link from "next/link";
+import { UserPlus } from "lucide-react";
 import { signUpAction } from "@/app/auth/actions";
+import { CodlPageHeader } from "@/components/CodlPageHeader";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 
@@ -11,10 +13,15 @@ export default async function RegisterPage({
   const params = await searchParams;
 
   return (
-    <div className="mx-auto max-w-md">
+    <div className="mx-auto grid max-w-md gap-4">
+      <CodlPageHeader
+        kicker="CODL Account"
+        title="注册"
+        description="创建选手账号后即可报名、计分和查看个人段位。"
+        icon={<UserPlus className="h-6 w-6" aria-hidden />}
+        poster="white"
+      />
       <Card>
-        <h1 className="text-2xl font-bold">注册</h1>
-        <p className="mt-2 text-sm text-muted">创建选手账号后即可报名、计分和查看个人段位。</p>
         {params.message ? (
           <p className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">{params.message}</p>
         ) : null}

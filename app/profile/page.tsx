@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { UserRound } from "lucide-react";
 import { confirmCasualMatchAction, confirmManualResultAction } from "@/lib/actions/matches";
 import { updateSavedTeamProfileAction } from "@/lib/actions/teams";
 import { calculatePlayerLevel, type PlayerLevelStats, type SoftPlayerLevelStats } from "@/lib/algorithms/player-level";
@@ -9,6 +10,7 @@ import { hasSupabaseEnv } from "@/lib/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { cn, formatDateTime } from "@/lib/utils";
 import { SetupNotice } from "@/components/SetupNotice";
+import { CodlPageHeader } from "@/components/CodlPageHeader";
 import { AvatarUploader } from "@/components/ui/AvatarUploader";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -535,25 +537,25 @@ export default async function ProfilePage() {
 
   return (
     <div className="grid gap-5 sm:gap-6">
-      <div className="flex flex-wrap items-center gap-4 rounded-lg border border-wire bg-surface p-4 shadow-soft">
-        <AvatarUploader
-          entityType="profile"
-          entityId={user.id}
-          initialUrl={profile?.avatar_url}
-          fallback={profile?.display_name || user.email || "U"}
-          label="更换头像"
-          size="lg"
-        />
-        <div className="min-w-0">
-          <div className="mb-3 inline-flex min-h-10 items-center rounded-lg border border-wire bg-field px-3 text-sm font-bold text-board">
-            UID {profile?.uid || "------"}
+      <CodlPageHeader
+        kicker={`UID ${profile?.uid || "------"}`}
+        title="个人中心"
+        description={`${profile?.display_name || user.email} · 普通 ${generalLevel.label} · 赛事 ${tournamentLevel.label}`}
+        icon={<UserRound className="h-6 w-6" aria-hidden />}
+        poster="white"
+        actions={
+          <div className="rounded-lg border border-wire bg-surface/95 p-3">
+            <AvatarUploader
+              entityType="profile"
+              entityId={user.id}
+              initialUrl={profile?.avatar_url}
+              fallback={profile?.display_name || user.email || "U"}
+              label="更换头像"
+              size="lg"
+            />
           </div>
-          <h1 className="text-2xl font-bold">个人中心</h1>
-          <p className="mt-2 text-sm text-muted">
-            {profile?.display_name || user.email} · 普通 {generalLevel.label} · 赛事 {tournamentLevel.label}
-          </p>
-        </div>
-      </div>
+        }
+      />
 
       <CombinedStatsPanel
         generalStats={generalStats}

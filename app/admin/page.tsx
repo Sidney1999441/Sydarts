@@ -4,6 +4,7 @@ import { requireAdmin } from "@/lib/auth/guards";
 import { hasSupabaseEnv } from "@/lib/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { SetupNotice } from "@/components/SetupNotice";
+import { CodlPageHeader } from "@/components/CodlPageHeader";
 
 export const dynamic = "force-dynamic";
 
@@ -24,15 +25,14 @@ export default async function AdminHomePage() {
 
   return (
     <div className="grid gap-5">
-      <section className="rounded-lg bg-primary p-5 text-white sm:p-6">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <div className="inline-flex items-center gap-2 text-sm font-bold text-white/70">
-              <ShieldCheck className="h-4 w-4 text-accent" aria-hidden />
-              Admin
-            </div>
-            <h1 className="mt-3 text-3xl font-black tracking-normal">赛事后台</h1>
-          </div>
+      <CodlPageHeader
+        dark
+        kicker="CODL Admin"
+        title="赛事后台"
+        description="管理赛事、用户、队伍、赛程和现场计分入口。"
+        icon={<ShieldCheck className="h-6 w-6" aria-hidden />}
+        poster="pattern"
+        actions={
           <Link
             className="inline-flex min-h-12 touch-manipulation items-center gap-2 rounded-lg bg-board px-4 text-sm font-bold text-white"
             href="/admin/tournaments/new"
@@ -40,8 +40,8 @@ export default async function AdminHomePage() {
             创建赛事
             <ChevronRight className="h-4 w-4" aria-hidden />
           </Link>
-        </div>
-      </section>
+        }
+      />
 
       <section className="grid grid-cols-3 gap-3">
         <Metric label="赛事" value={tournamentCount || 0} />
@@ -63,8 +63,8 @@ export default async function AdminHomePage() {
 
 function Metric({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-lg border border-wire bg-surface p-4">
-      <div className="text-xs font-bold text-muted">{label}</div>
+    <div className="rounded-lg border border-wire bg-surface/95 p-4 shadow-[0_14px_34px_rgb(17_24_39/0.05)]">
+      <div className="text-xs font-black uppercase text-muted">{label}</div>
       <div className="mt-1 text-3xl font-black">{value}</div>
     </div>
   );
@@ -82,10 +82,10 @@ function AdminAction({
   return (
     <Link
       href={href}
-      className="group flex min-h-32 touch-manipulation items-center justify-between rounded-lg border border-wire bg-surface p-5 transition-colors duration-75 active:bg-field sm:min-h-36"
+      className="group flex min-h-32 touch-manipulation items-center justify-between rounded-lg border border-wire bg-surface/95 p-5 shadow-[0_14px_34px_rgb(17_24_39/0.05)] transition-colors duration-75 hover:border-board/40 active:bg-field sm:min-h-36"
     >
       <div>
-        <div className="grid h-12 w-12 place-items-center rounded-lg bg-field text-board group-hover:bg-board group-hover:text-white">
+        <div className="grid h-12 w-12 place-items-center rounded-lg bg-board/10 text-board group-hover:bg-board group-hover:text-white">
           {icon}
         </div>
         <h2 className="mt-4 text-xl font-black">{title}</h2>

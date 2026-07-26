@@ -29,19 +29,20 @@ export function TournamentCard({ tournament }: { tournament: Tournament }) {
   return (
     <Link
       href={`/tournaments/${tournament.id}`}
-      className="grid min-h-44 touch-manipulation gap-4 rounded-lg border border-wire bg-surface p-4 transition-colors duration-75 hover:border-board/45 active:bg-field"
+      className="group relative grid min-h-44 touch-manipulation gap-4 overflow-hidden rounded-lg border border-wire bg-surface/95 p-4 shadow-[0_14px_34px_rgb(17_24_39/0.05)] transition-colors duration-75 hover:border-board/40 active:bg-field"
     >
+      <span className="absolute right-[-2.25rem] top-[-2.25rem] h-24 w-24 rounded-full border-[18px] border-board/10" aria-hidden />
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h3 className="text-lg font-black text-ink">{tournament.name}</h3>
+          <h3 className="text-lg font-black text-ink group-hover:text-board">{tournament.name}</h3>
           <p className="mt-1 line-clamp-1 text-sm text-muted">{tournament.location || "地点待定"}</p>
         </div>
-        <span className="shrink-0 rounded-md bg-field px-2.5 py-1 text-xs font-bold text-muted">
+        <span className="shrink-0 rounded-md bg-primary px-2.5 py-1 text-xs font-black text-white">
           {statusLabels[tournament.status] || tournament.status}
         </span>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 text-xs font-bold text-muted">
+      <div className="grid grid-cols-2 gap-2 text-xs font-black text-muted">
         <Meta icon={<UsersRound className="h-4 w-4" />} text={`${typeLabels[tournament.tournament_type]} / ${tournament.team_size}人`} />
         <Meta icon={<Target className="h-4 w-4" />} text={`${getDartModeLabel(tournament.dart_mode)} / ${gameLabel}`} />
         <Meta icon={<CalendarDays className="h-4 w-4" />} text={formatDateTime(tournament.tournament_start_at)} />

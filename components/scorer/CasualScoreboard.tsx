@@ -82,10 +82,17 @@ export function CasualScoreboard({ playerName }: { playerName: string }) {
   if (step === "scoring") {
     return (
       <div className="grid gap-2">
-        <section className="rounded-lg border border-wire bg-surface px-3 py-2 shadow-soft">
-          <div className="flex items-center justify-between gap-3">
+        <section className="relative overflow-hidden rounded-lg border border-wire bg-surface/95 px-3 py-2 shadow-[0_14px_34px_rgb(17_24_39/0.06)]">
+          <img
+            src="/codl/codl-white-poster.jpg"
+            alt=""
+            aria-hidden
+            className="absolute inset-0 h-full w-full object-cover opacity-10"
+            style={{ objectPosition: "68% 32%" }}
+          />
+          <div className="relative flex items-center justify-between gap-3">
             <div className="min-w-0">
-              <div className="text-xs font-semibold text-muted">平时切磋</div>
+              <div className="text-xs font-black uppercase text-board">平时切磋</div>
               <h1 className="truncate text-base font-black">
                 {playerName} vs {opponentDisplayName}
               </h1>
@@ -117,21 +124,30 @@ export function CasualScoreboard({ playerName }: { playerName: string }) {
 
   return (
     <div className="grid gap-5">
-      <section className="rounded-lg border border-wire bg-surface p-5 shadow-soft">
-        <Link className="text-sm font-semibold text-board underline" href="/scorer">
-          返回计分器
-        </Link>
-        <div className="mt-4 flex items-center gap-2 text-sm font-semibold text-board">
-          <UsersRound className="h-5 w-5" aria-hidden />
-          创建切磋对战
+      <section className="relative overflow-hidden rounded-lg border border-wire bg-surface/95 p-5 shadow-[0_18px_45px_rgb(17_24_39/0.06)]">
+        <img
+          src="/codl/codl-pattern-poster.jpg"
+          alt=""
+          aria-hidden
+          className="absolute inset-0 h-full w-full object-cover opacity-10"
+          style={{ objectPosition: "62% 36%" }}
+        />
+        <div className="relative">
+          <Link className="text-sm font-semibold text-board underline" href="/scorer">
+            返回计分器
+          </Link>
+          <div className="mt-4 flex items-center gap-2 text-sm font-black text-board">
+            <UsersRound className="h-5 w-5" aria-hidden />
+            创建切磋对战
+          </div>
+          <h1 className="mt-3 text-2xl font-black text-primary">先选择双方和规则</h1>
+          <p className="mt-2 text-sm font-bold leading-6 text-muted">
+            对手只想临时打一局时，用“只记录我”；对手也想累计普通数据时，用“同步双方”，搜索并选择对手账号后再开始。
+          </p>
         </div>
-        <h1 className="mt-3 text-2xl font-bold">先选择双方和规则</h1>
-        <p className="mt-2 text-sm leading-6 text-muted">
-          对手只想临时打一局时，用“只记录我”；对手也想累计普通数据时，用“同步双方”，搜索并选择对手账号后再开始。
-        </p>
       </section>
 
-      <section className="rounded-lg border border-wire bg-surface p-5 shadow-soft">
+      <section className="rounded-lg border border-wire bg-surface/95 p-5 shadow-[0_14px_34px_rgb(17_24_39/0.05)]">
         <h2 className="text-lg font-bold">对阵双方</h2>
         <div className="mt-4 grid gap-3 md:grid-cols-2">
           <div className="rounded-lg border border-wire bg-field p-4">

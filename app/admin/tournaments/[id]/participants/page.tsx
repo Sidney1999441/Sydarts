@@ -8,10 +8,12 @@ import {
   updateRegistrationStatusAction,
   updateTournamentTeamAction
 } from "@/lib/actions/tournaments";
+import { UsersRound } from "lucide-react";
 import { requireAdmin } from "@/lib/auth/guards";
 import { hasSupabaseEnv } from "@/lib/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { SetupNotice } from "@/components/SetupNotice";
+import { CodlPageHeader } from "@/components/CodlPageHeader";
 import { AvatarUploader } from "@/components/ui/AvatarUploader";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -75,12 +77,13 @@ export default async function ParticipantsAdminPage({
 
   return (
     <div className="grid gap-6">
-      <div>
-        <h1 className="text-2xl font-bold">参赛选手管理</h1>
-        <p className="mt-2 text-sm text-muted">
-          {tournament?.name} · {tournament?.tournament_type} · 每队 {tournament?.team_size} 人
-        </p>
-      </div>
+      <CodlPageHeader
+        kicker="CODL Admin"
+        title="参赛选手管理"
+        description={`${tournament?.name} · ${tournament?.tournament_type} · 每队 ${tournament?.team_size} 人`}
+        icon={<UsersRound className="h-6 w-6" aria-hidden />}
+        poster="pattern"
+      />
 
       <section className="grid gap-4 lg:grid-cols-[1fr_0.8fr]">
         <Card>

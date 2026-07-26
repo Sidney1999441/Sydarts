@@ -5,6 +5,7 @@ import { getMatchRulesSummary } from "@/lib/darts/variants";
 import { hasSupabaseEnv } from "@/lib/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { SetupNotice } from "@/components/SetupNotice";
+import { CodlPageHeader } from "@/components/CodlPageHeader";
 import { Card } from "@/components/ui/Card";
 
 export const dynamic = "force-dynamic";
@@ -59,24 +60,21 @@ export default async function ScorerPage() {
 
   return (
     <div className="grid gap-5">
-      <section className="rounded-lg bg-primary p-5 text-white sm:p-6">
-        <div className="flex items-center gap-3">
-          <div className="grid h-12 w-12 place-items-center rounded-lg bg-accent">
-            <Gauge className="h-6 w-6" aria-hidden />
-          </div>
-          <div>
-            <div className="text-sm font-bold text-white/60">Scorer</div>
-            <h1 className="text-3xl font-black">计分</h1>
-          </div>
-        </div>
-      </section>
+      <CodlPageHeader
+        dark
+        kicker="Match Scorer"
+        title="计分"
+        description="选择当前比赛后录入出场顺序，系统按本局赛制只显示需要填写的数据项。"
+        icon={<Gauge className="h-6 w-6" aria-hidden />}
+        poster="white"
+      />
 
       <Link
-        className="flex min-h-24 touch-manipulation items-center justify-between rounded-lg border border-wire bg-surface p-4 transition-colors duration-75 active:bg-field"
+        className="flex min-h-24 touch-manipulation items-center justify-between rounded-lg border border-wire bg-surface/95 p-4 shadow-[0_16px_38px_rgb(17_24_39/0.06)] transition-colors duration-75 hover:border-board/40 active:bg-field"
         href="/scorer/casual"
       >
         <span className="flex items-center gap-3">
-          <span className="grid h-12 w-12 place-items-center rounded-lg bg-field text-board">
+          <span className="grid h-12 w-12 place-items-center rounded-lg bg-board/10 text-board">
             <Crosshair className="h-6 w-6" aria-hidden />
           </span>
           <span>
@@ -88,7 +86,10 @@ export default async function ScorerPage() {
       </Link>
 
       <Card>
-        <h2 className="text-lg font-black">正式比赛</h2>
+        <h2 className="flex items-center gap-2 text-lg font-black">
+          <span className="h-3 w-3 rounded-full bg-board" aria-hidden />
+          正式比赛
+        </h2>
         <div className="mt-4 grid gap-3">
           {(matches || []).map((match) => {
             const participantAName = participantById.get(match.participant_a_id || "")?.display_name || "TBD";
@@ -98,9 +99,9 @@ export default async function ScorerPage() {
               <Link
                 key={match.id}
                 href={`/scorer/${match.id}`}
-                className="block min-h-20 touch-manipulation rounded-lg border border-wire p-4 transition-colors duration-75 hover:bg-field active:bg-field"
+                className="block min-h-20 touch-manipulation rounded-lg border border-wire bg-surface/90 p-4 transition-colors duration-75 hover:border-board/40 hover:bg-field active:bg-field"
               >
-                <div className="text-xs font-bold text-muted">
+                <div className="text-xs font-black uppercase text-muted">
                   第 {match.round_number} 轮 / 第 {match.match_number} 场 / {match.status}
                 </div>
                 <div className="mt-1 font-black">

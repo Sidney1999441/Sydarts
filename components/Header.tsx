@@ -7,7 +7,6 @@ import {
   LogIn,
   LogOut,
   Shield,
-  Target,
   UserPlus,
   UserRound
 } from "lucide-react";
@@ -44,22 +43,19 @@ export function Header({
 
   return (
     <>
-      <header className="sticky top-0 z-40 border-b border-white/10 bg-primary text-white shadow-[0_10px_30px_rgb(0_0_0/0.12)]">
+      <header className="sticky top-0 z-40 border-b border-white/10 bg-primary text-white shadow-[0_14px_34px_rgb(0_0_0/0.16)]">
         <div className="mx-auto flex min-h-16 w-full max-w-7xl items-center gap-3 px-4 sm:px-6 lg:px-8">
           <BackButton />
           <Link className="flex min-h-12 shrink-0 touch-manipulation items-center gap-3 rounded-lg pr-2" href="/">
-            {theme.logoUrl ? (
-              <img
-                src={theme.logoUrl}
-                alt={`${theme.platformName} logo`}
-                className="h-9 w-9 rounded-md bg-white object-contain"
-              />
-            ) : (
-              <span className="grid h-9 w-9 place-items-center rounded-md bg-accent text-white">
-                <Target className="h-5 w-5" aria-hidden />
+            <span className="grid h-10 w-10 place-items-center rounded-lg bg-white text-primary">
+              <span className="h-4 w-4 rounded-full bg-board" aria-hidden />
+            </span>
+            <span className="leading-none">
+              <span className="codl-brand-type block text-xl">{theme.platformName}</span>
+              <span className="hidden text-[10px] font-black uppercase text-white/60 sm:block">
+                Caliburn Office Darts League 2026
               </span>
-            )}
-            <span className="text-lg font-black tracking-[0.16em]">{theme.platformName}</span>
+            </span>
           </Link>
 
           <nav className="hidden flex-1 items-center justify-center gap-1 lg:flex">
@@ -83,11 +79,11 @@ export function Header({
               </>
             ) : (
               <>
-                <Link className="hidden min-h-12 touch-manipulation items-center gap-2 rounded-lg px-4 text-sm font-bold text-white/80 hover:bg-white/10 md:inline-flex" href="/auth/login">
+                <Link className="hidden min-h-12 touch-manipulation items-center gap-2 rounded-lg px-4 text-sm font-black text-white/80 hover:bg-white/10 md:inline-flex" href="/auth/login">
                   <LogIn className="h-4 w-4" aria-hidden />
                   登录
                 </Link>
-                <Link className="inline-flex min-h-12 touch-manipulation items-center gap-2 rounded-lg bg-board px-4 text-sm font-bold text-white hover:brightness-95" href="/auth/register">
+                <Link className="inline-flex min-h-12 touch-manipulation items-center gap-2 rounded-lg bg-board px-4 text-sm font-black text-white hover:brightness-95" href="/auth/register">
                   <UserPlus className="h-4 w-4" aria-hidden />
                   注册
                 </Link>
@@ -120,7 +116,7 @@ function TopNavLink({
 }) {
   return (
     <Link
-      className="inline-flex min-h-12 touch-manipulation items-center gap-2 rounded-lg px-4 text-sm font-bold text-white/75 transition-colors duration-75 hover:bg-white/10 hover:text-white active:bg-white/10"
+      className="inline-flex min-h-12 touch-manipulation items-center gap-2 rounded-lg px-4 text-sm font-black text-white/75 transition-colors duration-75 hover:bg-white/10 hover:text-white active:bg-white/10"
       href={href}
     >
       <Icon className="h-4 w-4" aria-hidden />
@@ -140,7 +136,7 @@ function DockLink({
 }) {
   return (
     <Link
-      className="grid min-h-14 touch-manipulation place-items-center rounded-md px-1 py-1 text-[11px] font-bold text-muted transition-colors duration-75 active:bg-field"
+      className="grid min-h-14 touch-manipulation place-items-center rounded-md px-1 py-1 text-[11px] font-black text-muted transition-colors duration-75 active:bg-field"
       href={href}
     >
       <Icon className="h-5 w-5 text-board" aria-hidden />

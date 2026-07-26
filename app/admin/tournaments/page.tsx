@@ -7,6 +7,7 @@ import { hasSupabaseEnv } from "@/lib/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { formatDateTime } from "@/lib/utils";
 import { SetupNotice } from "@/components/SetupNotice";
+import { CodlPageHeader } from "@/components/CodlPageHeader";
 import { Button } from "@/components/ui/Button";
 import type { TournamentStatus } from "@/types/domain";
 
@@ -31,13 +32,19 @@ export default async function AdminTournamentsPage() {
 
   return (
     <div className="grid gap-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-black">赛事</h1>
-        <Link className="inline-flex min-h-12 touch-manipulation items-center gap-2 rounded-lg bg-board px-4 text-sm font-bold text-white" href="/admin/tournaments/new">
+      <CodlPageHeader
+        kicker="CODL Admin"
+        title="赛事"
+        description="创建、发布、编排和维护 CODL 赛事。"
+        icon={<CalendarDays className="h-6 w-6" aria-hidden />}
+        poster="pattern"
+        actions={
+          <Link className="inline-flex min-h-12 touch-manipulation items-center gap-2 rounded-lg bg-board px-4 text-sm font-black text-white" href="/admin/tournaments/new">
           <Plus className="h-4 w-4" aria-hidden />
           创建
         </Link>
-      </div>
+        }
+      />
 
       <div className="grid gap-3">
         {(tournaments || []).map((tournament) => {
@@ -49,7 +56,7 @@ export default async function AdminTournamentsPage() {
                 : "软硬轮换";
 
           return (
-            <section key={tournament.id} className="rounded-lg border border-wire bg-surface p-4">
+            <section key={tournament.id} className="rounded-lg border border-wire bg-surface/95 p-4 shadow-[0_14px_34px_rgb(17_24_39/0.05)]">
               <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-center">
                 <div>
                   <div className="flex flex-wrap items-center gap-2">

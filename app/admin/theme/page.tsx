@@ -4,6 +4,7 @@ import { requireAdmin } from "@/lib/auth/guards";
 import { hasSupabaseEnv } from "@/lib/env";
 import { defaultSiteTheme, getSiteThemeSettings } from "@/lib/theme";
 import { SetupNotice } from "@/components/SetupNotice";
+import { CodlPageHeader } from "@/components/CodlPageHeader";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 
@@ -12,7 +13,7 @@ export const dynamic = "force-dynamic";
 const colorFields = [
   ["primary_color", "顶部黑色", "primaryColor"],
   ["board_color", "主蓝色", "boardColor"],
-  ["accent_color", "强调橙色", "accentColor"],
+  ["accent_color", "强调蓝色", "accentColor"],
   ["background_color", "页面背景", "backgroundColor"],
   ["surface_color", "卡片背景", "surfaceColor"],
   ["text_color", "正文颜色", "textColor"],
@@ -31,14 +32,13 @@ export default async function AdminThemePage({
 
   return (
     <div className="grid gap-6">
-      <div>
-        <div className="inline-flex items-center gap-2 rounded-full border border-wire bg-surface px-3 py-1 text-sm font-semibold text-muted">
-          <Palette className="h-4 w-4 text-accent" aria-hidden />
-          Theme
-        </div>
-        <h1 className="mt-3 text-2xl font-bold">主题管理</h1>
-        <p className="mt-2 text-sm text-muted">调整平台名称、LOGO 和全局配色。</p>
-      </div>
+      <CodlPageHeader
+        kicker="CODL Brand"
+        title="品牌配置"
+        description="CODL 专属视觉以黑、白、蓝为准；这里保留为维护主题配置和恢复默认值的入口。"
+        icon={<Palette className="h-6 w-6" aria-hidden />}
+        poster="white"
+      />
 
       {params.saved ? (
         <div className="rounded-lg border border-board/30 bg-board/10 px-4 py-3 text-sm font-semibold text-board">
@@ -51,11 +51,11 @@ export default async function AdminThemePage({
           <form action={updateThemeSettingsAction} className="grid gap-5">
             <div className="grid gap-4 md:grid-cols-2">
               <label className="label">
-                平台名称
+                平台名称（配置值）
                 <input className="form-input" name="platform_name" defaultValue={theme.platformName} maxLength={32} required />
               </label>
               <label className="label">
-                LOGO 地址
+                LOGO 地址（配置值）
                 <input
                   className="form-input"
                   name="logo_url"
@@ -84,7 +84,7 @@ export default async function AdminThemePage({
             </div>
 
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-wire pt-5">
-              <div className="text-sm text-muted">保存后会立即应用到导航、按钮、卡片和表单。</div>
+              <div className="text-sm text-muted">CODL 专属模式会优先使用默认品牌视觉；保存用于维护配置记录。</div>
               <div className="flex flex-wrap gap-2">
                 <a
                   className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-wire bg-surface px-4 py-2 text-sm font-semibold hover:bg-field"
@@ -116,7 +116,7 @@ export default async function AdminThemePage({
             <div className="grid gap-3 p-4">
               <div className="rounded-lg border border-wire bg-surface p-4">
                 <div className="text-lg font-bold text-ink">赛事管理</div>
-                <p className="mt-1 text-sm text-muted">黑、蓝、橙主题示例。</p>
+                <p className="mt-1 text-sm text-muted">黑、白、蓝主题示例。</p>
                 <div className="mt-4 flex gap-2">
                   <span className="rounded-lg bg-board px-3 py-2 text-sm font-semibold text-white">主按钮</span>
                   <span className="rounded-lg border border-wire px-3 py-2 text-sm font-semibold text-ink">次按钮</span>
@@ -125,13 +125,13 @@ export default async function AdminThemePage({
               <div className="grid grid-cols-3 gap-2">
                 <Swatch value={theme.primaryColor} label="黑" />
                 <Swatch value={theme.boardColor} label="蓝" />
-                <Swatch value={theme.accentColor} label="橙" />
+                <Swatch value={theme.accentColor} label="强调" />
               </div>
             </div>
           </div>
           <form action={updateThemeSettingsAction} className="mt-4">
             <input type="hidden" name="platform_name" value={defaultSiteTheme.platformName} />
-            <input type="hidden" name="logo_url" value="" />
+            <input type="hidden" name="logo_url" value={defaultSiteTheme.logoUrl || ""} />
             <input type="hidden" name="primary_color" value={defaultSiteTheme.primaryColor} />
             <input type="hidden" name="board_color" value={defaultSiteTheme.boardColor} />
             <input type="hidden" name="accent_color" value={defaultSiteTheme.accentColor} />

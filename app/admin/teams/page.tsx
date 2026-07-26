@@ -11,6 +11,7 @@ import { requireAdmin } from "@/lib/auth/guards";
 import { hasSupabaseEnv } from "@/lib/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { SetupNotice } from "@/components/SetupNotice";
+import { CodlPageHeader } from "@/components/CodlPageHeader";
 import { AvatarUploader } from "@/components/ui/AvatarUploader";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -65,21 +66,20 @@ export default async function AdminTeamsPage() {
 
   return (
     <div className="grid gap-5">
-      <section className="rounded-lg bg-primary p-5 text-white sm:p-6">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <div className="inline-flex items-center gap-2 text-sm font-bold text-white/60">
-              <UsersRound className="h-4 w-4 text-accent" aria-hidden />
-              Admin
-            </div>
-            <h1 className="mt-2 text-3xl font-black">队伍管理</h1>
-          </div>
+      <CodlPageHeader
+        dark
+        kicker="CODL Admin"
+        title="队伍管理"
+        description="维护长期队伍、赛事队伍和队伍成员关联。"
+        icon={<UsersRound className="h-6 w-6" aria-hidden />}
+        poster="pattern"
+        actions={
           <div className="grid grid-cols-2 gap-2 text-sm font-bold">
             <Metric label="长期队伍" value={(savedTeams || []).length} />
             <Metric label="赛事队伍" value={(tournamentTeams || []).length} />
           </div>
-        </div>
-      </section>
+        }
+      />
 
       <Card>
         <div className="flex items-center gap-2">

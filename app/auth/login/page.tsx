@@ -1,5 +1,7 @@
 import Link from "next/link";
+import { LogIn } from "lucide-react";
 import { signInAction } from "@/app/auth/actions";
+import { CodlPageHeader } from "@/components/CodlPageHeader";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 
@@ -11,10 +13,15 @@ export default async function LoginPage({
   const params = await searchParams;
 
   return (
-    <div className="mx-auto max-w-md">
+    <div className="mx-auto grid max-w-md gap-4">
+      <CodlPageHeader
+        kicker="CODL Account"
+        title="登录"
+        description="进入赛事、计分器和个人数据。"
+        icon={<LogIn className="h-6 w-6" aria-hidden />}
+        poster="white"
+      />
       <Card>
-        <h1 className="text-2xl font-bold">登录</h1>
-        <p className="mt-2 text-sm text-muted">进入赛事、计分器和个人数据。</p>
         {params.message ? (
           <p className="mt-4 rounded-lg bg-field p-3 text-sm text-muted">{params.message}</p>
         ) : null}

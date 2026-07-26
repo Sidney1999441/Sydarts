@@ -1,3 +1,4 @@
+import { ClipboardCheck } from "lucide-react";
 import { adminUpdateMatchResultAction } from "@/lib/actions/matches";
 import { requireAdmin } from "@/lib/auth/guards";
 import { getMatchRulesSummary, getLegRuleLabel } from "@/lib/darts/variants";
@@ -5,6 +6,7 @@ import { hasSupabaseEnv } from "@/lib/env";
 import { createResultSubmissionId } from "@/lib/results/submission";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { SetupNotice } from "@/components/SetupNotice";
+import { CodlPageHeader } from "@/components/CodlPageHeader";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import type { MatchDartMode, MatchLegRule } from "@/types/domain";
@@ -69,10 +71,13 @@ export default async function ResultsAdminPage({
 
   return (
     <div className="grid gap-6">
-      <div>
-        <h1 className="text-2xl font-bold">成绩管理</h1>
-        <p className="mt-2 text-sm text-muted">管理员可修改结果、处理确认记录，并补录个人数据。</p>
-      </div>
+      <CodlPageHeader
+        kicker="CODL Admin"
+        title="成绩管理"
+        description="管理员可修改结果、处理确认记录，并补录个人数据。"
+        icon={<ClipboardCheck className="h-6 w-6" aria-hidden />}
+        poster="pattern"
+      />
       <Card>
         <div className="grid gap-4">
           {(matches || []).map((match) => {
