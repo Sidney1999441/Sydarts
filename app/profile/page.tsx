@@ -4,7 +4,7 @@ import { updateSavedTeamProfileAction } from "@/lib/actions/teams";
 import { calculatePlayerLevel, type PlayerLevelStats, type SoftPlayerLevelStats } from "@/lib/algorithms/player-level";
 import { calculateDartStats, type ScoreTurn } from "@/lib/algorithms/scoring";
 import { requireUser } from "@/lib/auth/guards";
-import { getDartModeLabel, getGameVariantLabel } from "@/lib/darts/variants";
+import { getMatchRulesSummary } from "@/lib/darts/variants";
 import { hasSupabaseEnv } from "@/lib/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { cn, formatDateTime } from "@/lib/utils";
@@ -458,7 +458,11 @@ export default async function ProfilePage() {
           href: `/tournaments/${match.tournament_id}`,
           playedAt: match.updated_at || match.created_at,
           result: match.winner_participant_id === myParticipantId ? "胜" : "负",
-          statusLabel: `${match.stage === "group" ? "小组赛" : `淘汰赛 R${match.round_number}`} · ${getDartModeLabel(match.dart_mode)} · ${getGameVariantLabel({ dartMode: match.dart_mode, gameVariant: match.game_variant })}`,
+          statusLabel: `${match.stage === "group" ? "小组赛" : `淘汰赛 R${match.round_number}`} / ${getMatchRulesSummary({
+            dartMode: match.dart_mode,
+            gameVariant: match.game_variant,
+            legRules: (match.details as { legRules?: unknown } | null)?.legRules
+          })}`,
           scoreLabel: `${myScore}:${opponentScore}`,
           myName,
           opponentName,

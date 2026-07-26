@@ -1,6 +1,6 @@
 import { adminUpdateMatchResultAction } from "@/lib/actions/matches";
 import { requireAdmin } from "@/lib/auth/guards";
-import { getDartModeLabel, getGameVariantLabel, getLegRuleLabel } from "@/lib/darts/variants";
+import { getMatchRulesSummary, getLegRuleLabel } from "@/lib/darts/variants";
 import { hasSupabaseEnv } from "@/lib/env";
 import { createResultSubmissionId } from "@/lib/results/submission";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -90,7 +90,11 @@ export default async function ResultsAdminPage({
                       R{match.round_number} M{match.match_number} / {match.status}
                     </div>
                     <div className="mt-1 text-xs font-semibold text-board">
-                      {getDartModeLabel(dartMode)} / {getGameVariantLabel({ dartMode, gameVariant: match.game_variant })}
+                      {getMatchRulesSummary({
+                        dartMode,
+                        gameVariant: match.game_variant,
+                        legRules: match.leg_rules
+                      })}
                     </div>
                     <div className="mt-1 font-bold">
                       {participantById.get(match.participant_a_id)?.display_name || "TBD"} vs {participantById.get(match.participant_b_id)?.display_name || "TBD"}

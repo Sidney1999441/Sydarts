@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Crosshair, Gauge, Swords } from "lucide-react";
 import { requireUser } from "@/lib/auth/guards";
-import { getDartModeLabel, getGameVariantLabel } from "@/lib/darts/variants";
+import { getMatchRulesSummary } from "@/lib/darts/variants";
 import { hasSupabaseEnv } from "@/lib/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { SetupNotice } from "@/components/SetupNotice";
@@ -107,7 +107,11 @@ export default async function ScorerPage() {
                   第 {match.round_number} 轮，{participantAName} 对 {participantBName}
                 </div>
                 <div className="mt-1 text-xs font-bold text-board">
-                  {getDartModeLabel(match.dart_mode)} / {getGameVariantLabel({ dartMode: match.dart_mode, gameVariant: match.game_variant })}
+                  {getMatchRulesSummary({
+                    dartMode: match.dart_mode,
+                    gameVariant: match.game_variant,
+                    legRules: match.leg_rules
+                  })}
                 </div>
               </Link>
             );

@@ -7,7 +7,7 @@ import {
 import { getCurrentUserAndProfile } from "@/lib/auth/guards";
 import { hasSupabaseEnv } from "@/lib/env";
 import { updateTournamentStandings } from "@/lib/algorithms/standings";
-import { getDartModeLabel, getGameVariantLabel } from "@/lib/darts/variants";
+import { getDartModeLabel, getGameVariantLabel, getMatchRulesSummary } from "@/lib/darts/variants";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { formatDateTime } from "@/lib/utils";
 import { SetupNotice } from "@/components/SetupNotice";
@@ -257,7 +257,11 @@ export default async function TournamentDetailPage({
                     第 {match.round_number} 轮 / 第 {match.match_number} 场 / {match.status}
                   </div>
                   <div className="mt-1 text-xs font-semibold text-board">
-                    {getDartModeLabel(dartMode)} / {getGameVariantLabel({ dartMode, gameVariant: match.game_variant })}
+                    {getMatchRulesSummary({
+                      dartMode,
+                      gameVariant: match.game_variant,
+                      legRules: match.leg_rules
+                    })}
                   </div>
                   <div className="mt-1 text-base font-bold">
                     第 {match.round_number} 轮，{participantAName} 对 {participantBName}

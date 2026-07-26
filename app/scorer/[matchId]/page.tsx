@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { requireUser } from "@/lib/auth/guards";
-import { getDartModeLabel, getGameVariantLabel, getLegStartingScore, resolveMatchLegRules } from "@/lib/darts/variants";
+import { getLegStartingScore, getMatchRulesSummary, resolveMatchLegRules } from "@/lib/darts/variants";
 import { hasSupabaseEnv } from "@/lib/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { SetupNotice } from "@/components/SetupNotice";
@@ -101,7 +101,6 @@ export default async function MatchScorerPage({
       })) as MatchLegRule[];
   const firstRule = legRules[0];
   const matchDartMode = (firstRule?.dartMode || match.dart_mode || "steel") as "steel" | "soft";
-  const gameVariant = firstRule?.gameVariant || match.game_variant || tournamentData?.dart_game || 501;
   const matchFinishMode = (match.match_finish_mode || tournamentData?.match_finish_mode || "majority") as MatchFinishMode;
 
   return (
@@ -111,7 +110,11 @@ export default async function MatchScorerPage({
           第 {match.round_number} 轮，{participantA.name} 对 {participantB.name}
         </h1>
         <p className="mt-2 text-sm text-muted">
-          {tournamentData?.name || "比赛计分"} / {getDartModeLabel(matchDartMode)} / {getGameVariantLabel({ dartMode: matchDartMode, gameVariant })} / {legRules.length} 局
+          {tournamentData?.name || "比赛计分"} / {getMatchRulesSummary({
+            dartMode: matchDartMode,
+            gameVariant: match.game_variant,
+            legRules
+          })}
         </p>
       </div>
       {match.status === "completed" ? (

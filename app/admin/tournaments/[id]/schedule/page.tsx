@@ -1,6 +1,6 @@
 import { generateGroupsAndScheduleAction } from "@/lib/actions/tournaments";
 import { requireAdmin } from "@/lib/auth/guards";
-import { getDartModeLabel, getGameVariantLabel } from "@/lib/darts/variants";
+import { getMatchRulesSummary } from "@/lib/darts/variants";
 import { hasSupabaseEnv } from "@/lib/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { SetupNotice } from "@/components/SetupNotice";
@@ -33,7 +33,7 @@ export default async function ScheduleAdminPage({
       <div>
         <h1 className="text-2xl font-bold">分组与赛程</h1>
         <p className="mt-2 text-sm text-muted">
-          {tournament?.name} · {tournament?.format} · 当前参赛主体 {(participants || []).length}
+          {tournament?.name} / {tournament?.format} / 当前参赛主体 {(participants || []).length}
         </p>
       </div>
       <Card>
@@ -60,7 +60,7 @@ export default async function ScheduleAdminPage({
                   <div className="font-bold">{group.name} 组</div>
                   <ul className="mt-2 grid gap-1 text-sm text-muted">
                     {members.map((member) => (
-                      <li key={member.id}>{member.display_name} · {member.rating_snapshot}</li>
+                      <li key={member.id}>{member.display_name} / {member.rating_snapshot}</li>
                     ))}
                   </ul>
                 </div>
@@ -75,10 +75,14 @@ export default async function ScheduleAdminPage({
             {(matches || []).map((match) => (
               <div key={match.id} className="rounded-lg border border-wire p-4 text-sm">
                 <div className="font-semibold text-muted">
-                  {match.stage} · R{match.round_number} M{match.match_number} · {match.status}
+                  {match.stage} / R{match.round_number} M{match.match_number} / {match.status}
                 </div>
                 <div className="mt-1 text-xs font-semibold text-board">
-                  {getDartModeLabel(match.dart_mode)} · {getGameVariantLabel({ dartMode: match.dart_mode, gameVariant: match.game_variant })}
+                  {getMatchRulesSummary({
+                    dartMode: match.dart_mode,
+                    gameVariant: match.game_variant,
+                    legRules: match.leg_rules
+                  })}
                 </div>
                 <div className="mt-1 font-bold">
                   {participantById.get(match.participant_a_id)?.display_name || "TBD"} vs {participantById.get(match.participant_b_id)?.display_name || "TBD"}

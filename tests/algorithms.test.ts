@@ -9,7 +9,13 @@ import { applyTurn, calculateDartStats, createScoringState } from "@/lib/algorit
 import { updateTournamentStandings } from "@/lib/algorithms/standings";
 import { updateUserRating } from "@/lib/algorithms/rating";
 import { calculatePlayerLevel, ratingToSkillLevel } from "@/lib/algorithms/player-level";
-import { resolveMatchLegRules, validateMatchLegRules, getMatchDartMode, getMatchGameVariant } from "@/lib/darts/variants";
+import {
+  resolveMatchLegRules,
+  validateMatchLegRules,
+  getMatchDartMode,
+  getMatchGameVariant,
+  getMatchRulesSummary
+} from "@/lib/darts/variants";
 import { getSoftStatFields, mergeManualStats } from "@/lib/darts/soft-stats";
 
 const players = [
@@ -356,6 +362,24 @@ describe("team-first tournament algorithms", () => {
     ]);
     expect(new Set(roundTwo.map((rule) => rule.dartMode))).toEqual(new Set(["steel"]));
     expect(roundTwo.map((rule) => rule.gameVariant)).toEqual(["501", "501", "301"]);
+  });
+
+  it("summarizes mixed leg rules instead of naming only one stored match variant", () => {
+    const summary = getMatchRulesSummary({
+      dartMode: "soft",
+      gameVariant: "soft_501",
+      legRules: [
+        { legNumber: 1, participantMode: "singles", dartMode: "soft", gameVariant: "soft_501" },
+        { legNumber: 2, participantMode: "doubles", dartMode: "soft", gameVariant: "soft_cricket" },
+        { legNumber: 3, participantMode: "singles", dartMode: "soft", gameVariant: "soft_high_score" }
+      ]
+    });
+
+    expect(summary).toContain("混合赛制");
+    expect(summary).toContain("3 局");
+    expect(summary).toContain("501");
+    expect(summary).toContain("Cricket");
+    expect(summary).toContain("HIGH SCORE");
   });
 
   it("shows only variant-specific soft dart stat fields", () => {

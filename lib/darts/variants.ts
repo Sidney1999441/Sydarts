@@ -113,6 +113,39 @@ export function getLegRuleLabel(rule: MatchLegRule) {
   })}`;
 }
 
+export function getMatchRulesSummary(input: {
+  dartMode?: string | null;
+  gameVariant?: string | number | null;
+  legRules?: unknown;
+}) {
+  const rules = normalizeMatchLegRules(input.legRules);
+  if (rules.length === 0) {
+    return `${getDartModeLabel(input.dartMode)} / ${getGameVariantLabel({
+      dartMode: input.dartMode,
+      gameVariant: input.gameVariant
+    })}`;
+  }
+
+  const dartModes = [...new Set(rules.map((rule) => rule.dartMode))];
+  const variantLabels = [
+    ...new Set(
+      rules.map((rule) =>
+        getGameVariantLabel({
+          dartMode: rule.dartMode,
+          gameVariant: rule.gameVariant
+        })
+      )
+    )
+  ];
+
+  if (variantLabels.length === 1 && dartModes.length === 1) {
+    return `${getDartModeLabel(dartModes[0])} / ${variantLabels[0]} / ${rules.length} 局`;
+  }
+
+  const modeLabel = dartModes.length > 1 ? "混合镖种" : `${getDartModeLabel(dartModes[0])}混合赛制`;
+  return `${modeLabel} / ${rules.length} 局 / ${variantLabels.join(" / ")}`;
+}
+
 export function hasCustomLegRules(value?: unknown): value is MatchLegRule[] {
   if (Array.isArray(value)) return value.length > 0;
   if (isTemplateSet(value)) return Boolean(value.steel?.length || value.soft?.length);
