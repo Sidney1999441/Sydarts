@@ -2,7 +2,7 @@ import { Palette, RotateCcw } from "lucide-react";
 import { updateThemeSettingsAction } from "@/lib/actions/theme";
 import { requireAdmin } from "@/lib/auth/guards";
 import { hasSupabaseEnv } from "@/lib/env";
-import { defaultSiteTheme, getSiteThemeSettings } from "@/lib/theme";
+import { defaultSiteTheme } from "@/lib/theme";
 import { SetupNotice } from "@/components/SetupNotice";
 import { CodlPageHeader } from "@/components/CodlPageHeader";
 import { Button } from "@/components/ui/Button";
@@ -28,7 +28,8 @@ export default async function AdminThemePage({
 }) {
   if (!hasSupabaseEnv()) return <SetupNotice />;
   await requireAdmin();
-  const [params, theme] = await Promise.all([searchParams, getSiteThemeSettings()]);
+  const params = await searchParams;
+  const theme = defaultSiteTheme;
 
   return (
     <div className="grid gap-6">
@@ -104,12 +105,7 @@ export default async function AdminThemePage({
           <div className="mt-4 overflow-hidden rounded-lg border border-wire bg-field">
             <div className="flex items-center justify-between border-b border-wire bg-primary px-4 py-3 text-white">
               <div className="flex items-center gap-2 text-sm font-black tracking-[0.12em]">
-                {theme.logoUrl ? (
-                  <img src={theme.logoUrl} alt="" className="h-7 w-7 rounded-md bg-surface object-contain" />
-                ) : (
-                  <span className="h-7 w-7 rounded-md bg-accent" />
-                )}
-                {theme.platformName}
+                <img src="/codl/codl-mark-dark.png" alt="CODL logo" className="h-9 w-auto object-contain" />
               </div>
               <span className="rounded-full bg-surface/15 px-2 py-1 text-xs">Admin</span>
             </div>

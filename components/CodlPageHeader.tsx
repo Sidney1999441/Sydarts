@@ -55,6 +55,11 @@ export function CodlPageHeader({
       <div className={cn("absolute inset-0", dark ? "bg-primary/90" : "bg-white/80")} />
       <div className="relative flex flex-wrap items-end justify-between gap-5">
         <div className="max-w-3xl">
+          <img
+            src={dark ? "/codl/codl-logo-dark.png" : "/codl/codl-logo-light.png"}
+            alt="CODL logo"
+            className={cn("mb-4 h-auto w-[150px] object-contain sm:w-[210px]", dark && "mix-blend-normal")}
+          />
           <div className={cn("codl-page-kicker", dark && "text-white")}>
             <span className={cn("codl-rule", dark && "bg-white")} aria-hidden />
             {kicker}

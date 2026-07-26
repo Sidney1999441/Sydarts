@@ -46,16 +46,12 @@ export function Header({
       <header className="sticky top-0 z-40 border-b border-white/10 bg-primary text-white shadow-[0_14px_34px_rgb(0_0_0/0.16)]">
         <div className="mx-auto flex min-h-16 w-full max-w-7xl items-center gap-3 px-4 sm:px-6 lg:px-8">
           <BackButton />
-          <Link className="flex min-h-12 shrink-0 touch-manipulation items-center gap-3 rounded-lg pr-2" href="/">
-            <span className="grid h-10 w-10 place-items-center rounded-lg bg-white text-primary">
-              <span className="h-4 w-4 rounded-full bg-board" aria-hidden />
-            </span>
-            <span className="leading-none">
-              <span className="codl-brand-type block text-xl">{theme.platformName}</span>
-              <span className="hidden text-[10px] font-black uppercase text-white/60 sm:block">
-                Caliburn Office Darts League 2026
-              </span>
-            </span>
+          <Link className="flex min-h-12 shrink-0 touch-manipulation items-center rounded-lg pr-2" href="/">
+            <img
+              src="/codl/codl-mark-dark.png"
+              alt={`${theme.platformName} logo`}
+              className="h-10 w-auto max-w-[128px] object-contain sm:h-11 sm:max-w-[152px]"
+            />
           </Link>
 
           <nav className="hidden flex-1 items-center justify-center gap-1 lg:flex">

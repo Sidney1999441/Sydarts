@@ -147,9 +147,12 @@ function Hero({ platformName, isAdmin }: { platformName: string; isAdmin: boolea
             <span className="codl-rule" aria-hidden />
             Caliburn Office Darts League 2026
           </div>
-          <h1 className="mt-4 text-6xl font-black leading-none text-primary sm:text-7xl md:text-8xl">
-            {platformName}
-          </h1>
+          <img
+            src="/codl/codl-logo-light.png"
+            alt={`${platformName} logo`}
+            className="mt-4 h-auto w-full max-w-[560px] object-contain"
+          />
+          <h1 className="sr-only">{platformName}</h1>
           <p className="mt-3 max-w-xl text-base font-bold text-muted sm:text-lg">
             软镖、硬镖、团队联赛、个人数据和现场计分全部集中在一个赛事系统里。
           </p>

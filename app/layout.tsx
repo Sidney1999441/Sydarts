@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { Header } from "@/components/Header";
 import { getCurrentUserAndProfile } from "@/lib/auth/guards";
-import { defaultSiteTheme, getSiteThemeSettings, themeCssVariables } from "@/lib/theme";
+import { defaultSiteTheme, themeCssVariables } from "@/lib/theme";
 
 export const metadata: Metadata = {
   title: "CODL 2026",
@@ -14,14 +14,8 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const [{ user, profile }, theme] = await Promise.all([
-    getCurrentUserAndProfile(),
-    getSiteThemeSettings()
-  ]);
-  const codlTheme = {
-    ...defaultSiteTheme,
-    logoUrl: theme.logoUrl || defaultSiteTheme.logoUrl
-  };
+  const { user, profile } = await getCurrentUserAndProfile();
+  const codlTheme = defaultSiteTheme;
 
   return (
     <html lang="zh-CN">

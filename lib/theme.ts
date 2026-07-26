@@ -17,7 +17,7 @@ export type SiteThemeSettings = {
 
 export const defaultSiteTheme: SiteThemeSettings = {
   platformName: "CODL",
-  logoUrl: "/codl/codl-logo-lockup.jpg",
+  logoUrl: "/codl/codl-logo-light.png",
   primaryColor: "#202020",
   boardColor: "#0879b8",
   accentColor: "#0879b8",
