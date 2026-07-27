@@ -1,7 +1,9 @@
 import { createClient } from "@supabase/supabase-js";
+import { assertSupabaseBackend } from "@/lib/backend/provider";
 import { getSupabaseServiceRoleKey, getSupabaseUrl } from "@/lib/env";
 
 export function createSupabaseAdminClient() {
+  assertSupabaseBackend("Supabase admin client");
   const serviceRoleKey = getSupabaseServiceRoleKey();
 
   if (!serviceRoleKey) {

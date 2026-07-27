@@ -110,6 +110,10 @@ participant path regardless of event type.
 - Dongkang office league closed-loop smoke test script for creating mock
   accounts, teams, a mixed league schedule, RPC settlements, and a JSON evidence
   report.
+- CloudBase/Tencent Cloud migration boundary:
+  - backend provider readiness check
+  - CloudBase/Tencent production environment placeholders
+  - CODL-owned avatar proxy URLs for future COS/CloudBase Storage migration
 
 ## Known Limits
 
@@ -137,6 +141,10 @@ participant path regardless of event type.
   ledgered stat events and applies rating delta compensation for that match.
 - The automated tests currently focus on algorithms. Server Action and
   browser-level workflow coverage is still needed.
+- `CODL_BACKEND_PROVIDER=tencent` is reserved for the formal Tencent Cloud
+  backend migration. Keep it set to `supabase` until the Tencent PostgreSQL,
+  CloudBase auth, storage, and settlement implementations pass the closed-loop
+  smoke tests.
 
 ## Setup
 
@@ -149,6 +157,7 @@ participant path regardless of event type.
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
+CODL_BACKEND_PROVIDER=supabase
 ```
 
 5. Install dependencies:
@@ -212,11 +221,29 @@ Theme and identity workflow:
 - `npm run test:dongkang` creates a full Dongkang-style test league in Supabase
   using service-role credentials and writes a report to
   `tmp/dongkang-league-test-report-<batch>.json`.
+- `npm run backend:check` verifies the required environment variables for the
+  selected `CODL_BACKEND_PROVIDER`.
 - `npm run db:wake` sends a low-cost Supabase REST request so an idle project can
   wake up.
 - `npm run db:test` wakes Supabase and checks the expected database tables and
   key post-migration columns. With `SUPABASE_SERVICE_ROLE_KEY`, it also checks
   the `avatars` storage bucket.
+
+## Tencent CloudBase Migration
+
+The formal mainland-ready production path is documented in
+[`docs/cloudbase-migration-plan.md`](docs/cloudbase-migration-plan.md).
+
+The short version:
+
+1. Keep the current Supabase app working.
+2. Put browser-facing file access behind CODL API routes.
+3. Move database access behind service/repository boundaries.
+4. Create a Tencent Cloud managed PostgreSQL schema.
+5. Move auth to CloudBase/WeChat identity mapping.
+6. Move file objects to COS or CloudBase Storage.
+7. Rebuild match settlement as a Tencent PostgreSQL transaction service.
+8. Flip `CODL_BACKEND_PROVIDER=tencent` only after closed-loop parity tests pass.
 
 ## Verification Baseline
 

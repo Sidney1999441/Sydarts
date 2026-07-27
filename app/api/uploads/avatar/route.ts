@@ -2,8 +2,8 @@ import { revalidatePath } from "next/cache";
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { avatarBucketName, buildAvatarPublicUrl } from "@/lib/storage/avatars";
 
-const bucketName = "avatars";
 const maxCompressedSize = 2 * 1024 * 1024;
 const entityTypes = new Set(["profile", "saved_team", "tournament_team"]);
 
@@ -94,7 +94,7 @@ export async function POST(request: NextRequest) {
 
   const path = avatarPath(entityType, entityId);
   const bytes = Buffer.from(await file.arrayBuffer());
-  const { error: uploadError } = await admin.storage.from(bucketName).upload(path, bytes, {
+  const { error: uploadError } = await admin.storage.from(avatarBucketName).upload(path, bytes, {
     cacheControl: "31536000",
     contentType: "image/webp",
     upsert: true
@@ -104,8 +104,7 @@ export async function POST(request: NextRequest) {
     return jsonError(`头像上传失败：${uploadError.message}`, 500);
   }
 
-  const { data: publicData } = admin.storage.from(bucketName).getPublicUrl(path);
-  const avatarUrl = publicData.publicUrl;
+  const avatarUrl = buildAvatarPublicUrl(path);
   const { error: updateError } = await admin
     .from(updateTarget.table)
     .update({ avatar_url: avatarUrl })

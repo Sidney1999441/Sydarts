@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { UsersRound } from "lucide-react";
 import { requireUser } from "@/lib/auth/guards";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { normalizeAvatarUrl } from "@/lib/storage/avatars";
 import { formatDateTime } from "@/lib/utils";
 import { CodlPageHeader } from "@/components/CodlPageHeader";
 import { Button } from "@/components/ui/Button";
@@ -86,6 +87,7 @@ export default async function SavedTeamDetailPage({
   const completedMatches = (matches || []).filter((match) => match.status === "completed");
   const wins = completedMatches.filter((match) => participantIds.includes(match.winner_participant_id || "")).length;
   const losses = completedMatches.length - wins;
+  const savedTeamAvatarUrl = normalizeAvatarUrl(savedTeam.avatar_url);
 
   return (
     <div className="grid gap-5">
@@ -106,9 +108,9 @@ export default async function SavedTeamDetailPage({
           返回个人中心
         </Link>
         <div className="mt-4 flex flex-wrap items-center gap-4">
-          {savedTeam.avatar_url ? (
+          {savedTeamAvatarUrl ? (
             <img
-              src={savedTeam.avatar_url}
+              src={savedTeamAvatarUrl}
               alt=""
               className="h-16 w-16 rounded-lg border border-wire object-cover"
             />

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Check, ImagePlus, Loader2, Minus, Plus, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { normalizeAvatarUrl } from "@/lib/storage/avatars";
 import { Button } from "@/components/ui/Button";
 
 type AvatarEntityType = "profile" | "saved_team" | "tournament_team";
@@ -62,7 +63,7 @@ export function AvatarUploader({
   const imageRef = useRef<HTMLImageElement>(null);
   const dragRef = useRef<{ pointerId: number; startX: number; startY: number; offsetX: number; offsetY: number } | null>(null);
   const objectUrlRef = useRef<string | null>(null);
-  const [avatarUrl, setAvatarUrl] = useState(initialUrl || "");
+  const [avatarUrl, setAvatarUrl] = useState(normalizeAvatarUrl(initialUrl));
   const [imageMeta, setImageMeta] = useState<ImageMeta | null>(null);
   const [zoom, setZoom] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
@@ -70,7 +71,7 @@ export function AvatarUploader({
   const [isUploading, setIsUploading] = useState(false);
 
   useEffect(() => {
-    setAvatarUrl(initialUrl || "");
+    setAvatarUrl(normalizeAvatarUrl(initialUrl));
   }, [initialUrl]);
 
   useEffect(() => {

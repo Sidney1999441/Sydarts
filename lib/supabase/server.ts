@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 import type { CookieOptions } from "@supabase/ssr";
+import { assertSupabaseBackend } from "@/lib/backend/provider";
 import { getSupabaseAnonKey, getSupabaseUrl } from "@/lib/env";
 
 type CookieToSet = {
@@ -10,6 +11,7 @@ type CookieToSet = {
 };
 
 export async function createSupabaseServerClient() {
+  assertSupabaseBackend("Supabase server client");
   const cookieStore = await cookies();
 
   return createServerClient(getSupabaseUrl(), getSupabaseAnonKey(), {
