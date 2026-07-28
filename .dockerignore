@@ -1,0 +1,13 @@
+.git
+.next
+node_modules
+output
+tmp
+*.log
+*.err.log
+.env
+.env.*
+!.env.example
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
