@@ -403,7 +403,7 @@ export default async function HelpPage() {
         title={`${platformName} 全功能说明`}
         description="这是一份面向真实赛事现场的操作手册。它覆盖选手、队长、计分员和管理员的完整路径，也列出上线前必须复核的功能点。"
         icon={<BookOpen className="h-6 w-6" aria-hidden />}
-        poster="pattern"
+        art="pattern"
         actions={
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             <Shortcut href="#quick" label="快速开始" />

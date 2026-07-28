@@ -82,7 +82,7 @@ export default async function ParticipantsAdminPage({
         title="参赛选手管理"
         description={`${tournament?.name} · ${tournament?.tournament_type} · 每队 ${tournament?.team_size} 人`}
         icon={<UsersRound className="h-6 w-6" aria-hidden />}
-        poster="pattern"
+        art="pattern"
       />
 
       <section className="grid gap-4 lg:grid-cols-[1fr_0.8fr]">

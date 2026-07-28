@@ -51,6 +51,7 @@ export function Header({
               src="/codl/codl-mark-dark.png"
               alt={`${theme.platformName} logo`}
               className="h-10 w-auto max-w-[128px] object-contain sm:h-11 sm:max-w-[152px]"
+              style={{ height: "clamp(2.5rem, 3vw, 2.75rem)", width: "auto", maxWidth: "min(152px, 34vw)" }}
             />
           </Link>
 

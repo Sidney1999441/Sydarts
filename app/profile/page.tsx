@@ -11,6 +11,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { cn, formatDateTime } from "@/lib/utils";
 import { SetupNotice } from "@/components/SetupNotice";
 import { CodlPageHeader } from "@/components/CodlPageHeader";
+import { LevelExplanation } from "@/components/LevelExplanation";
 import { AvatarUploader } from "@/components/ui/AvatarUploader";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -542,7 +543,7 @@ export default async function ProfilePage() {
         title="个人中心"
         description={`${profile?.display_name || user.email} · 普通 ${generalLevel.label} · 赛事 ${tournamentLevel.label}`}
         icon={<UserRound className="h-6 w-6" aria-hidden />}
-        poster="white"
+        art="white"
         actions={
           <div className="rounded-lg border border-wire bg-surface/95 p-3">
             <AvatarUploader
@@ -700,9 +701,7 @@ function CombinedStatsPanel({
             普通统计包含赛事和切磋，赛事统计只计算正式比赛。
           </p>
         </div>
-        <div className="rounded-full bg-field px-3 py-1 text-xs font-semibold text-muted">
-          段位由平均分、胜率、legs 胜率和高分表现综合计算
-        </div>
+        <LevelExplanation compact />
       </div>
       <div className="mt-5 grid gap-3 md:grid-cols-2">
         <LevelSummary

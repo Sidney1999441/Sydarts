@@ -66,7 +66,7 @@ export default async function ScorerPage() {
         title="计分"
         description="选择当前比赛后录入出场顺序，系统按本局赛制只显示需要填写的数据项。"
         icon={<Gauge className="h-6 w-6" aria-hidden />}
-        poster="white"
+        art="white"
       />
 
       <Link

@@ -37,7 +37,7 @@ export default async function ScheduleAdminPage({
         title="分组与赛程"
         description={`${tournament?.name} / ${tournament?.format} / 当前参赛主体 ${(participants || []).length}`}
         icon={<CalendarRange className="h-6 w-6" aria-hidden />}
-        poster="white"
+        art="white"
       />
       <Card>
         <form action={generateGroupsAndScheduleAction} className="flex flex-wrap items-end gap-3">

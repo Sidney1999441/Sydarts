@@ -40,7 +40,7 @@ export default async function EditTournamentPage({
         title="编辑赛事"
         description={tournament.name}
         icon={<Pencil className="h-6 w-6" aria-hidden />}
-        poster="white"
+        art="white"
       />
       {flags.saved || flags.created ? (
         <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">

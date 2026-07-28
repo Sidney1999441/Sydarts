@@ -27,8 +27,7 @@ html {
 body {
   margin: 0;
   min-height: 100vh;
-  background:
-    linear-gradient(180deg, rgb(var(--color-surface)) 0%, rgb(var(--color-field)) 48%, rgb(238 247 253) 100%);
+  background: rgb(var(--color-field));
   color: rgb(var(--color-ink));
   font-family: Arial, "Microsoft YaHei", "PingFang SC", sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -42,32 +41,32 @@ body {
   z-index: -10;
   overflow: hidden;
   pointer-events: none;
-  background:
-    radial-gradient(circle at 48px 48px, rgb(var(--color-board) / 0.045) 0 30px, transparent 31px),
-    radial-gradient(circle at 48px 48px, transparent 0 51px, rgb(var(--color-board) / 0.06) 52px 54px, transparent 55px);
-  background-size: 168px 168px;
+  background: rgb(var(--color-field));
 }
 
 .codl-backdrop::before {
   content: "";
   position: absolute;
-  top: -18rem;
-  right: -18rem;
-  width: min(980px, 78vw);
-  aspect-ratio: 2018 / 2854;
-  background: url("/codl/codl-pattern-poster.jpg") center / cover no-repeat;
-  opacity: 0.09;
+  top: -14rem;
+  right: -14rem;
+  width: min(760px, 70vw);
+  aspect-ratio: 1;
+  border: clamp(3.5rem, 8vw, 6.5rem) solid rgb(var(--color-board) / 0.08);
+  border-left-color: transparent;
+  border-radius: 50%;
+  transform: rotate(-18deg);
 }
 
 .codl-backdrop::after {
   content: "";
   position: absolute;
-  bottom: -18rem;
-  left: -18rem;
-  width: min(860px, 74vw);
-  aspect-ratio: 2018 / 2854;
-  background: url("/codl/codl-white-poster.jpg") center / cover no-repeat;
-  opacity: 0.08;
+  bottom: -10rem;
+  left: -12rem;
+  width: min(560px, 64vw);
+  height: min(720px, 72vw);
+  background: rgb(var(--color-primary) / 0.035);
+  clip-path: polygon(38% 0, 100% 0, 62% 100%, 0 100%);
+  transform: rotate(28deg);
 }
 
 button,
@@ -159,8 +158,7 @@ th {
 }
 
 .codl-hero {
-  background:
-    linear-gradient(90deg, rgb(var(--color-surface)) 0%, rgb(var(--color-surface) / 0.97) 44%, rgb(238 247 253 / 0.92) 100%);
+  background: rgb(var(--color-surface));
 }
 
 .codl-hero-art {
@@ -173,29 +171,28 @@ th {
 .codl-hero-art::after {
   content: "";
   position: absolute;
-  background-repeat: no-repeat;
-  background-size: contain;
   pointer-events: none;
 }
 
 .codl-hero-art::before {
-  top: -8.5rem;
+  top: -9rem;
   right: -8rem;
-  width: min(620px, 48vw);
-  aspect-ratio: 2018 / 2854;
-  background-image: url("/codl/codl-pattern-poster.jpg");
-  background-position: center;
-  opacity: 0.18;
+  width: min(34rem, 48vw);
+  aspect-ratio: 1;
+  border: clamp(3rem, 7vw, 5.4rem) solid rgb(var(--color-board) / 0.16);
+  border-left-color: transparent;
+  border-radius: 50%;
+  transform: rotate(-16deg);
 }
 
 .codl-hero-art::after {
-  right: 4rem;
-  bottom: -12rem;
-  width: min(680px, 46vw);
-  aspect-ratio: 2018 / 2854;
-  background-image: url("/codl/codl-focus-poster.jpg");
-  background-position: center;
-  opacity: 0.07;
+  top: -8rem;
+  right: 28%;
+  width: min(12rem, 18vw);
+  height: 145%;
+  background: rgb(var(--color-primary) / 0.06);
+  clip-path: polygon(32% 0, 100% 0, 68% 100%, 0 100%);
+  transform: rotate(36deg);
 }
 
 .codl-page-header {
@@ -205,10 +202,84 @@ th {
 .codl-page-header-art {
   position: absolute;
   inset: 0;
-  background-repeat: no-repeat;
-  background-size: min(680px, 58vw) auto;
-  opacity: 0.22;
   pointer-events: none;
+}
+
+.codl-page-header-art::before,
+.codl-page-header-art::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+}
+
+.codl-page-header-art::before {
+  top: -8rem;
+  right: -7rem;
+  width: min(29rem, 48vw);
+  aspect-ratio: 1;
+  border: clamp(2.5rem, 6vw, 4.4rem) solid rgb(var(--color-board) / 0.13);
+  border-left-color: transparent;
+  border-radius: 50%;
+  transform: rotate(-18deg);
+}
+
+.codl-page-header-art::after {
+  top: -7rem;
+  right: 25%;
+  width: min(9rem, 16vw);
+  height: 140%;
+  background: rgb(var(--color-primary) / 0.05);
+  clip-path: polygon(34% 0, 100% 0, 66% 100%, 0 100%);
+  transform: rotate(34deg);
+}
+
+.codl-page-header-art--focus::before {
+  border-color: rgb(var(--color-board) / 0.18);
+  border-left-color: transparent;
+}
+
+.codl-page-header-art--pattern::after {
+  background: rgb(var(--color-board) / 0.08);
+}
+
+.codl-page-header-art--white::before {
+  border-color: rgb(var(--color-board) / 0.1);
+  border-left-color: transparent;
+}
+
+.codl-panel-art {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.codl-panel-art::before,
+.codl-panel-art::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+}
+
+.codl-panel-art::before {
+  top: -8rem;
+  right: -7rem;
+  width: min(28rem, 52vw);
+  aspect-ratio: 1;
+  border: clamp(2.5rem, 6vw, 4rem) solid rgb(var(--color-board) / 0.1);
+  border-left-color: transparent;
+  border-radius: 50%;
+  transform: rotate(-18deg);
+}
+
+.codl-panel-art::after {
+  top: -6rem;
+  right: 27%;
+  width: min(8rem, 18vw);
+  height: 140%;
+  background: rgb(var(--color-primary) / 0.04);
+  clip-path: polygon(34% 0, 100% 0, 66% 100%, 0 100%);
+  transform: rotate(34deg);
 }
 
 @media (max-width: 1023px) {
@@ -219,17 +290,17 @@ th {
 
 @media (max-width: 640px) {
   .codl-backdrop::before {
-    top: -11rem;
+    top: -12rem;
     right: -13rem;
     width: 25rem;
-    opacity: 0.06;
+    border-width: 3.2rem;
   }
 
   .codl-backdrop::after {
-    bottom: -12rem;
-    left: -13rem;
-    width: 24rem;
-    opacity: 0.05;
+    bottom: -10rem;
+    left: -15rem;
+    width: 23rem;
+    height: 30rem;
   }
 
   .codl-hero {
@@ -249,11 +320,13 @@ th {
     top: -7rem;
     right: -8rem;
     width: 22rem;
-    opacity: 0.13;
+    border-width: 3rem;
   }
 
   .codl-hero-art::after {
-    display: none;
+    right: 1.5rem;
+    width: 4rem;
+    opacity: 0.8;
   }
 
   .codl-page-header {
@@ -261,9 +334,22 @@ th {
   }
 
   .codl-page-header-art {
-    background-position: right -8rem top -6.5rem !important;
-    background-size: 22rem auto;
-    opacity: 0.14;
+    opacity: 0.9;
+  }
+
+  .codl-page-header-art::before,
+  .codl-panel-art::before {
+    top: -7.5rem;
+    right: -8rem;
+    width: 20rem;
+    border-width: 2.8rem;
+  }
+
+  .codl-page-header-art::after,
+  .codl-panel-art::after {
+    top: -5rem;
+    right: 1.25rem;
+    width: 3.6rem;
   }
 
   .codl-page-kicker {

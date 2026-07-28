@@ -83,13 +83,7 @@ export function CasualScoreboard({ playerName }: { playerName: string }) {
     return (
       <div className="grid gap-2">
         <section className="relative overflow-hidden rounded-lg border border-wire bg-surface/95 px-3 py-2 shadow-[0_14px_34px_rgb(17_24_39/0.06)]">
-          <img
-            src="/codl/codl-white-poster.jpg"
-            alt=""
-            aria-hidden
-            className="absolute inset-0 h-full w-full object-cover opacity-10"
-            style={{ objectPosition: "68% 32%" }}
-          />
+          <div className="codl-panel-art" aria-hidden />
           <div className="relative flex items-center justify-between gap-3">
             <div className="min-w-0">
               <div className="text-xs font-black uppercase text-board">平时切磋</div>
@@ -125,13 +119,7 @@ export function CasualScoreboard({ playerName }: { playerName: string }) {
   return (
     <div className="grid gap-5">
       <section className="relative overflow-hidden rounded-lg border border-wire bg-surface/95 p-5 shadow-[0_18px_45px_rgb(17_24_39/0.06)]">
-        <img
-          src="/codl/codl-pattern-poster.jpg"
-          alt=""
-          aria-hidden
-          className="absolute inset-0 h-full w-full object-cover opacity-10"
-          style={{ objectPosition: "62% 36%" }}
-        />
+        <div className="codl-panel-art" aria-hidden />
         <div className="relative">
           <Link className="text-sm font-semibold text-board underline" href="/scorer">
             返回计分器

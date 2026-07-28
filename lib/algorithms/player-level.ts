@@ -87,17 +87,18 @@ export const initialRatingTiers: Array<{
   id: InitialRatingTierId;
   label: string;
   rating: number;
+  targetLevel: number;
   description: string;
 }> = [
-  { id: "tier_1", label: "T1 新手体验", rating: 800, description: "第一次参赛或完全新人" },
-  { id: "tier_2", label: "T2 入门稳定", rating: 950, description: "了解规则，偶尔练习" },
-  { id: "tier_3", label: "T3 基础选手", rating: 1050, description: "能稳定完成比赛" },
-  { id: "tier_4", label: "T4 普通参赛", rating: 1150, description: "有一定准度，适合常规分组" },
-  { id: "tier_5", label: "T5 进阶选手", rating: 1275, description: "稳定得分，具备小组竞争力" },
-  { id: "tier_6", label: "T6 强力选手", rating: 1400, description: "明显高于平均，分组需平衡" },
-  { id: "tier_7", label: "T7 主力选手", rating: 1550, description: "队伍核心战力" },
-  { id: "tier_8", label: "T8 种子选手", rating: 1700, description: "高水平选手，建议作为种子" },
-  { id: "tier_9", label: "T9 顶尖种子", rating: 1850, description: "赛事最高档初始评级" }
+  { id: "tier_1", label: "T1 新手体验", rating: 800, targetLevel: 1, description: "第一次参赛或完全新人" },
+  { id: "tier_2", label: "T2 入门稳定", rating: 968, targetLevel: 16, description: "了解规则，偶尔练习" },
+  { id: "tier_3", label: "T3 基础选手", rating: 1103, targetLevel: 28, description: "能稳定完成比赛" },
+  { id: "tier_4", label: "T4 普通参赛", rating: 1238, targetLevel: 40, description: "有一定准度，适合常规分组" },
+  { id: "tier_5", label: "T5 进阶选手", rating: 1372, targetLevel: 52, description: "稳定得分，具备小组竞争力" },
+  { id: "tier_6", label: "T6 强力选手", rating: 1507, targetLevel: 64, description: "明显高于平均，分组需平衡" },
+  { id: "tier_7", label: "T7 主力选手", rating: 1642, targetLevel: 76, description: "队伍核心战力" },
+  { id: "tier_8", label: "T8 种子选手", rating: 1777, targetLevel: 88, description: "高水平选手，建议作为种子" },
+  { id: "tier_9", label: "T9 顶尖种子", rating: 1900, targetLevel: 99, description: "赛事最高档初始评级" }
 ];
 
 export function getInitialRatingTier(value: string | null | undefined) {
@@ -132,6 +133,13 @@ export function calculatePlayerLevel(input: {
   const turnsEstimate = Math.max(1, Math.ceil(totalDarts / 3), matchesPlayed * 8);
   const averagePer3Darts = numberOrZero(stats.averagePer3Darts);
   const rating = input.rating ?? 1000;
+  const hasSteelEvidence =
+    matchesPlayed > 0 ||
+    legsPlayed > 0 ||
+    totalDarts > 0 ||
+    averagePer3Darts > 0 ||
+    numberOrZero(stats.highestTurnScore) > 0 ||
+    numberOrZero(stats.highestCheckout) > 0;
 
   const winRate = matchesPlayed > 0 ? wins / matchesPlayed : 0;
   const legsWinRate = legsPlayed > 0 ? legsWon / legsPlayed : winRate;
@@ -150,6 +158,7 @@ export function calculatePlayerLevel(input: {
     100
   );
   const disciplinePenalty = clamp(numberOrZero(stats.bustCount) / Math.max(1, matchesPlayed) * 2.5, 0, 9);
+  const ratingOnlyScore = clamp(normalize(rating, 800, 1900) * 0.98 + 1, 1, 99);
 
   const rawScore =
     averageScore * 0.38 +
@@ -158,9 +167,11 @@ export function calculatePlayerLevel(input: {
     ratingScore * 0.18 +
     scoringPowerScore * 0.12 -
     disciplinePenalty;
-  const confidence = clamp(0.25 + matchesPlayed / 24, 0.25, 1);
-  const ratingBaseline = clamp(ratingScore * 0.45 + 4, 0, 55);
-  const steelScore = clamp(rawScore * confidence + ratingBaseline * (1 - confidence), 0, 100);
+  const confidence = hasSteelEvidence ? clamp(0.25 + matchesPlayed / 24, 0.25, 1) : 0.25;
+  const ratingBaseline = ratingOnlyScore;
+  const steelScore = hasSteelEvidence
+    ? clamp(rawScore * confidence + ratingBaseline * (1 - confidence), 0, 100)
+    : ratingOnlyScore;
   const softStats = input.softStats || null;
   const softMatchesPlayed = numberOrZero(softStats?.matchesPlayed);
   const softWins = numberOrZero(softStats?.wins);

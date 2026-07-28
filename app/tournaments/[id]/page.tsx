@@ -151,7 +151,7 @@ export default async function TournamentDetailPage({
         title={tournamentData.name}
         description={tournamentData.description || "暂无赛事说明"}
         icon={<Trophy className="h-6 w-6" aria-hidden />}
-        poster="pattern"
+        art="pattern"
         actions={
           <RegistrationPanel
             tournament={tournamentData}

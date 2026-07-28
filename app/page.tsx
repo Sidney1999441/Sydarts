@@ -144,6 +144,7 @@ function Hero({ platformName, isAdmin }: { platformName: string; isAdmin: boolea
             src="/codl/codl-logo-light.png"
             alt={`${platformName} logo`}
             className="codl-hero-logo mt-4 h-auto w-full max-w-[560px] object-contain"
+            style={{ height: "auto", maxWidth: "min(560px, 100%)", width: "100%" }}
           />
           <h1 className="sr-only">{platformName}</h1>
           <p className="mt-3 max-w-xl text-base font-bold text-muted sm:text-lg">

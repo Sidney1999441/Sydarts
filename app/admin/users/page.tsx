@@ -13,6 +13,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { formatDateTime } from "@/lib/utils";
 import { SetupNotice } from "@/components/SetupNotice";
 import { CodlPageHeader } from "@/components/CodlPageHeader";
+import { LevelExplanation } from "@/components/LevelExplanation";
 import { AvatarUploader } from "@/components/ui/AvatarUploader";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -160,7 +161,7 @@ export default async function AdminUsersPage({
         title="用户管理"
         description="统一维护选手资料、权限、评级和软硬镖个人数据。"
         icon={<UserRound className="h-6 w-6" aria-hidden />}
-        poster="white"
+        art="white"
         actions={
           <form className="flex w-full gap-2 sm:w-auto" action="/admin/users">
             <input
@@ -176,6 +177,8 @@ export default async function AdminUsersPage({
           </form>
         }
       />
+
+      <LevelExplanation />
 
       <Card>
         <div className="grid gap-3">
@@ -237,7 +240,7 @@ export default async function AdminUsersPage({
                         const level = calculatePlayerLevel({ rating: tier.rating });
                         return (
                           <option key={tier.id} value={tier.id}>
-                            {tier.label} · {tier.rating} · {ratingToSkillLevel(tier.rating)} · {level.label}
+                            {tier.label} · 目标{tier.targetLevel}级 · Rating {tier.rating} · {ratingToSkillLevel(tier.rating)} · {level.majorRank}
                           </option>
                         );
                       })}

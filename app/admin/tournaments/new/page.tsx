@@ -20,7 +20,7 @@ export default async function NewTournamentPage() {
         title="创建赛事"
         description="默认创建双人赛，后续可以调整为多人队制、软硬交替和自定义局制。"
         icon={<Plus className="h-6 w-6" aria-hidden />}
-        poster="white"
+        art="white"
       />
       <Card>
         <TournamentForm action={createTournamentAction} />

@@ -96,7 +96,7 @@ export default async function SavedTeamDetailPage({
         title={savedTeam.name}
         description={`长期队伍 · 状态 ${savedTeam.status}`}
         icon={<UsersRound className="h-6 w-6" aria-hidden />}
-        poster="white"
+        art="white"
         actions={
           <Link className="inline-flex min-h-11 items-center rounded-lg bg-board px-4 text-sm font-black text-white" href="/profile">
             返回个人中心

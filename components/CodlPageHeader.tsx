@@ -1,19 +1,10 @@
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
-const posterMap = {
-  focus: {
-    src: "/codl/codl-focus-poster.jpg",
-    position: "74% 34%"
-  },
-  pattern: {
-    src: "/codl/codl-pattern-poster.jpg",
-    position: "62% 36%"
-  },
-  white: {
-    src: "/codl/codl-white-poster.jpg",
-    position: "58% 32%"
-  }
+const headerArtMap = {
+  focus: "codl-page-header-art--focus",
+  pattern: "codl-page-header-art--pattern",
+  white: "codl-page-header-art--white"
 };
 
 export function CodlPageHeader({
@@ -22,7 +13,7 @@ export function CodlPageHeader({
   description,
   icon,
   actions,
-  poster = "pattern",
+  art = "pattern",
   dark = false,
   className
 }: {
@@ -31,12 +22,10 @@ export function CodlPageHeader({
   description?: string;
   icon?: ReactNode;
   actions?: ReactNode;
-  poster?: keyof typeof posterMap;
+  art?: keyof typeof headerArtMap;
   dark?: boolean;
   className?: string;
 }) {
-  const asset = posterMap[poster];
-
   return (
     <section
       className={cn(
@@ -47,8 +36,7 @@ export function CodlPageHeader({
     >
       <div
         aria-hidden
-        className="codl-page-header-art"
-        style={{ backgroundImage: `url(${asset.src})`, backgroundPosition: asset.position }}
+        className={cn("codl-page-header-art", headerArtMap[art])}
       />
       <div className={cn("absolute inset-0", dark ? "bg-primary/90" : "bg-white/80")} />
       <div className="relative flex flex-wrap items-end justify-between gap-5">
@@ -57,6 +45,7 @@ export function CodlPageHeader({
             src={dark ? "/codl/codl-logo-dark.png" : "/codl/codl-logo-light.png"}
             alt="CODL logo"
             className={cn("mb-4 h-auto w-[150px] object-contain sm:w-[210px]", dark && "mix-blend-normal")}
+            style={{ height: "auto", maxWidth: "min(210px, 58vw)", width: "min(210px, 58vw)" }}
           />
           <div className={cn("codl-page-kicker", dark && "text-white")}>
             <span className={cn("codl-rule", dark && "bg-white")} aria-hidden />

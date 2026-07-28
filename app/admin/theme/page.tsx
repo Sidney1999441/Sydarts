@@ -38,7 +38,7 @@ export default async function AdminThemePage({
         title="品牌配置"
         description="CODL 专属视觉以黑、白、蓝为准；这里保留为维护主题配置和恢复默认值的入口。"
         icon={<Palette className="h-6 w-6" aria-hidden />}
-        poster="white"
+        art="white"
       />
 
       {params.saved ? (
@@ -105,7 +105,12 @@ export default async function AdminThemePage({
           <div className="mt-4 overflow-hidden rounded-lg border border-wire bg-field">
             <div className="flex items-center justify-between border-b border-wire bg-primary px-4 py-3 text-white">
               <div className="flex items-center gap-2 text-sm font-black tracking-[0.12em]">
-                <img src="/codl/codl-mark-dark.png" alt="CODL logo" className="h-9 w-auto object-contain" />
+                <img
+                  src="/codl/codl-mark-dark.png"
+                  alt="CODL logo"
+                  className="h-9 w-auto object-contain"
+                  style={{ height: "2.25rem", width: "auto", maxWidth: "min(128px, 34vw)" }}
+                />
               </div>
               <span className="rounded-full bg-surface/15 px-2 py-1 text-xs">Admin</span>
             </div>

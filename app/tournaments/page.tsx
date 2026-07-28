@@ -28,7 +28,7 @@ export default async function TournamentsPage() {
         title="赛事列表"
         description="支持硬镖、软镖和软硬交替赛事；软镖使用手机手动录入，个人数据随正式比赛自动沉淀。"
         icon={<CalendarDays className="h-6 w-6" aria-hidden />}
-        poster="white"
+        art="white"
       />
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {(tournaments || []).map((tournament) => (

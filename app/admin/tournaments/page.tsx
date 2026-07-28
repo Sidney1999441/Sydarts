@@ -37,7 +37,7 @@ export default async function AdminTournamentsPage() {
         title="赛事"
         description="创建、发布、编排和维护 CODL 赛事。"
         icon={<CalendarDays className="h-6 w-6" aria-hidden />}
-        poster="pattern"
+        art="pattern"
         actions={
           <Link className="inline-flex min-h-12 touch-manipulation items-center gap-2 rounded-lg bg-board px-4 text-sm font-black text-white" href="/admin/tournaments/new">
           <Plus className="h-4 w-4" aria-hidden />

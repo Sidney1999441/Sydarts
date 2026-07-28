@@ -76,7 +76,7 @@ export default async function ResultsAdminPage({
         title="成绩管理"
         description="管理员可修改结果、处理确认记录，并补录个人数据。"
         icon={<ClipboardCheck className="h-6 w-6" aria-hidden />}
-        poster="pattern"
+        art="pattern"
       />
       <Card>
         <div className="grid gap-4">

@@ -31,7 +31,7 @@ export default async function AdminHomePage() {
         title="赛事后台"
         description="管理赛事、用户、队伍、赛程和现场计分入口。"
         icon={<ShieldCheck className="h-6 w-6" aria-hidden />}
-        poster="pattern"
+        art="pattern"
         actions={
           <Link
             className="inline-flex min-h-12 touch-manipulation items-center gap-2 rounded-lg bg-board px-4 text-sm font-bold text-white"

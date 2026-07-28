@@ -445,19 +445,30 @@ describe("team-first tournament algorithms", () => {
     expect(initialRatingTiers).toHaveLength(9);
     expect(initialRatingTiers.map((tier) => tier.rating)).toEqual([
       800,
-      950,
-      1050,
-      1150,
-      1275,
-      1400,
-      1550,
-      1700,
-      1850
+      968,
+      1103,
+      1238,
+      1372,
+      1507,
+      1642,
+      1777,
+      1900
+    ]);
+    expect(initialRatingTiers.map((tier) => tier.targetLevel)).toEqual([
+      1,
+      16,
+      28,
+      40,
+      52,
+      64,
+      76,
+      88,
+      99
     ]);
     expect(initialRatingTiers.map((tier) => ratingToSkillLevel(tier.rating))).toEqual([
       "Beginner",
       "Beginner",
-      "Beginner",
+      "Intermediate",
       "Intermediate",
       "Intermediate",
       "Advanced",
@@ -465,7 +476,18 @@ describe("team-first tournament algorithms", () => {
       "Pro",
       "Pro"
     ]);
-    expect(getInitialRatingTier("tier_6")?.rating).toBe(1400);
+    expect(initialRatingTiers.map((tier) => calculatePlayerLevel({ rating: tier.rating }).level)).toEqual([
+      1,
+      16,
+      28,
+      40,
+      52,
+      64,
+      76,
+      88,
+      99
+    ]);
+    expect(getInitialRatingTier("tier_6")?.rating).toBe(1507);
     expect(getInitialRatingTier("missing")).toBeNull();
   });
 

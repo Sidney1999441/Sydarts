@@ -117,7 +117,7 @@ export default async function MatchScorerPage({
             legRules
           })}
         icon={<Gauge className="h-6 w-6" aria-hidden />}
-        poster="white"
+        art="white"
       />
       {match.status === "completed" ? (
         <Card>

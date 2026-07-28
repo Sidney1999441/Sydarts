@@ -19,7 +19,7 @@ export default async function RegisterPage({
         title="注册"
         description="创建选手账号后即可报名、计分和查看个人段位。"
         icon={<UserPlus className="h-6 w-6" aria-hidden />}
-        poster="white"
+        art="white"
       />
       <Card>
         {params.message ? (

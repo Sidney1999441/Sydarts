@@ -19,7 +19,7 @@ export default async function LoginPage({
         title="登录"
         description="进入赛事、计分器和个人数据。"
         icon={<LogIn className="h-6 w-6" aria-hidden />}
-        poster="white"
+        art="white"
       />
       <Card>
         {params.message ? (

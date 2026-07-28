@@ -72,7 +72,7 @@ export default async function AdminTeamsPage() {
         title="队伍管理"
         description="维护长期队伍、赛事队伍和队伍成员关联。"
         icon={<UsersRound className="h-6 w-6" aria-hidden />}
-        poster="pattern"
+        art="pattern"
         actions={
           <div className="grid grid-cols-2 gap-2 text-sm font-bold">
             <Metric label="长期队伍" value={(savedTeams || []).length} />
