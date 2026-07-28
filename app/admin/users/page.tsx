@@ -1,6 +1,12 @@
 import { Search, UserRound } from "lucide-react";
 import { updateUserAdminFieldsAction } from "@/lib/actions/users";
-import { calculatePlayerLevel, ratingToSkillLevel, type PlayerLevelStats, type SoftPlayerLevelStats } from "@/lib/algorithms/player-level";
+import {
+  calculatePlayerLevel,
+  initialRatingTiers,
+  ratingToSkillLevel,
+  type PlayerLevelStats,
+  type SoftPlayerLevelStats
+} from "@/lib/algorithms/player-level";
 import { requireAdmin } from "@/lib/auth/guards";
 import { hasSupabaseEnv } from "@/lib/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -222,6 +228,31 @@ export default async function AdminUsersPage({
                   </div>
                 </div>
 
+                <div className="grid gap-3 rounded-lg border border-board/25 bg-field/80 p-3 lg:grid-cols-[1fr_auto] lg:items-end">
+                  <label className="label">
+                    一键初始等级
+                    <select className="form-input bg-white" name="initial_rating_tier" defaultValue="">
+                      <option value="">不修改，保留下方当前等级分</option>
+                      {initialRatingTiers.map((tier) => {
+                        const level = calculatePlayerLevel({ rating: tier.rating });
+                        return (
+                          <option key={tier.id} value={tier.id}>
+                            {tier.label} · {tier.rating} · {ratingToSkillLevel(tier.rating)} · {level.label}
+                          </option>
+                        );
+                      })}
+                    </select>
+                    <span className="text-xs font-semibold text-muted">
+                      保存时会同步普通、赛事、软镖三条 Rating，并自动更新当前等级系统。
+                    </span>
+                  </label>
+                  <div className="grid gap-2 text-xs font-black text-muted sm:grid-cols-3 lg:w-[28rem]">
+                    <div className="rounded-lg bg-surface px-3 py-2">普通 {casualRating}</div>
+                    <div className="rounded-lg bg-surface px-3 py-2">赛事 {tournamentRating}</div>
+                    <div className="rounded-lg bg-surface px-3 py-2">软镖 {softRating}</div>
+                  </div>
+                </div>
+
                 <div className="grid gap-3 lg:grid-cols-4">
                   <label className="label">
                     显示名
@@ -245,41 +276,49 @@ export default async function AdminUsersPage({
                       <option value="admin">admin</option>
                     </select>
                   </label>
-                  <label className="label">
-                    普通 Rating
-                    <input
-                      className="form-input"
-                      type="number"
-                      name="casual_rating"
-                      defaultValue={casualRating}
-                    />
-                  </label>
-                  <label className="label">
-                    赛事 Rating
-                    <input
-                      className="form-input"
-                      type="number"
-                      name="tournament_rating"
-                      defaultValue={tournamentRating}
-                    />
-                  </label>
-                  <label className="label">
-                    软镖 Rating
-                    <input
-                      className="form-input"
-                      type="number"
-                      name="soft_rating"
-                      defaultValue={softRating}
-                    />
-                  </label>
-                  <ReadOnlyField label="普通分档" value={ratingToSkillLevel(casualRating)} />
-                  <ReadOnlyField label="赛事分档" value={ratingToSkillLevel(tournamentRating)} />
-                  <ReadOnlyField label="软镖分档" value={ratingToSkillLevel(softRating)} />
                   <label className="label lg:col-span-4">
                     备注
                     <textarea className="form-input min-h-24" name="bio" defaultValue={user.bio || ""} />
                   </label>
                 </div>
+
+                <details className="rounded-lg border border-wire bg-surface/80 p-3">
+                  <summary className="cursor-pointer text-sm font-black text-board">
+                    高级：手动微调 Rating
+                  </summary>
+                  <div className="mt-3 grid gap-3 lg:grid-cols-3">
+                    <label className="label">
+                      普通 Rating
+                      <input
+                        className="form-input"
+                        type="number"
+                        name="casual_rating"
+                        defaultValue={casualRating}
+                      />
+                    </label>
+                    <label className="label">
+                      赛事 Rating
+                      <input
+                        className="form-input"
+                        type="number"
+                        name="tournament_rating"
+                        defaultValue={tournamentRating}
+                      />
+                    </label>
+                    <label className="label">
+                      软镖 Rating
+                      <input
+                        className="form-input"
+                        type="number"
+                        name="soft_rating"
+                        defaultValue={softRating}
+                      />
+                    </label>
+                    <ReadOnlyField label="普通分档" value={ratingToSkillLevel(casualRating)} />
+                    <ReadOnlyField label="赛事分档" value={ratingToSkillLevel(tournamentRating)} />
+                    <ReadOnlyField label="软镖分档" value={ratingToSkillLevel(softRating)} />
+                  </div>
+                </details>
 
                 <div className="grid gap-3 lg:grid-cols-[1fr_1fr_1.1fr]">
                   <AdminLevelCard title="普通段位" rating={casualRating} stats={generalStats} level={generalLevel} tone="general" />

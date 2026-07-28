@@ -40,17 +40,15 @@ export function CodlPageHeader({
   return (
     <section
       className={cn(
-        "relative overflow-hidden rounded-lg border border-wire p-5 shadow-[0_22px_58px_rgb(17_24_39/0.08)] sm:p-6",
+        "codl-page-header relative overflow-hidden rounded-lg border border-wire p-5 shadow-[0_22px_58px_rgb(17_24_39/0.08)] sm:p-6",
         dark ? "bg-primary text-white" : "bg-surface text-ink",
         className
       )}
     >
-      <img
-        src={asset.src}
-        alt=""
+      <div
         aria-hidden
-        className="absolute inset-0 h-full w-full object-cover"
-        style={{ objectPosition: asset.position }}
+        className="codl-page-header-art"
+        style={{ backgroundImage: `url(${asset.src})`, backgroundPosition: asset.position }}
       />
       <div className={cn("absolute inset-0", dark ? "bg-primary/90" : "bg-white/80")} />
       <div className="relative flex flex-wrap items-end justify-between gap-5">
@@ -85,7 +83,7 @@ export function CodlPageHeader({
             </p>
           ) : null}
         </div>
-        {actions ? <div className="shrink-0">{actions}</div> : null}
+        {actions ? <div className="w-full min-w-0 sm:w-auto sm:shrink-0">{actions}</div> : null}
       </div>
     </section>
   );

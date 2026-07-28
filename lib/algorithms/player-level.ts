@@ -35,6 +35,16 @@ export type SoftPlayerLevelStats = {
 
 export type MajorRank = "白丁" | "镖人" | "镖侠" | "镖王" | "镖仙" | "镖神" | "归一";
 export type CoarseSkillLevel = "Beginner" | "Intermediate" | "Advanced" | "Pro";
+export type InitialRatingTierId =
+  | "tier_1"
+  | "tier_2"
+  | "tier_3"
+  | "tier_4"
+  | "tier_5"
+  | "tier_6"
+  | "tier_7"
+  | "tier_8"
+  | "tier_9";
 
 export type PlayerLevelResult = {
   majorRank: MajorRank;
@@ -71,6 +81,27 @@ export function ratingToSkillLevel(rating?: number | null): CoarseSkillLevel {
   if (value >= 1400) return "Advanced";
   if (value >= 1100) return "Intermediate";
   return "Beginner";
+}
+
+export const initialRatingTiers: Array<{
+  id: InitialRatingTierId;
+  label: string;
+  rating: number;
+  description: string;
+}> = [
+  { id: "tier_1", label: "T1 新手体验", rating: 800, description: "第一次参赛或完全新人" },
+  { id: "tier_2", label: "T2 入门稳定", rating: 950, description: "了解规则，偶尔练习" },
+  { id: "tier_3", label: "T3 基础选手", rating: 1050, description: "能稳定完成比赛" },
+  { id: "tier_4", label: "T4 普通参赛", rating: 1150, description: "有一定准度，适合常规分组" },
+  { id: "tier_5", label: "T5 进阶选手", rating: 1275, description: "稳定得分，具备小组竞争力" },
+  { id: "tier_6", label: "T6 强力选手", rating: 1400, description: "明显高于平均，分组需平衡" },
+  { id: "tier_7", label: "T7 主力选手", rating: 1550, description: "队伍核心战力" },
+  { id: "tier_8", label: "T8 种子选手", rating: 1700, description: "高水平选手，建议作为种子" },
+  { id: "tier_9", label: "T9 顶尖种子", rating: 1850, description: "赛事最高档初始评级" }
+];
+
+export function getInitialRatingTier(value: string | null | undefined) {
+  return initialRatingTiers.find((tier) => tier.id === value) || null;
 }
 
 function numberOrZero(value: number | null | undefined) {

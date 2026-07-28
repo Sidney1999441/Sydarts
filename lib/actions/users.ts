@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireAdmin, requireUser } from "@/lib/auth/guards";
-import { ratingToSkillLevel } from "@/lib/algorithms/player-level";
+import { getInitialRatingTier, ratingToSkillLevel } from "@/lib/algorithms/player-level";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { fromFormString } from "@/lib/utils";
@@ -33,9 +33,11 @@ export async function updateUserAdminFieldsAction(formData: FormData) {
   const bio = fromFormString(formData.get("bio")) || null;
   const role = parseOption(fromFormString(formData.get("role")), userRoles, "user");
   const status = parseOption(fromFormString(formData.get("status")), userStatuses, "active");
-  const tournamentRating = parseRating(formData.get("tournament_rating"));
-  const casualRating = parseRating(formData.get("casual_rating"), tournamentRating);
-  const softRating = parseRating(formData.get("soft_rating"), tournamentRating);
+  const initialRatingTier = getInitialRatingTier(fromFormString(formData.get("initial_rating_tier")));
+  const initialRating = initialRatingTier?.rating ?? null;
+  const tournamentRating = initialRating ?? parseRating(formData.get("tournament_rating"));
+  const casualRating = initialRating ?? parseRating(formData.get("casual_rating"), tournamentRating);
+  const softRating = initialRating ?? parseRating(formData.get("soft_rating"), tournamentRating);
   const tournamentSkillLevel = parseSkillLevel(formData.get("tournament_skill_level"), tournamentRating);
   const casualSkillLevel = parseSkillLevel(formData.get("casual_skill_level"), casualRating);
   const softSkillLevel = parseSkillLevel(formData.get("soft_skill_level"), softRating);

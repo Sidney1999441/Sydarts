@@ -132,16 +132,9 @@ export default async function HomePage() {
 
 function Hero({ platformName, isAdmin }: { platformName: string; isAdmin: boolean }) {
   return (
-    <section className="relative min-h-[360px] overflow-hidden rounded-lg border border-wire bg-surface text-ink shadow-[0_24px_70px_rgb(17_24_39/0.10)]">
-      <img
-        src="/codl/codl-focus-poster.jpg"
-        alt=""
-        aria-hidden
-        className="absolute inset-0 h-full w-full object-cover"
-        style={{ objectPosition: "72% 34%" }}
-      />
-      <div className="absolute inset-0 bg-white/80" />
-      <div className="relative grid min-h-[360px] content-between gap-8 p-5 sm:p-6 lg:p-8">
+    <section className="codl-hero relative overflow-hidden rounded-lg border border-wire bg-surface text-ink shadow-[0_24px_70px_rgb(17_24_39/0.10)]">
+      <div className="codl-hero-art" aria-hidden />
+      <div className="codl-hero-content relative grid min-h-[360px] content-between gap-8 p-5 sm:p-6 lg:p-8">
         <div className="max-w-2xl">
           <div className="codl-page-kicker">
             <span className="codl-rule" aria-hidden />
@@ -150,7 +143,7 @@ function Hero({ platformName, isAdmin }: { platformName: string; isAdmin: boolea
           <img
             src="/codl/codl-logo-light.png"
             alt={`${platformName} logo`}
-            className="mt-4 h-auto w-full max-w-[560px] object-contain"
+            className="codl-hero-logo mt-4 h-auto w-full max-w-[560px] object-contain"
           />
           <h1 className="sr-only">{platformName}</h1>
           <p className="mt-3 max-w-xl text-base font-bold text-muted sm:text-lg">

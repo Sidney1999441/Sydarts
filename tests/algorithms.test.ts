@@ -8,7 +8,7 @@ import {
 import { applyTurn, calculateDartStats, createScoringState } from "@/lib/algorithms/scoring";
 import { updateTournamentStandings } from "@/lib/algorithms/standings";
 import { updateUserRating } from "@/lib/algorithms/rating";
-import { calculatePlayerLevel, ratingToSkillLevel } from "@/lib/algorithms/player-level";
+import { calculatePlayerLevel, getInitialRatingTier, initialRatingTiers, ratingToSkillLevel } from "@/lib/algorithms/player-level";
 import {
   resolveMatchLegRules,
   validateMatchLegRules,
@@ -439,6 +439,34 @@ describe("team-first tournament algorithms", () => {
     expect(ratingToSkillLevel(1100)).toBe("Intermediate");
     expect(ratingToSkillLevel(1400)).toBe("Advanced");
     expect(ratingToSkillLevel(1700)).toBe("Pro");
+  });
+
+  it("offers nine initial rating tiers tied to the current rating buckets", () => {
+    expect(initialRatingTiers).toHaveLength(9);
+    expect(initialRatingTiers.map((tier) => tier.rating)).toEqual([
+      800,
+      950,
+      1050,
+      1150,
+      1275,
+      1400,
+      1550,
+      1700,
+      1850
+    ]);
+    expect(initialRatingTiers.map((tier) => ratingToSkillLevel(tier.rating))).toEqual([
+      "Beginner",
+      "Beginner",
+      "Beginner",
+      "Intermediate",
+      "Intermediate",
+      "Advanced",
+      "Advanced",
+      "Pro",
+      "Pro"
+    ]);
+    expect(getInitialRatingTier("tier_6")?.rating).toBe(1400);
+    expect(getInitialRatingTier("missing")).toBeNull();
   });
 
   it("promotes strong players with high averages and win rates", () => {

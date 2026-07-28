@@ -158,8 +158,119 @@ th {
   background: rgb(var(--color-board));
 }
 
+.codl-hero {
+  background:
+    linear-gradient(90deg, rgb(var(--color-surface)) 0%, rgb(var(--color-surface) / 0.97) 44%, rgb(238 247 253 / 0.92) 100%);
+}
+
+.codl-hero-art {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.codl-hero-art::before,
+.codl-hero-art::after {
+  content: "";
+  position: absolute;
+  background-repeat: no-repeat;
+  background-size: contain;
+  pointer-events: none;
+}
+
+.codl-hero-art::before {
+  top: -8.5rem;
+  right: -8rem;
+  width: min(620px, 48vw);
+  aspect-ratio: 2018 / 2854;
+  background-image: url("/codl/codl-pattern-poster.jpg");
+  background-position: center;
+  opacity: 0.18;
+}
+
+.codl-hero-art::after {
+  right: 4rem;
+  bottom: -12rem;
+  width: min(680px, 46vw);
+  aspect-ratio: 2018 / 2854;
+  background-image: url("/codl/codl-focus-poster.jpg");
+  background-position: center;
+  opacity: 0.07;
+}
+
+.codl-page-header {
+  min-height: 13rem;
+}
+
+.codl-page-header-art {
+  position: absolute;
+  inset: 0;
+  background-repeat: no-repeat;
+  background-size: min(680px, 58vw) auto;
+  opacity: 0.22;
+  pointer-events: none;
+}
+
 @media (max-width: 1023px) {
   body {
     padding-bottom: calc(5.5rem + env(safe-area-inset-bottom));
+  }
+}
+
+@media (max-width: 640px) {
+  .codl-backdrop::before {
+    top: -11rem;
+    right: -13rem;
+    width: 25rem;
+    opacity: 0.06;
+  }
+
+  .codl-backdrop::after {
+    bottom: -12rem;
+    left: -13rem;
+    width: 24rem;
+    opacity: 0.05;
+  }
+
+  .codl-hero {
+    min-height: 0;
+  }
+
+  .codl-hero-content {
+    min-height: 0;
+    gap: 1.5rem;
+  }
+
+  .codl-hero-logo {
+    max-width: min(100%, 20rem);
+  }
+
+  .codl-hero-art::before {
+    top: -7rem;
+    right: -8rem;
+    width: 22rem;
+    opacity: 0.13;
+  }
+
+  .codl-hero-art::after {
+    display: none;
+  }
+
+  .codl-page-header {
+    min-height: 0;
+  }
+
+  .codl-page-header-art {
+    background-position: right -8rem top -6.5rem !important;
+    background-size: 22rem auto;
+    opacity: 0.14;
+  }
+
+  .codl-page-kicker {
+    font-size: 0.72rem;
+  }
+
+  .codl-rule {
+    width: 3.25rem;
   }
 }
