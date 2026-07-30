@@ -282,6 +282,18 @@ th {
   transform: rotate(34deg);
 }
 
+.codl-mobile-fold > summary {
+  list-style: none;
+}
+
+.codl-mobile-fold > summary::-webkit-details-marker {
+  display: none;
+}
+
+.codl-mobile-fold-content {
+  display: grid;
+}
+
 @media (max-width: 1023px) {
   body {
     padding-bottom: calc(5.5rem + env(safe-area-inset-bottom));

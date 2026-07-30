@@ -22,7 +22,7 @@ export default async function RootLayout({
       <body style={themeCssVariables(codlTheme)}>
         <div className="codl-backdrop" aria-hidden />
         <Header userEmail={user?.email || null} profile={profile} theme={codlTheme} />
-        <main className="relative z-0 mx-auto w-full max-w-7xl px-4 py-5 sm:px-6 lg:px-8">
+        <main className="relative mx-auto w-full max-w-7xl px-4 py-5 sm:px-6 lg:px-8">
           {children}
         </main>
       </body>

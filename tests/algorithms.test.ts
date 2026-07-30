@@ -5,7 +5,7 @@ import {
   generateRoundRobinMatches,
   generateSingleEliminationBracket
 } from "@/lib/algorithms/schedule";
-import { applyTurn, calculateDartStats, createScoringState } from "@/lib/algorithms/scoring";
+import { adjudicateCurrentLegWinner, applyTurn, calculateDartStats, createScoringState } from "@/lib/algorithms/scoring";
 import { updateTournamentStandings } from "@/lib/algorithms/standings";
 import { updateUserRating } from "@/lib/algorithms/rating";
 import { calculatePlayerLevel, getInitialRatingTier, initialRatingTiers, ratingToSkillLevel } from "@/lib/algorithms/player-level";
@@ -140,6 +140,66 @@ describe("team-first tournament algorithms", () => {
     const stats = calculateDartStats(state.participants[0].turns);
     expect(stats.highestTurnScore).toBe(180);
     expect(stats.count180).toBe(2);
+  });
+
+  it("starts 01 scoring from the selected first participant", () => {
+    let state = createScoringState({
+      participantAId: "team-1",
+      participantBId: "team-2",
+      startingScore: 501,
+      bestOf: 3,
+      firstParticipantId: "team-2"
+    });
+
+    expect(state.activeParticipantId).toBe("team-2");
+
+    state = applyTurn(state, 60);
+
+    expect(state.turns[0].participantId).toBe("team-2");
+    expect(state.activeParticipantId).toBe("team-1");
+  });
+
+  it("can adjudicate a leg at the round limit without recording a checkout", () => {
+    let state = createScoringState({
+      participantAId: "team-1",
+      participantBId: "team-2",
+      startingScore: 501,
+      bestOf: 3
+    });
+
+    state = applyTurn(state, 60);
+    state = applyTurn(state, 45);
+    state = adjudicateCurrentLegWinner(state, "team-2", { roundLimit: 10 });
+
+    expect(state.participants[1].legsWon).toBe(1);
+    expect(state.currentLeg).toBe(2);
+    expect(state.activeParticipantId).toBe("team-2");
+    expect(state.legResults[0]).toMatchObject({
+      winnerParticipantId: "team-2",
+      checkoutScore: null,
+      resolutionReason: "round_limit",
+      roundLimit: 10,
+      remainingA: 441,
+      remainingB: 456
+    });
+  });
+
+  it("lets the previous leg winner start next leg in winner-start mode", () => {
+    let state = createScoringState({
+      participantAId: "team-1",
+      participantBId: "team-2",
+      startingScore: 301,
+      bestOf: 3,
+      firstThrowMode: "winner"
+    });
+
+    state = applyTurn(state, 180);
+    state = applyTurn(state, 0);
+    state = applyTurn(state, 121);
+
+    expect(state.participants[0].legsWon).toBe(1);
+    expect(state.currentLeg).toBe(2);
+    expect(state.activeParticipantId).toBe("team-1");
   });
 
   it("records the exact thrower for team scoring turns", () => {

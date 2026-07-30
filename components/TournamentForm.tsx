@@ -21,6 +21,7 @@ import {
 import { toDatetimeLocal } from "@/lib/utils";
 import type {
   DartMode,
+  FirstThrowMode,
   LegGameVariant,
   MatchDartMode,
   MatchLegRule,
@@ -314,7 +315,7 @@ export function TournamentForm({
       </div>
 
       <div className="grid gap-4 rounded-lg border border-wire bg-field p-4">
-        <div className="grid gap-4 lg:grid-cols-4">
+        <div className="grid gap-4 lg:grid-cols-5">
           <label className="label">
             镖种
             <select
@@ -356,6 +357,17 @@ export function TournamentForm({
                 <option key={option.value} value={option.value}>{option.label}</option>
               ))}
             </select>
+          </label>
+          <label className="label">
+            先手交替
+            <select className="form-input" name="first_throw_mode" defaultValue={tournament?.first_throw_mode || ""}>
+              <option value="">现场选择</option>
+              <option value={"alternate" satisfies FirstThrowMode}>轮先</option>
+              <option value={"winner" satisfies FirstThrowMode}>胜先</option>
+            </select>
+            <span className="text-xs font-normal text-muted">
+              设置后计分开局只选先手方；不设置则现场一起选择。
+            </span>
           </label>
           <label className="label">
             标准胜负规则

@@ -2,8 +2,9 @@
 
 import type { ReactNode } from "react";
 import { useMemo, useRef, useState, useTransition } from "react";
-import { BarChart3, Check, Eye, EyeOff, ListChecks, RotateCcw, Save, Trophy, Undo2 } from "lucide-react";
+import { BarChart3, Check, Clock3, Eye, EyeOff, Flag, ListChecks, RotateCcw, Save, Trophy, Undo2 } from "lucide-react";
 import {
+  adjudicateCurrentLegWinner,
   applyTurn,
   calculateDartStats,
   createScoringState,
@@ -14,10 +15,11 @@ import { getLegRuleLabel, getLegStartingScore } from "@/lib/darts/variants";
 import type { ManualMatchStats } from "@/lib/darts/soft-stats";
 import { createResultSubmissionId } from "@/lib/results/submission";
 import { Button } from "@/components/ui/Button";
-import type { MatchFinishMode, MatchLegLineup, MatchLegResult, MatchLegRule } from "@/types/domain";
+import type { FirstThrowMode, MatchFinishMode, MatchLegLineup, MatchLegResult, MatchLegRule } from "@/types/domain";
 
 type GameScore = 301 | 501 | 701;
 type BestOf = 3 | 5 | 7;
+export type RoundLimit = 10 | 15 | 20 | "unlimited";
 type PlayerOption = { userId: string; name: string };
 type ParticipantInfo = { id: string; name: string; members?: PlayerOption[] };
 type ThrowerByParticipant = Record<string, string>;
@@ -36,6 +38,34 @@ export type ScoringCompletePayload = {
   legLineups: MatchLegLineup[];
   userStats?: Record<string, ManualMatchStats>;
 };
+
+const roundLimitOptions: Array<{ value: RoundLimit; label: string }> = [
+  { value: 10, label: "10 轮" },
+  { value: 15, label: "15 轮" },
+  { value: 20, label: "20 轮" },
+  { value: "unlimited", label: "无限" }
+];
+
+const firstThrowModeOptions: Array<{ value: FirstThrowMode; label: string; description: string }> = [
+  { value: "alternate", label: "轮先", description: "每局双方轮流先手" },
+  { value: "winner", label: "胜先", description: "上一局胜方下一局先手" }
+];
+
+const scorerDialogBackdropClass =
+  "fixed inset-0 z-[100] grid place-items-end overflow-y-auto bg-slate-950/50 p-3 pb-[calc(5.75rem+env(safe-area-inset-bottom))] sm:place-items-center sm:pb-3";
+const scorerDialogPanelClass = "max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain";
+
+function getNumericRoundLimit(limit: RoundLimit) {
+  return limit === "unlimited" ? null : limit;
+}
+
+function getRoundLimitLabel(limit: RoundLimit) {
+  return limit === "unlimited" ? "无限" : `${limit} 轮`;
+}
+
+function getFirstThrowModeLabel(mode: FirstThrowMode) {
+  return firstThrowModeOptions.find((option) => option.value === mode)?.label || "轮先";
+}
 
 function defaultRules(startingScore: GameScore, bestOf: BestOf): MatchLegRule[] {
   return Array.from({ length: bestOf }, (_, index) => ({
@@ -80,6 +110,8 @@ export function TouchScoreboard({
   bestOf,
   legRules,
   matchFinishMode = "majority",
+  initialRoundLimit = "unlimited",
+  initialFirstThrowMode = null,
   saveLabel,
   successMessage,
   onComplete
@@ -90,6 +122,8 @@ export function TouchScoreboard({
   bestOf: BestOf;
   legRules?: MatchLegRule[];
   matchFinishMode?: MatchFinishMode;
+  initialRoundLimit?: RoundLimit;
+  initialFirstThrowMode?: FirstThrowMode | null;
   saveLabel: string;
   successMessage: string;
   onComplete: (payload: ScoringCompletePayload) => Promise<void>;
@@ -100,22 +134,39 @@ export function TouchScoreboard({
   );
   const initialLineups = useMemo(() => defaultLineups(rules, participantA, participantB), [rules, participantA, participantB]);
   const hasSinglesLeg = rules.some((rule) => rule.participantMode === "singles");
-  const [lineups, setLineups] = useState<MatchLegLineup[]>(initialLineups);
-  const [lineupConfirmed, setLineupConfirmed] = useState(!hasSinglesLeg);
-  const [activeThrowerByParticipant, setActiveThrowerByParticipant] = useState<ThrowerByParticipant>(() =>
-    defaultThrowers(initialLineups, participantA, participantB)
-  );
-  const [state, setState] = useState(() =>
-    createScoringState({
+  const configuredFirstThrowMode =
+    initialFirstThrowMode === "alternate" || initialFirstThrowMode === "winner"
+      ? initialFirstThrowMode
+      : null;
+  const defaultFirstThrowMode = configuredFirstThrowMode || "alternate";
+
+  function createFreshState(
+    nextLineups: MatchLegLineup[],
+    firstParticipantId?: string | null,
+    nextFirstThrowMode: FirstThrowMode = defaultFirstThrowMode
+  ) {
+    return createScoringState({
       participantAId: participantA.id,
       participantBId: participantB.id,
       startingScore: getLegStartingScore(rules[0]) || startingScore,
       bestOf,
       legRules: rules,
       matchFinishMode,
-      legLineups: initialLineups
-    })
+      legLineups: nextLineups,
+      firstParticipantId,
+      firstThrowMode: nextFirstThrowMode
+    });
+  }
+
+  const [lineups, setLineups] = useState<MatchLegLineup[]>(initialLineups);
+  const [lineupConfirmed, setLineupConfirmed] = useState(!hasSinglesLeg);
+  const [firstParticipantId, setFirstParticipantId] = useState<string | null>(null);
+  const [firstThrowMode, setFirstThrowMode] = useState<FirstThrowMode>(defaultFirstThrowMode);
+  const [roundLimit, setRoundLimit] = useState<RoundLimit>(initialRoundLimit);
+  const [activeThrowerByParticipant, setActiveThrowerByParticipant] = useState<ThrowerByParticipant>(() =>
+    defaultThrowers(initialLineups, participantA, participantB)
   );
+  const [state, setState] = useState(() => createFreshState(initialLineups, null, defaultFirstThrowMode));
   const [history, setHistory] = useState<ScoringHistoryEntry[]>([]);
   const [scoreInput, setScoreInput] = useState("");
   const [checkoutScore, setCheckoutScore] = useState<number | null>(null);
@@ -144,6 +195,26 @@ export function TouchScoreboard({
   );
   const currentRule = state.legRules[state.currentLeg - 1] || state.legRules[0];
   const quickScores = [180, 140, 100, 85, 81, 60, 45, 41, 26, 0];
+  const numericRoundLimit = getNumericRoundLimit(roundLimit);
+
+  function currentLegTurns(scoringState = state) {
+    return scoringState.turns.filter((turn) => turn.legNumber === scoringState.currentLeg);
+  }
+
+  function isRoundLimitReached(scoringState = state) {
+    return Boolean(
+      numericRoundLimit &&
+        !scoringState.winnerParticipantId &&
+        currentLegTurns(scoringState).length >= numericRoundLimit * 2
+    );
+  }
+
+  function currentRoundLabel() {
+    const turnCount = currentLegTurns().length;
+    const currentRound = Math.max(1, Math.floor(turnCount / 2) + 1);
+    if (!numericRoundLimit) return `${currentRound}/无限`;
+    return `${Math.min(currentRound, numericRoundLimit)}/${numericRoundLimit}`;
+  }
 
   function lineupUserIds(participantId: string, legNumber = state.currentLeg) {
     const lineup = lineups.find((item) => item.legNumber === legNumber);
@@ -222,41 +293,74 @@ export function TouchScoreboard({
       setMessage("请先为所有单人局选择双方出场选手。");
       return;
     }
-    setState(
-      createScoringState({
-        participantAId: participantA.id,
-        participantBId: participantB.id,
-        startingScore: getLegStartingScore(rules[0]) || startingScore,
-        bestOf,
-        legRules: rules,
-        matchFinishMode,
-        legLineups: lineups
-      })
-    );
+    setState(createFreshState(lineups, null, firstThrowMode));
     setLineupConfirmed(true);
+    setFirstParticipantId(null);
     setActiveThrowerByParticipant(defaultThrowers(lineups, participantA, participantB));
+    setHistory([]);
+    setScoreInput("");
+    setCheckoutScore(null);
+    setIsSaved(false);
     setMessage("");
     submissionIdRef.current = createResultSubmissionId();
   }
 
+  function chooseFirstParticipant(participantId: string) {
+    setState(createFreshState(lineups, participantId, firstThrowMode));
+    setFirstParticipantId(participantId);
+    setActiveThrowerByParticipant(defaultThrowers(lineups, participantA, participantB));
+    setHistory([]);
+    setScoreInput("");
+    setCheckoutScore(null);
+    setMessage("");
+    setIsSaved(false);
+    submissionIdRef.current = createResultSubmissionId();
+  }
+
+  function chooseRoundLimitWinner(participantId: string) {
+    const limit = getNumericRoundLimit(roundLimit);
+    if (!limit || state.winnerParticipantId) return;
+
+    try {
+      const next = adjudicateCurrentLegWinner(state, participantId, { roundLimit: limit });
+      const legChanged = next.currentLeg !== state.currentLeg;
+      setHistory((current) => [...current, { state, throwers: activeThrowerByParticipant }]);
+      setState(next);
+      setActiveThrowerByParticipant(
+        legChanged ? defaultThrowers(lineups, participantA, participantB, next.currentLeg) : activeThrowerByParticipant
+      );
+      setScoreInput("");
+      setCheckoutScore(null);
+      setMessage(next.winnerParticipantId ? "" : `已裁定本局胜方，进入第 ${next.currentLeg} 局。`);
+      setIsSaved(false);
+      submissionIdRef.current = createResultSubmissionId();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "请选择有效的本局胜方。");
+    }
+  }
+
   function recordScore(value: number, darts = 3) {
+    if (!firstParticipantId || isRoundLimitReached()) return;
     try {
       const participantId = state.activeParticipantId;
       const throwerUserId = currentThrowerUserId(participantId);
       const next = applyTurn(state, value, darts, throwerUserId || undefined);
+      const legChanged = next.currentLeg !== state.currentLeg;
       setHistory((current) => [...current, { state, throwers: activeThrowerByParticipant }]);
       setState(next);
-      setActiveThrowerByParticipant((current) => rotateThrower(current, participantId, state.currentLeg));
+      setActiveThrowerByParticipant((current) =>
+        legChanged ? defaultThrowers(lineups, participantA, participantB, next.currentLeg) : rotateThrower(current, participantId, state.currentLeg)
+      );
       setScoreInput("");
       setCheckoutScore(null);
-      setMessage("");
+      setMessage(isRoundLimitReached(next) ? `已达到本局 ${roundLimit} 轮上限，请选择本局胜方。` : "");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "请输入 0-180 的整数。");
     }
   }
 
   function requestScore(value: number) {
-    if (!activeParticipant || state.winnerParticipantId) return;
+    if (!firstParticipantId || !activeParticipant || state.winnerParticipantId || isRoundLimitReached()) return;
     if (value === activeParticipant.remaining && value > 0) {
       setCheckoutScore(value);
       return;
@@ -265,7 +369,7 @@ export function TouchScoreboard({
   }
 
   function appendDigit(digit: string) {
-    if (state.winnerParticipantId) return;
+    if (!firstParticipantId || state.winnerParticipantId || isRoundLimitReached()) return;
     setScoreInput((current) => {
       const next = current === "0" ? digit : `${current}${digit}`;
       return next.length > 3 ? current : next;
@@ -273,7 +377,7 @@ export function TouchScoreboard({
   }
 
   function confirmInput() {
-    if (scoreInput.length === 0) return;
+    if (!firstParticipantId || scoreInput.length === 0 || isRoundLimitReached()) return;
     requestScore(Number(scoreInput));
   }
 
@@ -291,17 +395,8 @@ export function TouchScoreboard({
   }
 
   function resetMatch() {
-    setState(
-      createScoringState({
-        participantAId: participantA.id,
-        participantBId: participantB.id,
-        startingScore: getLegStartingScore(rules[0]) || startingScore,
-        bestOf,
-        legRules: rules,
-        matchFinishMode,
-        legLineups: lineups
-      })
-    );
+    setState(createFreshState(lineups, null, firstThrowMode));
+    setFirstParticipantId(null);
     setActiveThrowerByParticipant(defaultThrowers(lineups, participantA, participantB));
     setHistory([]);
     setScoreInput("");
@@ -370,10 +465,26 @@ export function TouchScoreboard({
         {message ? <p className="text-sm font-semibold text-red-600">{message}</p> : null}
         <div>
           <Button type="button" onClick={confirmLineups}>
-            确认并开始计分
+            确认名单，进入开局设置
           </Button>
         </div>
       </div>
+    );
+  }
+
+  if (!firstParticipantId) {
+    return (
+      <OpeningSetupModal
+        participantAName={displayName(participantA.id, 1)}
+        participantBName={displayName(participantB.id, 1)}
+        firstThrowMode={firstThrowMode}
+        firstThrowModeLocked={Boolean(configuredFirstThrowMode)}
+        message={message}
+        onFirstThrowModeChange={setFirstThrowMode}
+        onChooseStarter={chooseFirstParticipant}
+        participantAId={participantA.id}
+        participantBId={participantB.id}
+      />
     );
   }
 
@@ -405,10 +516,11 @@ export function TouchScoreboard({
     : [];
   const activeThrowerId = activeParticipant ? currentThrowerUserId(activeParticipant.participantId) : "";
   const activeThrowerName = activeThrowerId ? memberNames.get(activeThrowerId) : null;
+  const roundLimitReached = isRoundLimitReached();
 
   return (
-    <div className="relative h-[calc(100dvh-14rem)] min-h-[500px] overflow-hidden rounded-lg lg:h-[calc(100dvh-7rem)] lg:min-h-[560px]">
-      <div className="grid h-full min-h-0 grid-rows-[auto_1fr] gap-2 lg:grid-cols-[0.9fr_1.1fr] lg:grid-rows-1">
+    <div className="relative grid gap-2 rounded-lg lg:h-[calc(100dvh-7rem)] lg:min-h-[560px] lg:overflow-hidden">
+      <div className="grid min-h-0 gap-2 lg:h-full lg:grid-cols-[0.9fr_1.1fr]">
         <section className="grid min-h-0 grid-cols-2 grid-rows-[1fr_auto] gap-2 lg:grid-cols-1 lg:grid-rows-[1fr_1fr_auto]">
           {state.participants.map((participant) => {
             const stats = calculateDartStats(participant.turns);
@@ -441,17 +553,27 @@ export function TouchScoreboard({
           </div>
         </section>
 
-        <section className="grid min-h-0 grid-rows-[auto_auto_1fr_auto] gap-2 rounded-lg border border-wire bg-surface p-3 shadow-soft">
+        <section className="grid min-h-0 gap-2 rounded-lg border border-wire bg-surface p-3 shadow-soft">
           <div className="flex items-start justify-between gap-3">
             <div>
               <div className="text-xs font-bold text-muted">本轮输入</div>
               <div className="text-4xl font-black leading-none text-ink">{scoreInput || "0"}</div>
               <div className="mt-1 text-xs font-semibold text-board">{getLegRuleLabel(currentRule)}</div>
             </div>
-            <div className="text-right text-sm text-muted">
+            <div className="grid justify-items-end gap-2 text-right text-sm text-muted">
               <div className="font-bold text-ink">{activeParticipant ? displayName(activeParticipant.participantId) : "已结束"}</div>
               {activeThrowerName ? <div>出镖 {activeThrowerName}</div> : null}
               <div>剩余 {activeParticipant?.remaining ?? 0}</div>
+              <div>{getFirstThrowModeLabel(firstThrowMode)} · 轮数 {currentRoundLabel()} · 上限 {getRoundLimitLabel(roundLimit)}</div>
+              <button
+                type="button"
+                className="inline-flex min-h-11 touch-manipulation select-none items-center justify-center gap-2 rounded-lg bg-board px-4 text-sm font-bold text-white transition-colors duration-75 active:bg-board/90 disabled:cursor-not-allowed disabled:opacity-50"
+                onClick={confirmInput}
+                disabled={scoreInput.length === 0 || roundLimitReached}
+              >
+                <Check className="h-4 w-4" aria-hidden />
+                确认录入
+              </button>
             </div>
           </div>
 
@@ -493,15 +615,6 @@ export function TouchScoreboard({
             </KeyButton>
           </div>
 
-          <button
-            type="button"
-            className="inline-flex min-h-10 touch-manipulation select-none items-center justify-center gap-2 rounded-lg bg-board px-4 text-base font-bold text-white transition-colors duration-75 active:bg-board/90 disabled:cursor-not-allowed disabled:opacity-50"
-            onClick={confirmInput}
-            disabled={scoreInput.length === 0}
-          >
-            <Check className="h-5 w-5" aria-hidden />
-            确认录入
-          </button>
           {message ? <p className="text-xs font-semibold text-accent">{message}</p> : null}
         </section>
       </div>
@@ -518,8 +631,8 @@ export function TouchScoreboard({
       ) : null}
 
       {checkoutScore !== null ? (
-        <div className="fixed inset-0 z-50 grid place-items-end bg-slate-950/45 p-3 sm:place-items-center">
-          <div className="w-full max-w-sm rounded-lg bg-surface p-5 shadow-soft">
+        <div className={scorerDialogBackdropClass}>
+          <div className={`${scorerDialogPanelClass} w-full max-w-sm rounded-lg bg-surface p-5 shadow-soft`}>
             <h3 className="text-lg font-bold">结镖确认</h3>
             <p className="mt-2 text-sm text-muted">本轮 {checkoutScore} 分结镖，用几镖完成？</p>
             <div className="mt-4 grid grid-cols-3 gap-2">
@@ -544,7 +657,178 @@ export function TouchScoreboard({
           </div>
         </div>
       ) : null}
+
+      {roundLimitReached ? (
+        <RoundLimitWinnerDialog
+          roundLimit={numericRoundLimit || 0}
+          participantAName={displayName(participantA.id)}
+          participantBName={displayName(participantB.id)}
+          participantARemaining={state.participants[0].remaining}
+          participantBRemaining={state.participants[1].remaining}
+          onChooseWinner={chooseRoundLimitWinner}
+          participantAId={participantA.id}
+          participantBId={participantB.id}
+        />
+      ) : null}
     </div>
+  );
+}
+
+function OpeningSetupModal({
+  participantAId,
+  participantBId,
+  participantAName,
+  participantBName,
+  firstThrowMode,
+  firstThrowModeLocked,
+  message,
+  onFirstThrowModeChange,
+  onChooseStarter
+}: {
+  participantAId: string;
+  participantBId: string;
+  participantAName: string;
+  participantBName: string;
+  firstThrowMode: FirstThrowMode;
+  firstThrowModeLocked: boolean;
+  message: string;
+  onFirstThrowModeChange: (mode: FirstThrowMode) => void;
+  onChooseStarter: (participantId: string) => void;
+}) {
+  return (
+    <div className={scorerDialogBackdropClass}>
+      <div className={`${scorerDialogPanelClass} w-full max-w-lg rounded-lg border border-wire bg-surface p-4 shadow-soft sm:p-5`}>
+        <div className="flex items-start gap-3">
+          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-board text-white">
+            <Flag className="h-5 w-5" aria-hidden />
+          </div>
+          <div>
+            <div className="text-xs font-black uppercase text-board">01 开局设置</div>
+            <h2 className="mt-1 text-xl font-black">选择先手后开始</h2>
+            <p className="mt-1 text-sm text-muted">双方确认谁先出镖；未选择前不会进入计分。</p>
+          </div>
+        </div>
+
+        <div className="mt-4 rounded-lg bg-field p-3">
+          <div className="text-sm font-bold text-ink">先手交替模式</div>
+          {firstThrowModeLocked ? (
+            <div className="mt-2 rounded-lg border border-board/25 bg-surface px-3 py-2 text-sm font-bold text-board">
+              赛事已设置：{firstThrowModeOptions.find((option) => option.value === firstThrowMode)?.label || "轮先"}
+            </div>
+          ) : (
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              {firstThrowModeOptions.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={`min-h-14 touch-manipulation select-none rounded-lg border px-3 text-left transition-colors duration-75 ${
+                    firstThrowMode === option.value
+                      ? "border-board bg-board text-white"
+                      : "border-wire bg-surface text-ink active:bg-field"
+                  }`}
+                  onClick={() => onFirstThrowModeChange(option.value)}
+                >
+                  <span className="block text-base font-black">{option.label}</span>
+                  <span className="mt-1 block text-xs font-semibold opacity-80">{option.description}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="mt-4 grid gap-2 sm:grid-cols-2">
+          <StarterButton name={participantAName} onClick={() => onChooseStarter(participantAId)} />
+          <StarterButton name={participantBName} onClick={() => onChooseStarter(participantBId)} />
+        </div>
+
+        {message ? <p className="mt-3 text-sm font-semibold text-accent">{message}</p> : null}
+      </div>
+    </div>
+  );
+}
+
+function StarterButton({ name, onClick }: { name: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      className="min-h-16 touch-manipulation select-none rounded-lg border border-wire bg-surface px-4 text-left transition-colors duration-75 active:border-board active:bg-board/10"
+      onClick={onClick}
+    >
+      <span className="block text-xs font-bold text-muted">先手</span>
+      <span className="mt-1 block truncate text-lg font-black text-ink">{name}</span>
+    </button>
+  );
+}
+
+function RoundLimitWinnerDialog({
+  participantAId,
+  participantBId,
+  participantAName,
+  participantBName,
+  participantARemaining,
+  participantBRemaining,
+  roundLimit,
+  onChooseWinner
+}: {
+  participantAId: string;
+  participantBId: string;
+  participantAName: string;
+  participantBName: string;
+  participantARemaining: number;
+  participantBRemaining: number;
+  roundLimit: number;
+  onChooseWinner: (participantId: string) => void;
+}) {
+  return (
+    <div className={scorerDialogBackdropClass}>
+      <div className={`${scorerDialogPanelClass} w-full max-w-lg rounded-lg border border-wire bg-surface p-4 shadow-soft sm:p-5`}>
+        <div className="flex items-start gap-3">
+          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-board text-white">
+            <Clock3 className="h-5 w-5" aria-hidden />
+          </div>
+          <div>
+            <div className="text-xs font-black uppercase text-board">轮数上限</div>
+            <h2 className="mt-1 text-xl font-black">第 {roundLimit} 轮已结束</h2>
+            <p className="mt-1 text-sm text-muted">本局未清零，请双方确认本局胜方后继续。</p>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-2 sm:grid-cols-2">
+          <AdjudicationWinnerButton
+            name={participantAName}
+            remaining={participantARemaining}
+            onClick={() => onChooseWinner(participantAId)}
+          />
+          <AdjudicationWinnerButton
+            name={participantBName}
+            remaining={participantBRemaining}
+            onClick={() => onChooseWinner(participantBId)}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AdjudicationWinnerButton({
+  name,
+  remaining,
+  onClick
+}: {
+  name: string;
+  remaining: number;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="min-h-20 touch-manipulation select-none rounded-lg border border-wire bg-field px-4 text-left transition-colors duration-75 active:border-board active:bg-board/10"
+      onClick={onClick}
+    >
+      <span className="block text-xs font-bold text-muted">选择本局胜方</span>
+      <span className="mt-1 block truncate text-lg font-black text-ink">{name}</span>
+      <span className="mt-1 block text-xs font-bold text-board">剩余 {remaining}</span>
+    </button>
   );
 }
 

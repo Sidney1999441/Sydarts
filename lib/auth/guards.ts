@@ -1,5 +1,7 @@
 import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import { hasSupabaseEnv } from "@/lib/env";
+import { hasSupabaseAuthCookie } from "@/lib/supabase/cookies";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { Profile, SkillLevel, UserRole } from "@/types/domain";
 
@@ -8,10 +10,20 @@ export async function getCurrentUserAndProfile() {
     return { user: null, profile: null as Profile | null };
   }
 
-  const supabase = await createSupabaseServerClient();
-  const {
-    data: { user }
-  } = await supabase.auth.getUser();
+  const cookieStore = await cookies();
+  if (!hasSupabaseAuthCookie(cookieStore.getAll())) {
+    return { user: null, profile: null as Profile | null };
+  }
+
+  const supabase = await createSupabaseServerClient({ timeoutMs: 8000 });
+  let user = null;
+
+  try {
+    const result = await supabase.auth.getUser();
+    user = result.data.user;
+  } catch {
+    return { user: null, profile: null as Profile | null };
+  }
 
   if (!user) {
     return { user: null, profile: null as Profile | null };

@@ -16,6 +16,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { fromFormString } from "@/lib/utils";
 import type {
   DartMode,
+  FirstThrowMode,
   MatchDartMode,
   MatchFinishMode,
   MatchLegRuleConfig,
@@ -71,6 +72,7 @@ const tournamentSchema = z
     match_rule_mode: z.enum(["standard", "custom_legs"]),
     match_leg_rules: matchLegRuleConfigSchema,
     match_finish_mode: z.enum(["majority", "play_all"]),
+    first_throw_mode: z.enum(["alternate", "winner"]).nullable().optional(),
     soft_machine_provider: z.string().trim().max(80).default("manual"),
     soft_machine_event_ref: z.string().trim().max(120).optional(),
     soft_machine_sync_enabled: z.boolean(),
@@ -129,6 +131,11 @@ type ParsedTournamentForm = z.infer<typeof tournamentSchema>;
 
 function booleanFromForm(formData: FormData, key: string) {
   return formData.get(key) === "on" || formData.get(key) === "true";
+}
+
+function parseFirstThrowMode(value: FormDataEntryValue | null): FirstThrowMode | null {
+  const mode = fromFormString(value);
+  return mode === "alternate" || mode === "winner" ? mode : null;
 }
 
 const userLookupSelect =
@@ -342,6 +349,7 @@ function parseTournamentForm(formData: FormData) {
     match_rule_mode: matchRuleMode,
     match_leg_rules: matchRuleMode === "custom_legs" ? parseMatchLegRuleConfig(formData.get("match_leg_rules")) : [],
     match_finish_mode: (fromFormString(formData.get("match_finish_mode")) || "majority") as MatchFinishMode,
+    first_throw_mode: parseFirstThrowMode(formData.get("first_throw_mode")),
     soft_machine_provider: fromFormString(formData.get("soft_machine_provider")) || "manual",
     soft_machine_event_ref: fromFormString(formData.get("soft_machine_event_ref")) || undefined,
     soft_machine_sync_enabled: booleanFromForm(formData, "soft_machine_sync_enabled"),
@@ -371,7 +379,8 @@ function buildMatchRuleSnapshot(tournament: ParsedTournamentForm & { roundNumber
     dart_mode: firstRule?.dartMode || tournament.forceDartMode || tournament.dart_mode,
     game_variant: firstRule?.gameVariant || String(tournament.dart_game || 501),
     leg_rules: legRules,
-    match_finish_mode: tournament.match_finish_mode || "majority"
+    match_finish_mode: tournament.match_finish_mode || "majority",
+    first_throw_mode: tournament.first_throw_mode || null
   };
 }
 
@@ -964,7 +973,7 @@ export async function generateGroupsAndScheduleAction(formData: FormData) {
 
   const { data: tournament, error: tournamentError } = await supabase
     .from("tournaments")
-    .select("id, format, balanced_grouping_enabled, tournament_type, team_size, dart_mode, dart_game, soft_game, mixed_first_dart_mode, match_rule_mode, match_leg_rules, match_finish_mode, best_of")
+    .select("id, format, balanced_grouping_enabled, tournament_type, team_size, dart_mode, dart_game, soft_game, mixed_first_dart_mode, match_rule_mode, match_leg_rules, match_finish_mode, first_throw_mode, best_of")
     .eq("id", tournamentId)
     .single();
 

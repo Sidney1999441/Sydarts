@@ -152,6 +152,10 @@ const completeMatchSchema = z.object({
       checkoutScore: z.number().nullable().optional(),
       scoreA: z.number().nullable().optional(),
       scoreB: z.number().nullable().optional(),
+      resolutionReason: z.enum(["checkout", "round_limit"]).optional(),
+      roundLimit: z.number().int().positive().nullable().optional(),
+      remainingA: z.number().int().min(0).nullable().optional(),
+      remainingB: z.number().int().min(0).nullable().optional(),
       userStats: z.record(z.string().uuid(), manualStatsSchema).optional()
     })
   ).default([]),
@@ -174,6 +178,24 @@ const completeCasualMatchSchema = z.object({
   winnerSide: z.enum(["A", "B"]),
   scoreA: z.number().int().min(0),
   scoreB: z.number().int().min(0),
+  legResults: z.array(
+    z.object({
+      legNumber: z.number().int().min(1),
+      winnerParticipantId: z.enum(["me", "opponent"]),
+      participantMode: z.enum(["singles", "doubles", "team"]),
+      dartMode: z.enum(["steel", "soft"]),
+      gameVariant: z.string(),
+      participantAUserIds: z.array(z.string()).default([]),
+      participantBUserIds: z.array(z.string()).default([]),
+      checkoutScore: z.number().nullable().optional(),
+      scoreA: z.number().nullable().optional(),
+      scoreB: z.number().nullable().optional(),
+      resolutionReason: z.enum(["checkout", "round_limit"]).optional(),
+      roundLimit: z.number().int().positive().nullable().optional(),
+      remainingA: z.number().int().min(0).nullable().optional(),
+      remainingB: z.number().int().min(0).nullable().optional()
+    })
+  ).default([]),
   turns: z.array(
     z.object({
       participantId: z.enum(["me", "opponent"]),
@@ -1079,6 +1101,7 @@ export async function completeCasualMatchAction(payload: unknown) {
           A: statsA,
           B: statsB
         },
+        legResults: values.legResults,
         ratingOutcome: {
           A: {
             before: playerARating,

@@ -9,7 +9,7 @@ import { CodlPageHeader } from "@/components/CodlPageHeader";
 import { Card } from "@/components/ui/Card";
 import { Scoreboard } from "@/components/scorer/Scoreboard";
 import { SoftScoreboard } from "@/components/scorer/SoftScoreboard";
-import type { MatchFinishMode, MatchLegRule, Tournament } from "@/types/domain";
+import type { FirstThrowMode, MatchFinishMode, MatchLegRule, Tournament } from "@/types/domain";
 
 export const dynamic = "force-dynamic";
 
@@ -104,6 +104,7 @@ export default async function MatchScorerPage({
   const firstRule = legRules[0];
   const matchDartMode = (firstRule?.dartMode || match.dart_mode || "steel") as "steel" | "soft";
   const matchFinishMode = (match.match_finish_mode || tournamentData?.match_finish_mode || "majority") as MatchFinishMode;
+  const firstThrowMode = (match.first_throw_mode || tournamentData?.first_throw_mode || null) as FirstThrowMode | null;
 
   return (
     <div className="grid gap-6">
@@ -142,6 +143,7 @@ export default async function MatchScorerPage({
           bestOf={(tournamentData?.best_of || 3) as 3 | 5 | 7}
           legRules={legRules}
           matchFinishMode={matchFinishMode}
+          firstThrowMode={firstThrowMode}
         />
       )}
     </div>

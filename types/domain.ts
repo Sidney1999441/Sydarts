@@ -9,6 +9,7 @@ export type TournamentFormat =
 export type DartMode = "steel" | "soft" | "mixed_alternating";
 export type MatchDartMode = "steel" | "soft";
 export type MatchFinishMode = "majority" | "play_all";
+export type FirstThrowMode = "alternate" | "winner";
 export type SoftGameVariant =
   | "soft_301"
   | "soft_501"
@@ -55,6 +56,10 @@ export type MatchLegResult = MatchLegLineup & {
   checkoutScore?: number | null;
   scoreA?: number | null;
   scoreB?: number | null;
+  resolutionReason?: "checkout" | "round_limit";
+  roundLimit?: number | null;
+  remainingA?: number | null;
+  remainingB?: number | null;
   userStats?: Record<string, unknown>;
 };
 export type TournamentStatus =
@@ -150,6 +155,7 @@ export type Tournament = {
   match_rule_mode: MatchRuleMode;
   match_leg_rules: MatchLegRuleConfig;
   match_finish_mode: MatchFinishMode;
+  first_throw_mode?: FirstThrowMode | null;
   best_of: 3 | 5 | 7;
   auto_grouping_enabled: boolean;
   balanced_grouping_enabled: boolean;
@@ -214,5 +220,6 @@ export type MatchSummary = {
   game_variant?: string | null;
   leg_rules?: MatchLegRule[] | null;
   match_finish_mode?: MatchFinishMode | null;
+  first_throw_mode?: FirstThrowMode | null;
   details?: Record<string, unknown> | null;
 };

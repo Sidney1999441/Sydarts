@@ -341,14 +341,14 @@ export function SoftMatchScoreboard({
 
         <div className="grid gap-3">
           {rules.map((rule) => (
-            <div key={rule.legNumber} className="grid gap-3 rounded-lg bg-field p-3">
-              <div>
+            <details key={rule.legNumber} className="rounded-lg bg-field p-3" open={rule.legNumber === rules[0]?.legNumber}>
+              <summary className="cursor-pointer">
                 <div className="font-bold">{getLegRuleLabel(rule)}</div>
                 <div className="mt-1 text-xs text-muted">
                   {rule.participantMode === "singles" ? "单人局" : rule.participantMode === "doubles" ? "双人局" : "团队局"}
                 </div>
-              </div>
-              <div className="grid gap-3 md:grid-cols-2">
+              </summary>
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
                 <LineupSideFields
                   participantName={participantA.name}
                   members={participantA.members || []}
@@ -368,7 +368,7 @@ export function SoftMatchScoreboard({
                   onChange={(index, userId) => updateLineup(rule.legNumber, "B", index, userId)}
                 />
               </div>
-            </div>
+            </details>
           ))}
         </div>
 
@@ -526,12 +526,12 @@ export function SoftMatchScoreboard({
       <section className="rounded-lg border border-wire bg-surface p-3 shadow-soft">
         <h3 className="font-bold">本局个人数据</h3>
         <div className="mt-3 grid gap-3">
-          {currentUsers.map((player) => (
-            <div key={player.userId} className="grid gap-2 rounded-lg bg-field p-3">
-              <div className="text-sm font-bold">
+          {currentUsers.map((player, index) => (
+            <details key={player.userId} className="rounded-lg bg-field p-3" open={index === 0}>
+              <summary className="cursor-pointer text-sm font-bold">
                 {player.sideName} / {player.name}
-              </div>
-              <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+              </summary>
+              <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-4">
                 {currentFields.map((field) => (
                   <label key={`${player.userId}-${field.key}`} className="label">
                     {field.label}
@@ -547,7 +547,7 @@ export function SoftMatchScoreboard({
                   </label>
                 ))}
               </div>
-            </div>
+            </details>
           ))}
           {currentUsers.length === 0 ? (
             <p className="rounded-lg bg-field p-3 text-sm text-muted">当前局没有可记录的队员名单。</p>

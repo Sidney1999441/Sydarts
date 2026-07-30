@@ -5,7 +5,7 @@ import {
   TouchScoreboard,
   type ScoringCompletePayload
 } from "@/components/scorer/TouchScoreboard";
-import type { MatchFinishMode, MatchLegRule } from "@/types/domain";
+import type { FirstThrowMode, MatchFinishMode, MatchLegRule } from "@/types/domain";
 
 type ParticipantInfo = {
   id: string;
@@ -20,7 +20,8 @@ export function Scoreboard({
   startingScore,
   bestOf,
   legRules,
-  matchFinishMode
+  matchFinishMode,
+  firstThrowMode
 }: {
   matchId: string;
   participantA: ParticipantInfo;
@@ -29,6 +30,7 @@ export function Scoreboard({
   bestOf: 3 | 5 | 7;
   legRules: MatchLegRule[];
   matchFinishMode: MatchFinishMode;
+  firstThrowMode?: FirstThrowMode | null;
 }) {
   async function saveOfficialResult(payload: ScoringCompletePayload) {
     await completeScoredMatchAction({
@@ -51,6 +53,7 @@ export function Scoreboard({
       bestOf={bestOf}
       legRules={legRules}
       matchFinishMode={matchFinishMode}
+      initialFirstThrowMode={firstThrowMode}
       saveLabel="上传结果"
       successMessage="比赛结果已上传，并写入赛事数据和普通数据。"
       onComplete={saveOfficialResult}

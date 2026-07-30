@@ -1,5 +1,5 @@
 import { getLegStartingScore } from "@/lib/darts/variants";
-import type { MatchFinishMode, MatchLegLineup, MatchLegResult, MatchLegRule } from "@/types/domain";
+import type { FirstThrowMode, MatchFinishMode, MatchLegLineup, MatchLegResult, MatchLegRule } from "@/types/domain";
 
 export type ScoreTurn = {
   participantId: string;
@@ -24,6 +24,8 @@ export type ScoringState = {
   startingScore: 301 | 501 | 701;
   bestOf: 3 | 5 | 7;
   matchFinishMode: MatchFinishMode;
+  firstParticipantId: string;
+  firstThrowMode: FirstThrowMode;
   legRules: MatchLegRule[];
   legLineups: MatchLegLineup[];
   legResults: MatchLegResult[];
@@ -91,6 +93,32 @@ function shouldFinishMatch(state: ScoringState, currentParticipant: ScoringParti
   return Boolean(other && currentParticipant.legsWon > other.legsWon);
 }
 
+function otherParticipantId(state: ScoringState, participantId: string) {
+  return state.participants.find((participant) => participant.participantId !== participantId)?.participantId || participantId;
+}
+
+function getStarterForLeg(state: ScoringState, legNumber: number, previousWinnerParticipantId?: string | null) {
+  if (state.firstThrowMode === "winner" && previousWinnerParticipantId) {
+    return previousWinnerParticipantId;
+  }
+
+  return legNumber % 2 === 1
+    ? state.firstParticipantId
+    : otherParticipantId(state, state.firstParticipantId);
+}
+
+function advanceToNextLeg(state: ScoringState, previousWinnerParticipantId: string) {
+  state.currentLeg += 1;
+  const nextRule = getCurrentRule(state);
+  const nextStartingScore = getLegStartingScore(nextRule);
+  state.startingScore = nextStartingScore;
+  state.participants = state.participants.map((participant) => ({
+    ...participant,
+    remaining: nextStartingScore
+  })) as [ScoringParticipant, ScoringParticipant];
+  state.activeParticipantId = getStarterForLeg(state, state.currentLeg, previousWinnerParticipantId);
+}
+
 export function createScoringState(input: {
   participantAId: string;
   participantBId: string;
@@ -99,6 +127,8 @@ export function createScoringState(input: {
   legRules?: MatchLegRule[];
   matchFinishMode?: MatchFinishMode;
   legLineups?: MatchLegLineup[];
+  firstParticipantId?: string | null;
+  firstThrowMode?: FirstThrowMode | null;
 }): ScoringState {
   const startingScore = input.startingScore || 501;
   const bestOf = input.bestOf || 3;
@@ -107,16 +137,21 @@ export function createScoringState(input: {
       ? input.legRules
       : buildFallbackRules({ startingScore, bestOf });
   const firstStartingScore = getLegStartingScore(legRules[0]);
+  const firstParticipantId =
+    input.firstParticipantId === input.participantBId ? input.participantBId : input.participantAId;
+  const firstThrowMode = input.firstThrowMode === "winner" ? "winner" : "alternate";
 
   return {
     startingScore: firstStartingScore,
     bestOf,
     matchFinishMode: input.matchFinishMode || "majority",
+    firstParticipantId,
+    firstThrowMode,
     legRules,
     legLineups: input.legLineups || [],
     legResults: [],
     currentLeg: 1,
-    activeParticipantId: input.participantAId,
+    activeParticipantId: firstParticipantId,
     winnerParticipantId: null,
     turns: [],
     participants: [
@@ -134,6 +169,54 @@ export function createScoringState(input: {
       }
     ]
   };
+}
+
+export function adjudicateCurrentLegWinner(
+  state: ScoringState,
+  winnerParticipantId: string,
+  options: {
+    roundLimit?: number | null;
+  } = {}
+) {
+  if (state.winnerParticipantId) return state;
+
+  const next: ScoringState = structuredClone(state);
+  const currentRule = getCurrentRule(next);
+  const winner = next.participants.find(
+    (participant) => participant.participantId === winnerParticipantId
+  );
+  const loser = next.participants.find(
+    (participant) => participant.participantId !== winnerParticipantId
+  );
+
+  if (!winner || !loser || !currentRule) {
+    throw new Error("Invalid leg winner.");
+  }
+
+  winner.legsWon += 1;
+  const lineup = getLineupForLeg(next.legLineups, next.currentLeg);
+  next.legResults.push({
+    ...lineup,
+    legNumber: next.currentLeg,
+    winnerParticipantId: winner.participantId,
+    participantMode: currentRule.participantMode,
+    dartMode: currentRule.dartMode,
+    gameVariant: currentRule.gameVariant,
+    checkoutScore: null,
+    resolutionReason: "round_limit",
+    roundLimit: options.roundLimit ?? null,
+    remainingA: next.participants[0].remaining,
+    remainingB: next.participants[1].remaining
+  });
+
+  if (shouldFinishMatch(next, winner)) {
+    next.winnerParticipantId = winner.participantId;
+    return next;
+  }
+
+  advanceToNextLeg(next, winner.participantId);
+
+  return next;
 }
 
 export function applyTurn(state: ScoringState, rawScore: number, darts = 3, throwerUserId?: string | null) {
@@ -201,7 +284,8 @@ export function applyTurn(state: ScoringState, rawScore: number, darts = 3, thro
       participantMode: currentRule.participantMode,
       dartMode: currentRule.dartMode,
       gameVariant: currentRule.gameVariant,
-      checkoutScore: rawScore
+      checkoutScore: rawScore,
+      resolutionReason: "checkout"
     });
 
     if (shouldFinishMatch(next, current)) {
@@ -209,14 +293,8 @@ export function applyTurn(state: ScoringState, rawScore: number, darts = 3, thro
       return next;
     }
 
-    next.currentLeg += 1;
-    const nextRule = getCurrentRule(next);
-    const nextStartingScore = getLegStartingScore(nextRule);
-    next.startingScore = nextStartingScore;
-    next.participants = next.participants.map((participant) => ({
-      ...participant,
-      remaining: nextStartingScore
-    })) as [ScoringParticipant, ScoringParticipant];
+    advanceToNextLeg(next, current.participantId);
+    return next;
   }
 
   next.activeParticipantId = other.participantId;

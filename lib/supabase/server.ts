@@ -3,6 +3,7 @@ import { createServerClient } from "@supabase/ssr";
 import type { CookieOptions } from "@supabase/ssr";
 import { assertSupabaseBackend } from "@/lib/backend/provider";
 import { getSupabaseAnonKey, getSupabaseUrl } from "@/lib/env";
+import { createTimedSupabaseFetch } from "@/lib/supabase/fetch";
 
 type CookieToSet = {
   name: string;
@@ -10,11 +11,25 @@ type CookieToSet = {
   options: CookieOptions;
 };
 
-export async function createSupabaseServerClient() {
+type ServerClientOptions = {
+  timeoutMs?: number | false;
+};
+
+const DEFAULT_SERVER_CLIENT_TIMEOUT_MS = 10000;
+
+export async function createSupabaseServerClient(options: ServerClientOptions = {}) {
   assertSupabaseBackend("Supabase server client");
   const cookieStore = await cookies();
+  const timeoutMs =
+    options.timeoutMs === undefined ? DEFAULT_SERVER_CLIENT_TIMEOUT_MS : options.timeoutMs;
+  const global = timeoutMs
+    ? {
+        fetch: createTimedSupabaseFetch(timeoutMs)
+      }
+    : undefined;
 
   return createServerClient(getSupabaseUrl(), getSupabaseAnonKey(), {
+    global,
     cookies: {
       getAll() {
         return cookieStore.getAll();

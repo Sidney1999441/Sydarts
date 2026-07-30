@@ -8,6 +8,7 @@ import { completeCasualMatchAction } from "@/lib/actions/matches";
 import { searchPlayerProfilesAction } from "@/lib/actions/users";
 import {
   TouchScoreboard,
+  type RoundLimit,
   type ScoringCompletePayload
 } from "@/components/scorer/TouchScoreboard";
 import { Button } from "@/components/ui/Button";
@@ -34,6 +35,7 @@ export function CasualScoreboard({ playerName }: { playerName: string }) {
   const [searchResults, setSearchResults] = useState<PlayerSearchResult[]>([]);
   const [startingScore, setStartingScore] = useState<GameScore>(501);
   const [bestOf, setBestOf] = useState<BestOf>(3);
+  const [roundLimit, setRoundLimit] = useState<RoundLimit>("unlimited");
   const [setupMessage, setSetupMessage] = useState("");
   const [isSearching, startSearchTransition] = useTransition();
 
@@ -75,6 +77,7 @@ export function CasualScoreboard({ playerName }: { playerName: string }) {
       winnerSide: payload.winnerParticipantId === PLAYER_A_ID ? "A" : "B",
       scoreA: payload.scoreA,
       scoreB: payload.scoreB,
+      legResults: payload.legResults,
       turns: payload.turns
     });
   }
@@ -91,7 +94,7 @@ export function CasualScoreboard({ playerName }: { playerName: string }) {
                 {playerName} vs {opponentDisplayName}
               </h1>
               <p className="truncate text-xs text-muted">
-                {startingScore} · BO{bestOf} · {opponentMode === "linked" ? "双方确认后同步" : "只记录到我的普通数据"}
+                {startingScore} · BO{bestOf} · {roundLimit === "unlimited" ? "不限轮" : `${roundLimit} 轮上限`} · {opponentMode === "linked" ? "双方确认后同步" : "只记录到我的普通数据"}
               </p>
             </div>
             <Button type="button" variant="secondary" onClick={() => setStep("setup")}>
@@ -104,6 +107,7 @@ export function CasualScoreboard({ playerName }: { playerName: string }) {
           participantB={{ id: PLAYER_B_ID, name: opponentDisplayName }}
           startingScore={startingScore}
           bestOf={bestOf}
+          initialRoundLimit={roundLimit}
           saveLabel="保存到普通数据"
           successMessage={
             opponentMode === "linked"
@@ -251,6 +255,21 @@ export function CasualScoreboard({ playerName }: { playerName: string }) {
               />
             ))}
           </OptionGroup>
+          <OptionGroup label="每局轮数上限" wide>
+            {[
+              { value: 10, label: "10" },
+              { value: 15, label: "15" },
+              { value: 20, label: "20" },
+              { value: "unlimited", label: "无限" }
+            ].map((option) => (
+              <SelectButton
+                key={String(option.value)}
+                active={roundLimit === option.value}
+                label={option.label}
+                onClick={() => setRoundLimit(option.value as RoundLimit)}
+              />
+            ))}
+          </OptionGroup>
         </div>
       </section>
 
@@ -264,11 +283,11 @@ export function CasualScoreboard({ playerName }: { playerName: string }) {
   );
 }
 
-function OptionGroup({ label, children }: { label: string; children: ReactNode }) {
+function OptionGroup({ label, children, wide = false }: { label: string; children: ReactNode; wide?: boolean }) {
   return (
     <div>
       <div className="text-sm font-semibold text-muted">{label}</div>
-      <div className="mt-2 grid grid-cols-3 gap-2">{children}</div>
+      <div className={`mt-2 grid gap-2 ${wide ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-3"}`}>{children}</div>
     </div>
   );
 }
