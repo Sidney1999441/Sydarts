@@ -1,6 +1,8 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { notFound } from "next/navigation";
 import { ArrowLeft, ListChecks, Trophy, UserRound } from "lucide-react";
+import { confirmCasualMatchAction } from "@/lib/actions/matches";
 import { calculateDartStats, type ScoreTurn } from "@/lib/algorithms/scoring";
 import { requireUser } from "@/lib/auth/guards";
 import { getMatchRulesSummary } from "@/lib/darts/variants";
@@ -9,6 +11,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { cn, formatDateTime } from "@/lib/utils";
 import { CodlPageHeader } from "@/components/CodlPageHeader";
 import { SetupNotice } from "@/components/SetupNotice";
+import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 
 export const dynamic = "force-dynamic";
@@ -34,6 +37,14 @@ type DbParticipant = {
   display_name: string;
   user_id?: string | null;
   team_id?: string | null;
+};
+type StatsBucket = "participantStats" | "personalStats" | "userStats";
+type CasualTurnMeta = {
+  turnNumber?: number;
+  side?: "A" | "B";
+  legNumber?: number;
+  userId?: string | null;
+  userName?: string | null;
 };
 
 function toNumber(value: number | string | null | undefined) {
@@ -75,12 +86,24 @@ function normalizeDartStats(value?: Partial<DartStats> | null): DartStats {
   };
 }
 
-function readStatsFromDetails(details: unknown, key: string, bucket: "participantStats" | "userStats" = "participantStats") {
+function readStatsEntryFromDetails(details: unknown, key: string, bucket: StatsBucket = "participantStats") {
   const stats = (details as {
     participantStats?: Record<string, Partial<DartStats>>;
+    personalStats?: Record<string, Partial<DartStats>>;
     userStats?: Record<string, Partial<DartStats>>;
   } | null)?.[bucket];
-  return normalizeDartStats(stats?.[key]);
+  return stats?.[key] ? normalizeDartStats(stats[key]) : null;
+}
+
+function readStatsFromDetails(details: unknown, key: string, bucket: StatsBucket = "participantStats") {
+  return readStatsEntryFromDetails(details, key, bucket) || normalizeDartStats();
+}
+
+function readCasualTurnMeta(details: unknown) {
+  return (
+    (details as { turnMeta?: CasualTurnMeta[] } | null)?.turnMeta?.filter((item) => item.turnNumber && item.side) ||
+    []
+  );
 }
 
 function statsFromTurns(turns: ScoreTurn[]) {
@@ -114,23 +137,26 @@ function mapOfficialTurn(row: {
 
 function mapCasualTurn(row: {
   side: "A" | "B";
+  turn_number?: number | null;
   score: number;
   darts?: number | null;
   remaining_before: number;
   remaining_after: number;
   is_bust: boolean;
   is_checkout: boolean;
-}, playerName: string): DetailTurn {
+}, playerName: string, meta?: CasualTurnMeta): DetailTurn {
+  const userName = meta?.userName || null;
   return {
     participantId: row.side,
-    legNumber: 1,
+    userId: meta?.userId || undefined,
+    legNumber: meta?.legNumber || 1,
     score: row.score,
     darts: row.darts || 3,
     remainingBefore: row.remaining_before,
     remainingAfter: row.remaining_after,
     isBust: row.is_bust,
     isCheckout: row.is_checkout,
-    playerName
+    playerName: userName ? `${playerName} · ${userName}` : playerName
   };
 }
 
@@ -244,11 +270,15 @@ export default async function ProfileHistoryDetailPage({
       .order("turn_number", { ascending: true });
     const mySide = isPlayerA ? "A" : "B";
     const opponentSide = isPlayerA ? "B" : "A";
-    const matchTurns = (turns || []).map((turn) =>
-      mapCasualTurn(turn, turn.side === "A" ? match.player_a_name : match.player_b_name)
-    );
+    const turnMeta = readCasualTurnMeta(match.details);
+    const matchTurns = (turns || []).map((turn) => {
+      const meta = turnMeta.find((item) => item.side === turn.side && item.turnNumber === turn.turn_number);
+      return mapCasualTurn(turn, turn.side === "A" ? match.player_a_name : match.player_b_name, meta);
+    });
     const myTurns = matchTurns.filter((turn) => turn.participantId === mySide);
     const opponentTurns = matchTurns.filter((turn) => turn.participantId === opponentSide);
+    const myPersonalStats = readStatsEntryFromDetails(match.details, mySide, "personalStats");
+    const opponentPersonalStats = readStatsEntryFromDetails(match.details, opponentSide, "personalStats");
     const result =
       match.confirmation_status === "rejected"
         ? "争议"
@@ -267,11 +297,16 @@ export default async function ProfileHistoryDetailPage({
         scoreLabel={isPlayerA ? `${match.score_a}:${match.score_b}` : `${match.score_b}:${match.score_a}`}
         myName={isPlayerA ? match.player_a_name : match.player_b_name}
         opponentName={isPlayerA ? match.player_b_name : match.player_a_name}
-        myStats={myTurns.length > 0 ? statsFromTurns(myTurns) : readStatsFromDetails(match.details, mySide)}
+        myStats={myPersonalStats || (myTurns.length > 0 ? statsFromTurns(myTurns) : readStatsFromDetails(match.details, mySide))}
         opponentStats={
-          opponentTurns.length > 0 ? statsFromTurns(opponentTurns) : readStatsFromDetails(match.details, opponentSide)
+          opponentPersonalStats || (opponentTurns.length > 0 ? statsFromTurns(opponentTurns) : readStatsFromDetails(match.details, opponentSide))
         }
         turns={matchTurns}
+        confirmationSlot={
+          isPlayerB && match.confirmation_status === "pending" ? (
+            <CasualConfirmationActions matchId={match.id} />
+          ) : null
+        }
       />
     );
   }
@@ -291,7 +326,8 @@ function HistoryDetailView({
   opponentStats,
   turns,
   extraHref,
-  extraLabel
+  extraLabel,
+  confirmationSlot
 }: {
   title: string;
   subtitle: string;
@@ -305,6 +341,7 @@ function HistoryDetailView({
   turns: DetailTurn[];
   extraHref?: string;
   extraLabel?: string;
+  confirmationSlot?: ReactNode;
 }) {
   return (
     <div className="grid gap-5">
@@ -349,6 +386,7 @@ function HistoryDetailView({
             {extraLabel || "打开关联页面"}
           </Link>
         ) : null}
+        {confirmationSlot ? <div className="mt-4">{confirmationSlot}</div> : null}
       </Card>
 
       <section className="grid gap-3 lg:grid-cols-2">
@@ -388,6 +426,26 @@ function HistoryDetailView({
           </p>
         )}
       </Card>
+    </div>
+  );
+}
+
+function CasualConfirmationActions({ matchId }: { matchId: string }) {
+  return (
+    <div className="grid gap-2 rounded-lg border border-board/25 bg-field p-3 text-sm sm:flex sm:items-center sm:justify-between">
+      <div className="font-bold text-ink">确认后会写入你的普通数据和等级分。</div>
+      <div className="grid gap-2 sm:flex">
+        <form action={confirmCasualMatchAction}>
+          <input type="hidden" name="casual_match_id" value={matchId} />
+          <input type="hidden" name="decision" value="confirmed" />
+          <Button className="w-full sm:w-auto" type="submit">确认写入</Button>
+        </form>
+        <form action={confirmCasualMatchAction}>
+          <input type="hidden" name="casual_match_id" value={matchId} />
+          <input type="hidden" name="decision" value="rejected" />
+          <Button className="w-full sm:w-auto" type="submit" variant="secondary">拒绝</Button>
+        </form>
+      </div>
     </div>
   );
 }

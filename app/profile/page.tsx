@@ -342,6 +342,7 @@ export default async function ProfilePage() {
   ]
     .sort((a, b) => new Date(b.playedAt).getTime() - new Date(a.playedAt).getTime())
     .slice(0, 30);
+  const pendingActionCount = (confirmations || []).length + (pendingCasualMatches || []).length;
 
   return (
     <div className="grid gap-5 sm:gap-6">
@@ -373,9 +374,9 @@ export default async function ProfilePage() {
         tournamentLevel={tournamentLevel}
       />
 
-      <details className="codl-mobile-fold">
+      <details className="codl-mobile-fold" open={pendingActionCount > 0}>
         <summary className="cursor-pointer rounded-lg border border-wire bg-surface p-3 text-sm font-black text-board shadow-soft">
-          待确认事项
+          待确认事项{pendingActionCount > 0 ? ` · ${pendingActionCount}` : ""}
         </summary>
         <section className="codl-mobile-fold-content mt-3 gap-3 sm:gap-4 lg:grid-cols-2">
           <PendingManualCard

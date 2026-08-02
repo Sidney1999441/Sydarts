@@ -364,6 +364,7 @@ export function TournamentForm({
               <option value="">现场选择</option>
               <option value={"alternate" satisfies FirstThrowMode}>轮先</option>
               <option value={"winner" satisfies FirstThrowMode}>胜先</option>
+              <option value={"loser" satisfies FirstThrowMode}>负先</option>
             </select>
             <span className="text-xs font-normal text-muted">
               设置后计分开局只选先手方；不设置则现场一起选择。

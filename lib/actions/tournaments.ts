@@ -72,7 +72,7 @@ const tournamentSchema = z
     match_rule_mode: z.enum(["standard", "custom_legs"]),
     match_leg_rules: matchLegRuleConfigSchema,
     match_finish_mode: z.enum(["majority", "play_all"]),
-    first_throw_mode: z.enum(["alternate", "winner"]).nullable().optional(),
+    first_throw_mode: z.enum(["alternate", "winner", "loser"]).nullable().optional(),
     soft_machine_provider: z.string().trim().max(80).default("manual"),
     soft_machine_event_ref: z.string().trim().max(120).optional(),
     soft_machine_sync_enabled: z.boolean(),
@@ -135,7 +135,7 @@ function booleanFromForm(formData: FormData, key: string) {
 
 function parseFirstThrowMode(value: FormDataEntryValue | null): FirstThrowMode | null {
   const mode = fromFormString(value);
-  return mode === "alternate" || mode === "winner" ? mode : null;
+  return mode === "alternate" || mode === "winner" || mode === "loser" ? mode : null;
 }
 
 const userLookupSelect =

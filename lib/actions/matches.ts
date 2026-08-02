@@ -175,6 +175,19 @@ const completeCasualMatchSchema = z.object({
   opponentUserId: z.string().uuid().optional().nullable(),
   startingScore: z.union([z.literal(301), z.literal(501), z.literal(701)]),
   bestOf: z.union([z.literal(3), z.literal(5), z.literal(7)]),
+  participantMode: z.enum(["singles", "doubles"]).default("singles"),
+  participantMembers: z.object({
+    A: z.array(z.object({
+      userId: z.string().trim().min(1).max(120),
+      name: z.string().trim().min(1).max(80),
+      linked: z.boolean().optional().default(false)
+    })).default([]),
+    B: z.array(z.object({
+      userId: z.string().trim().min(1).max(120),
+      name: z.string().trim().min(1).max(80),
+      linked: z.boolean().optional().default(false)
+    })).default([])
+  }).default({ A: [], B: [] }),
   winnerSide: z.enum(["A", "B"]),
   scoreA: z.number().int().min(0),
   scoreB: z.number().int().min(0),
@@ -196,9 +209,17 @@ const completeCasualMatchSchema = z.object({
       remainingB: z.number().int().min(0).nullable().optional()
     })
   ).default([]),
+  legLineups: z.array(
+    z.object({
+      legNumber: z.number().int().min(1),
+      participantAUserIds: z.array(z.string()).default([]),
+      participantBUserIds: z.array(z.string()).default([])
+    })
+  ).default([]),
   turns: z.array(
     z.object({
       participantId: z.enum(["me", "opponent"]),
+      userId: z.string().trim().min(1).max(120).optional(),
       score: z.number(),
       darts: z.number().optional(),
       legNumber: z.number().int().min(1).default(1),
@@ -209,6 +230,29 @@ const completeCasualMatchSchema = z.object({
     })
   )
 });
+
+type CasualMatchInput = z.infer<typeof completeCasualMatchSchema>;
+type CasualTurnInput = CasualMatchInput["turns"][number];
+
+function personalCasualTurns(turns: CasualTurnInput[], participantId: "me" | "opponent", userId: string) {
+  const sideTurns = turns.filter((turn) => turn.participantId === participantId);
+  const userTurns = sideTurns.filter((turn) => turn.userId === userId);
+  return userTurns.length > 0 ? userTurns : sideTurns;
+}
+
+function casualTurnMeta(values: CasualMatchInput) {
+  const memberNameByUserId = new Map<string, string>();
+  for (const member of [...values.participantMembers.A, ...values.participantMembers.B]) {
+    memberNameByUserId.set(member.userId, member.name);
+  }
+  return values.turns.map((turn, index) => ({
+    turnNumber: index + 1,
+    side: turn.participantId === "me" ? "A" : "B",
+    legNumber: turn.legNumber,
+    userId: turn.userId || null,
+    userName: turn.userId ? memberNameByUserId.get(turn.userId) || null : null
+  }));
+}
 
 async function assertMatchMember(matchId: string, userId: string) {
   const supabase = await createSupabaseServerClient();
@@ -1065,8 +1109,12 @@ export async function completeCasualMatchAction(payload: unknown) {
   const playerBName = opponentProfile?.display_name || values.opponentName;
   const turnsA = values.turns.filter((turn) => turn.participantId === "me");
   const turnsB = values.turns.filter((turn) => turn.participantId === "opponent");
-  const statsA = calculateDartStats(turnsA);
-  const statsB = calculateDartStats(turnsB);
+  const participantStatsA = calculateDartStats(turnsA);
+  const participantStatsB = calculateDartStats(turnsB);
+  const statsA = calculateDartStats(personalCasualTurns(values.turns, "me", user.id));
+  const statsB = opponentUserId
+    ? calculateDartStats(personalCasualTurns(values.turns, "opponent", opponentUserId))
+    : participantStatsB;
   const playerARating = profileById.get(user.id)?.casual_rating ?? profileById.get(user.id)?.rating ?? 1000;
   const playerBRating = opponentProfile?.casual_rating ?? opponentProfile?.rating ?? 1000;
   const ratingResult =
@@ -1097,7 +1145,15 @@ export async function completeCasualMatchAction(payload: unknown) {
       details: {
         source: "casual_scorer",
         submissionId: values.submissionId || null,
+        participantMode: values.participantMode,
+        participantMembers: values.participantMembers,
+        legLineups: values.legLineups,
+        turnMeta: casualTurnMeta(values),
         participantStats: {
+          A: participantStatsA,
+          B: participantStatsB
+        },
+        personalStats: {
           A: statsA,
           B: statsB
         },
@@ -1213,6 +1269,7 @@ export async function confirmCasualMatchAction(formData: FormData) {
       })
       .eq("id", casualMatchId);
     revalidatePath("/profile");
+    revalidatePath(`/profile/history/casual/${casualMatchId}`);
     return;
   }
 
@@ -1224,17 +1281,29 @@ export async function confirmCasualMatchAction(formData: FormData) {
     .order("turn_number");
 
   if (turnError) throw new Error(turnError.message);
+  const turnMeta =
+    ((casualMatch.details as { turnMeta?: Array<{ turnNumber?: number; side?: string; userId?: string | null; legNumber?: number }> } | null)
+      ?.turnMeta || []);
+  const hasPersonalTurnMeta = turnMeta.some((item) => item.side === "B" && item.userId === user.id);
+  const personalTurns = hasPersonalTurnMeta
+    ? (turns || []).filter((turn) =>
+        turnMeta.some((item) => item.side === "B" && item.turnNumber === turn.turn_number && item.userId === user.id)
+      )
+    : turns || [];
   const stats = calculateDartStats(
-    (turns || []).map((turn) => ({
+    personalTurns.map((turn) => {
+      const meta = turnMeta.find((item) => item.side === "B" && item.turnNumber === turn.turn_number);
+      return {
       participantId: "opponent",
-      legNumber: 1,
+      legNumber: meta?.legNumber || 1,
       score: turn.score,
       darts: turn.darts || 3,
       remainingBefore: turn.remaining_before,
       remainingAfter: turn.remaining_after,
       isBust: turn.is_bust,
       isCheckout: turn.is_checkout
-    }))
+      };
+    })
   );
   const ratingDelta =
     (casualMatch.details as { ratingOutcome?: { B?: { delta?: number } } } | null)?.ratingOutcome?.B?.delta ??
@@ -1280,6 +1349,7 @@ export async function confirmCasualMatchAction(formData: FormData) {
     .eq("id", casualMatchId);
 
   revalidatePath("/profile");
+  revalidatePath(`/profile/history/casual/${casualMatchId}`);
 }
 
 export async function submitManualResultAction(formData: FormData) {

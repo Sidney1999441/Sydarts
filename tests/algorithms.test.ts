@@ -202,6 +202,24 @@ describe("team-first tournament algorithms", () => {
     expect(state.activeParticipantId).toBe("team-1");
   });
 
+  it("lets the previous leg loser start next leg in loser-start mode", () => {
+    let state = createScoringState({
+      participantAId: "team-1",
+      participantBId: "team-2",
+      startingScore: 301,
+      bestOf: 3,
+      firstThrowMode: "loser"
+    });
+
+    state = applyTurn(state, 180);
+    state = applyTurn(state, 0);
+    state = applyTurn(state, 121);
+
+    expect(state.participants[0].legsWon).toBe(1);
+    expect(state.currentLeg).toBe(2);
+    expect(state.activeParticipantId).toBe("team-2");
+  });
+
   it("records the exact thrower for team scoring turns", () => {
     const legRules = [
       { legNumber: 1, participantMode: "team", dartMode: "steel", gameVariant: "501" },

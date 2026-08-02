@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { Search, UserRound, UsersRound } from "lucide-react";
 import { completeCasualMatchAction } from "@/lib/actions/matches";
 import { searchPlayerProfilesAction } from "@/lib/actions/users";
@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/Button";
 type GameScore = 501 | 701;
 type BestOf = 3 | 5 | 7;
 type OpponentMode = "local" | "linked";
+type MatchMode = "singles" | "doubles";
 type SetupStep = "setup" | "scoring";
 type PlayerSearchResult = {
   id: string;
@@ -25,11 +26,17 @@ type PlayerSearchResult = {
 
 const PLAYER_A_ID = "me";
 const PLAYER_B_ID = "opponent";
+const LOCAL_MY_TEAMMATE_ID = "local-my-teammate";
+const LOCAL_OPPONENT_ID = "local-opponent";
+const LOCAL_OPPONENT_TEAMMATE_ID = "local-opponent-teammate";
 
-export function CasualScoreboard({ playerName }: { playerName: string }) {
+export function CasualScoreboard({ playerId, playerName }: { playerId: string; playerName: string }) {
   const [step, setStep] = useState<SetupStep>("setup");
   const [opponentMode, setOpponentMode] = useState<OpponentMode>("local");
+  const [matchMode, setMatchMode] = useState<MatchMode>("singles");
   const [opponentName, setOpponentName] = useState("对手");
+  const [myTeammateName, setMyTeammateName] = useState("队友");
+  const [opponentTeammateName, setOpponentTeammateName] = useState("对方队友");
   const [opponentQuery, setOpponentQuery] = useState("");
   const [selectedOpponent, setSelectedOpponent] = useState<PlayerSearchResult | null>(null);
   const [searchResults, setSearchResults] = useState<PlayerSearchResult[]>([]);
@@ -43,6 +50,29 @@ export function CasualScoreboard({ playerName }: { playerName: string }) {
     opponentMode === "linked"
       ? selectedOpponent?.displayName || "待选择对手"
       : opponentName.trim() || "对手";
+  const isDoubles = matchMode === "doubles";
+  const myTeammateDisplayName = myTeammateName.trim() || "队友";
+  const opponentTeammateDisplayName = opponentTeammateName.trim() || "对方队友";
+  const mySideName = isDoubles ? `${playerName} / ${myTeammateDisplayName}` : playerName;
+  const opponentSideName = isDoubles ? `${opponentDisplayName} / ${opponentTeammateDisplayName}` : opponentDisplayName;
+  const participantAMembers = useMemo(
+    () => [
+      { userId: playerId, name: playerName, linked: true },
+      ...(isDoubles ? [{ userId: LOCAL_MY_TEAMMATE_ID, name: myTeammateDisplayName, linked: false }] : [])
+    ],
+    [isDoubles, myTeammateDisplayName, playerId, playerName]
+  );
+  const participantBMembers = useMemo(
+    () => [
+      {
+        userId: opponentMode === "linked" && selectedOpponent ? selectedOpponent.id : LOCAL_OPPONENT_ID,
+        name: opponentDisplayName,
+        linked: opponentMode === "linked" && Boolean(selectedOpponent)
+      },
+      ...(isDoubles ? [{ userId: LOCAL_OPPONENT_TEAMMATE_ID, name: opponentTeammateDisplayName, linked: false }] : [])
+    ],
+    [isDoubles, opponentDisplayName, opponentMode, opponentTeammateDisplayName, selectedOpponent]
+  );
 
   function searchOpponents() {
     setSetupMessage("");
@@ -77,7 +107,13 @@ export function CasualScoreboard({ playerName }: { playerName: string }) {
       winnerSide: payload.winnerParticipantId === PLAYER_A_ID ? "A" : "B",
       scoreA: payload.scoreA,
       scoreB: payload.scoreB,
+      participantMode: matchMode,
+      participantMembers: {
+        A: participantAMembers,
+        B: participantBMembers
+      },
       legResults: payload.legResults,
+      legLineups: payload.legLineups,
       turns: payload.turns
     });
   }
@@ -91,10 +127,10 @@ export function CasualScoreboard({ playerName }: { playerName: string }) {
             <div className="min-w-0">
               <div className="text-xs font-black uppercase text-board">平时切磋</div>
               <h1 className="truncate text-base font-black">
-                {playerName} vs {opponentDisplayName}
+                {mySideName} vs {opponentSideName}
               </h1>
               <p className="truncate text-xs text-muted">
-                {startingScore} · BO{bestOf} · {roundLimit === "unlimited" ? "不限轮" : `${roundLimit} 轮上限`} · {opponentMode === "linked" ? "双方确认后同步" : "只记录到我的普通数据"}
+                {matchMode === "doubles" ? "双人" : "单人"} · {startingScore} · BO{bestOf} · {roundLimit === "unlimited" ? "不限轮" : `${roundLimit} 轮上限`} · {opponentMode === "linked" ? "双方确认后同步" : "只记录到我的普通数据"}
               </p>
             </div>
             <Button type="button" variant="secondary" onClick={() => setStep("setup")}>
@@ -103,10 +139,11 @@ export function CasualScoreboard({ playerName }: { playerName: string }) {
           </div>
         </section>
         <TouchScoreboard
-          participantA={{ id: PLAYER_A_ID, name: playerName }}
-          participantB={{ id: PLAYER_B_ID, name: opponentDisplayName }}
+          participantA={{ id: PLAYER_A_ID, name: mySideName, members: participantAMembers }}
+          participantB={{ id: PLAYER_B_ID, name: opponentSideName, members: participantBMembers }}
           startingScore={startingScore}
           bestOf={bestOf}
+          defaultParticipantMode={matchMode}
           initialRoundLimit={roundLimit}
           saveLabel="保存到普通数据"
           successMessage={
@@ -145,6 +182,17 @@ export function CasualScoreboard({ playerName }: { playerName: string }) {
           <div className="rounded-lg border border-wire bg-field p-4">
             <div className="text-sm font-semibold text-muted">我方</div>
             <div className="mt-1 text-lg font-bold">{playerName}</div>
+            {isDoubles ? (
+              <label className="label mt-3">
+                我方队友
+                <input
+                  className="form-input"
+                  value={myTeammateName}
+                  onChange={(event) => setMyTeammateName(event.target.value)}
+                  placeholder="队友"
+                />
+              </label>
+            ) : null}
           </div>
           <div className="grid gap-3">
             <div className="grid grid-cols-2 gap-2">
@@ -228,6 +276,22 @@ export function CasualScoreboard({ playerName }: { playerName: string }) {
                 </div>
               </div>
             )}
+            {isDoubles ? (
+              <label className="label">
+                对方队友
+                <input
+                  className="form-input"
+                  value={opponentTeammateName}
+                  onChange={(event) => setOpponentTeammateName(event.target.value)}
+                  placeholder="对方队友"
+                />
+              </label>
+            ) : null}
+            {isDoubles && opponentMode === "linked" ? (
+              <p className="rounded-lg bg-field p-3 text-xs font-semibold text-muted">
+                双人切磋会同步当前账号和选中的对手账号，双方队友作为本场出镖人记录。
+              </p>
+            ) : null}
           </div>
         </div>
       </section>
@@ -235,6 +299,18 @@ export function CasualScoreboard({ playerName }: { playerName: string }) {
       <section className="rounded-lg border border-wire bg-surface p-5 shadow-soft">
         <h2 className="text-lg font-bold">游戏和规则</h2>
         <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <OptionGroup label="对局形式">
+            <SelectButton
+              active={matchMode === "singles"}
+              label="单人"
+              onClick={() => setMatchMode("singles")}
+            />
+            <SelectButton
+              active={matchMode === "doubles"}
+              label="双人"
+              onClick={() => setMatchMode("doubles")}
+            />
+          </OptionGroup>
           <OptionGroup label="局制">
             {[501, 701].map((value) => (
               <SelectButton

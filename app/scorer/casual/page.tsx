@@ -11,5 +11,5 @@ export default async function CasualScorerPage() {
   const { user, profile } = await requireUser();
   const playerName = profile?.display_name || user.email?.split("@")[0] || "我";
 
-  return <CasualScoreboard playerName={playerName} />;
+  return <CasualScoreboard playerId={user.id} playerName={playerName} />;
 }
