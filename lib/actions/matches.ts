@@ -233,6 +233,37 @@ const completeCasualMatchSchema = z.object({
 
 type CasualMatchInput = z.infer<typeof completeCasualMatchSchema>;
 type CasualTurnInput = CasualMatchInput["turns"][number];
+type CasualSide = "A" | "B";
+type CasualMemberInput = CasualMatchInput["participantMembers"]["A"][number];
+type CasualProfile = {
+  id: string;
+  display_name: string | null;
+  rating: number | null;
+  casual_rating: number | null;
+};
+type CasualRatingOutcome = {
+  side: CasualSide;
+  name: string;
+  before: number;
+  after: number;
+  delta: number;
+};
+type CasualTurnMetaEntry = {
+  turnNumber?: number;
+  side?: CasualSide;
+  legNumber?: number;
+  userId?: string | null;
+};
+type CasualTurnRow = {
+  side: CasualSide;
+  turn_number: number;
+  score: number;
+  darts?: number | null;
+  remaining_before: number;
+  remaining_after: number;
+  is_bust: boolean;
+  is_checkout: boolean;
+};
 
 function personalCasualTurns(turns: CasualTurnInput[], participantId: "me" | "opponent", userId: string) {
   const sideTurns = turns.filter((turn) => turn.participantId === participantId);
@@ -252,6 +283,165 @@ function casualTurnMeta(values: CasualMatchInput) {
     userId: turn.userId || null,
     userName: turn.userId ? memberNameByUserId.get(turn.userId) || null : null
   }));
+}
+
+function isUuidValue(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
+function participantIdForCasualSide(side: CasualSide) {
+  return side === "A" ? "me" : "opponent";
+}
+
+function linkedCasualMembers(values: CasualMatchInput, side: CasualSide) {
+  return (values.participantMembers[side] || []).filter(
+    (member) => member.linked && isUuidValue(member.userId)
+  );
+}
+
+function allLinkedCasualMemberIds(values: CasualMatchInput) {
+  return [...linkedCasualMembers(values, "A"), ...linkedCasualMembers(values, "B")].map((member) => member.userId);
+}
+
+function ratingFromCasualProfile(profile?: CasualProfile | null) {
+  return profile?.casual_rating ?? profile?.rating ?? 1000;
+}
+
+function normalizeCasualMembers(
+  values: CasualMatchInput,
+  profileById: Map<string, CasualProfile>
+): CasualMatchInput["participantMembers"] {
+  const normalize = (members: CasualMemberInput[]) =>
+    members.map((member) => {
+      const profile = member.linked ? profileById.get(member.userId) : null;
+      return {
+        ...member,
+        name: profile?.display_name || member.name
+      };
+    });
+
+  return {
+    A: normalize(values.participantMembers.A || []),
+    B: normalize(values.participantMembers.B || [])
+  };
+}
+
+function averageCasualRating(members: CasualMemberInput[], profileById: Map<string, CasualProfile>) {
+  if (members.length === 0) return 1000;
+  const total = members.reduce((sum, member) => sum + ratingFromCasualProfile(profileById.get(member.userId)), 0);
+  return Math.round(total / members.length);
+}
+
+function buildCasualMemberRatingOutcomes(input: {
+  winnerSide: CasualSide;
+  membersA: CasualMemberInput[];
+  membersB: CasualMemberInput[];
+  profileById: Map<string, CasualProfile>;
+}) {
+  const opponentAverageBySide: Record<CasualSide, number> = {
+    A: averageCasualRating(input.membersB, input.profileById),
+    B: averageCasualRating(input.membersA, input.profileById)
+  };
+  const outcomes: Record<string, CasualRatingOutcome> = {};
+
+  for (const side of ["A", "B"] as CasualSide[]) {
+    const members = side === "A" ? input.membersA : input.membersB;
+    for (const member of members) {
+      const before = ratingFromCasualProfile(input.profileById.get(member.userId));
+      const result =
+        side === input.winnerSide
+          ? updateUserRating({ winnerRating: before, loserRating: opponentAverageBySide[side] })
+          : updateUserRating({ winnerRating: opponentAverageBySide[side], loserRating: before });
+      const after = side === input.winnerSide ? result.winnerRatingAfter : result.loserRatingAfter;
+      outcomes[member.userId] = {
+        side,
+        name: member.name,
+        before,
+        after,
+        delta: after - before
+      };
+    }
+  }
+
+  return outcomes;
+}
+
+function buildCasualMemberStats(values: CasualMatchInput, members: CasualMemberInput[], side: CasualSide) {
+  return Object.fromEntries(
+    members.map((member) => [
+      member.userId,
+      calculateDartStats(personalCasualTurns(values.turns, participantIdForCasualSide(side), member.userId))
+    ])
+  );
+}
+
+async function applyCasualLinkedMemberSettlement(input: {
+  admin: ReturnType<typeof createSupabaseAdminClient>;
+  casualMatchId: string;
+  userId: string;
+  won: boolean;
+  legsWon: number;
+  legsLost: number;
+  stats: ReturnType<typeof calculateDartStats>;
+  ratingOutcome: CasualRatingOutcome;
+  note: string;
+}) {
+  const { error: profileError } = await input.admin
+    .from("profiles")
+    .update({ casual_rating: input.ratingOutcome.after })
+    .eq("id", input.userId);
+  if (profileError) throw new Error(profileError.message);
+
+  const { error: ratingLogError } = await input.admin.from("rating_logs").insert({
+    user_id: input.userId,
+    casual_match_id: input.casualMatchId,
+    rating_before: input.ratingOutcome.before,
+    rating_after: input.ratingOutcome.after,
+    delta: input.ratingOutcome.delta,
+    reason: input.won ? "match_win" : "match_loss",
+    note: input.note,
+    rating_scope: "general",
+    match_source: "casual"
+  });
+  if (ratingLogError) throw new Error(ratingLogError.message);
+
+  const { error: statsError } = await input.admin.rpc(
+    "upsert_general_match_stats",
+    buildStatsRpcPayload({
+      userId: input.userId,
+      won: input.won,
+      legsWon: input.legsWon,
+      legsLost: input.legsLost,
+      stats: input.stats
+    })
+  );
+  if (statsError) throw new Error(statsError.message);
+}
+
+function statsFromCasualRowsForMember(rows: CasualTurnRow[], turnMeta: CasualTurnMetaEntry[], userId: string) {
+  const hasPersonalTurnMeta = turnMeta.some((item) => item.side === "B" && item.userId === userId);
+  const personalRows = hasPersonalTurnMeta
+    ? rows.filter((turn) =>
+        turnMeta.some((item) => item.side === "B" && item.turnNumber === turn.turn_number && item.userId === userId)
+      )
+    : rows;
+
+  return calculateDartStats(
+    personalRows.map((turn) => {
+      const meta = turnMeta.find((item) => item.side === "B" && item.turnNumber === turn.turn_number);
+      return {
+        participantId: "opponent",
+        userId: meta?.userId || undefined,
+        legNumber: meta?.legNumber || 1,
+        score: turn.score,
+        darts: turn.darts || 3,
+        remainingBefore: turn.remaining_before,
+        remainingAfter: turn.remaining_after,
+        isBust: turn.is_bust,
+        isCheckout: turn.is_checkout
+      };
+    })
+  );
 }
 
 async function assertMatchMember(matchId: string, userId: string) {
@@ -1091,7 +1281,18 @@ export async function completeCasualMatchAction(payload: unknown) {
     }
   }
 
-  const profileIds = [user.id, opponentUserId].filter(Boolean) as string[];
+  const linkedMemberIds = allLinkedCasualMemberIds(values);
+  if (!linkedMemberIds.includes(user.id)) {
+    throw new Error("当前账号必须在我方出场名单中。");
+  }
+  if (opponentUserId && !linkedCasualMembers(values, "B").some((member) => member.userId === opponentUserId)) {
+    throw new Error("对手账号必须在对方出场名单中。");
+  }
+  if (new Set(linkedMemberIds).size !== linkedMemberIds.length) {
+    throw new Error("同一个账号不能同时作为多个出场人。");
+  }
+
+  const profileIds = [...new Set([user.id, opponentUserId, ...linkedMemberIds].filter(Boolean))] as string[];
   const { data: profiles, error: profileError } = await admin
     .from("profiles")
     .select("id, display_name, rating, casual_rating")
@@ -1103,30 +1304,49 @@ export async function completeCasualMatchAction(payload: unknown) {
   if (opponentUserId && !opponentProfile) {
     throw new Error("Opponent profile was not found.");
   }
+  for (const userId of linkedMemberIds) {
+    if (!profileById.has(userId)) throw new Error("出场账号中有用户资料不存在，请重新选择。");
+  }
 
   const playerAName =
     profile?.display_name || profileById.get(user.id)?.display_name || user.email?.split("@")[0] || "Me";
-  const playerBName = opponentProfile?.display_name || values.opponentName;
-  const turnsA = values.turns.filter((turn) => turn.participantId === "me");
-  const turnsB = values.turns.filter((turn) => turn.participantId === "opponent");
+  const normalizedValues: CasualMatchInput = {
+    ...values,
+    participantMembers: normalizeCasualMembers(values, profileById)
+  };
+  const linkedMembersA = linkedCasualMembers(normalizedValues, "A");
+  const linkedMembersB = linkedCasualMembers(normalizedValues, "B");
+  const playerBName = opponentProfile?.display_name || normalizedValues.opponentName;
+  const turnsA = normalizedValues.turns.filter((turn) => turn.participantId === "me");
+  const turnsB = normalizedValues.turns.filter((turn) => turn.participantId === "opponent");
   const participantStatsA = calculateDartStats(turnsA);
   const participantStatsB = calculateDartStats(turnsB);
-  const statsA = calculateDartStats(personalCasualTurns(values.turns, "me", user.id));
+  const statsA = calculateDartStats(personalCasualTurns(normalizedValues.turns, "me", user.id));
   const statsB = opponentUserId
-    ? calculateDartStats(personalCasualTurns(values.turns, "opponent", opponentUserId))
+    ? calculateDartStats(personalCasualTurns(normalizedValues.turns, "opponent", opponentUserId))
     : participantStatsB;
-  const playerARating = profileById.get(user.id)?.casual_rating ?? profileById.get(user.id)?.rating ?? 1000;
-  const playerBRating = opponentProfile?.casual_rating ?? opponentProfile?.rating ?? 1000;
+  const memberStats = {
+    ...buildCasualMemberStats(normalizedValues, linkedMembersA, "A"),
+    ...buildCasualMemberStats(normalizedValues, linkedMembersB, "B")
+  };
+  const playerARating = averageCasualRating(linkedMembersA, profileById);
+  const playerBRating = averageCasualRating(linkedMembersB, profileById);
   const ratingResult =
-    values.winnerSide === "A"
+    normalizedValues.winnerSide === "A"
       ? updateUserRating({ winnerRating: playerARating, loserRating: playerBRating })
       : updateUserRating({ winnerRating: playerBRating, loserRating: playerARating });
   const playerARatingAfter =
-    values.winnerSide === "A" ? ratingResult.winnerRatingAfter : ratingResult.loserRatingAfter;
+    normalizedValues.winnerSide === "A" ? ratingResult.winnerRatingAfter : ratingResult.loserRatingAfter;
   const playerBRatingAfter =
-    values.winnerSide === "B" ? ratingResult.winnerRatingAfter : ratingResult.loserRatingAfter;
+    normalizedValues.winnerSide === "B" ? ratingResult.winnerRatingAfter : ratingResult.loserRatingAfter;
   const playerADelta = playerARatingAfter - playerARating;
   const playerBDelta = playerBRatingAfter - playerBRating;
+  const memberRatingOutcomes = buildCasualMemberRatingOutcomes({
+    winnerSide: normalizedValues.winnerSide,
+    membersA: linkedMembersA,
+    membersB: linkedMembersB,
+    profileById
+  });
 
   const { data: casualMatch, error: casualMatchError } = await admin
     .from("casual_matches")
@@ -1136,19 +1356,19 @@ export async function completeCasualMatchAction(payload: unknown) {
       player_b_user_id: opponentUserId,
       player_a_name: playerAName,
       player_b_name: playerBName,
-      starting_score: values.startingScore,
-      best_of: values.bestOf,
-      winner_side: values.winnerSide,
-      score_a: values.scoreA,
-      score_b: values.scoreB,
+      starting_score: normalizedValues.startingScore,
+      best_of: normalizedValues.bestOf,
+      winner_side: normalizedValues.winnerSide,
+      score_a: normalizedValues.scoreA,
+      score_b: normalizedValues.scoreB,
       confirmation_status: opponentUserId ? "pending" : "not_required",
       details: {
         source: "casual_scorer",
-        submissionId: values.submissionId || null,
-        participantMode: values.participantMode,
-        participantMembers: values.participantMembers,
-        legLineups: values.legLineups,
-        turnMeta: casualTurnMeta(values),
+        submissionId: normalizedValues.submissionId || null,
+        participantMode: normalizedValues.participantMode,
+        participantMembers: normalizedValues.participantMembers,
+        legLineups: normalizedValues.legLineups,
+        turnMeta: casualTurnMeta(normalizedValues),
         participantStats: {
           A: participantStatsA,
           B: participantStatsB
@@ -1157,7 +1377,8 @@ export async function completeCasualMatchAction(payload: unknown) {
           A: statsA,
           B: statsB
         },
-        legResults: values.legResults,
+        memberStats,
+        legResults: normalizedValues.legResults,
         ratingOutcome: {
           A: {
             before: playerARating,
@@ -1168,7 +1389,8 @@ export async function completeCasualMatchAction(payload: unknown) {
             before: playerBRating,
             after: playerBRatingAfter,
             delta: playerBDelta
-          }
+          },
+          members: memberRatingOutcomes
         }
       }
     })
@@ -1194,9 +1416,9 @@ export async function completeCasualMatchAction(payload: unknown) {
     throw new Error(casualMatchError.message);
   }
 
-  if (values.turns.length > 0) {
+  if (normalizedValues.turns.length > 0) {
     const { error: turnError } = await admin.from("casual_match_turns").insert(
-      values.turns.map((turn, index) => ({
+      normalizedValues.turns.map((turn, index) => ({
         casual_match_id: casualMatch.id,
         side: turn.participantId === "me" ? "A" : "B",
         turn_number: index + 1,
@@ -1211,28 +1433,21 @@ export async function completeCasualMatchAction(payload: unknown) {
     if (turnError) throw new Error(turnError.message);
   }
 
-  await admin.from("profiles").update({ casual_rating: playerARatingAfter }).eq("id", user.id);
-  await admin.from("rating_logs").insert({
-    user_id: user.id,
-    casual_match_id: casualMatch.id,
-    rating_before: playerARating,
-    rating_after: playerARatingAfter,
-    delta: playerADelta,
-    reason: values.winnerSide === "A" ? "match_win" : "match_loss",
-    note: "casual_sparring",
-    rating_scope: "general",
-    match_source: "casual"
-  });
-  await admin.rpc(
-    "upsert_general_match_stats",
-    buildStatsRpcPayload({
-      userId: user.id,
-      won: values.winnerSide === "A",
-      legsWon: values.scoreA,
-      legsLost: values.scoreB,
-      stats: statsA
-    })
-  );
+  for (const member of linkedMembersA) {
+    const outcome = memberRatingOutcomes[member.userId];
+    if (!outcome) continue;
+    await applyCasualLinkedMemberSettlement({
+      admin,
+      casualMatchId: casualMatch.id,
+      userId: member.userId,
+      won: normalizedValues.winnerSide === "A",
+      legsWon: normalizedValues.scoreA,
+      legsLost: normalizedValues.scoreB,
+      stats: memberStats[member.userId] || statsA,
+      ratingOutcome: outcome,
+      note: member.userId === user.id ? "casual_sparring" : "casual_sparring_teammate"
+    });
+  }
 
   revalidatePath("/scorer");
   revalidatePath("/profile");
@@ -1281,65 +1496,54 @@ export async function confirmCasualMatchAction(formData: FormData) {
     .order("turn_number");
 
   if (turnError) throw new Error(turnError.message);
-  const turnMeta =
-    ((casualMatch.details as { turnMeta?: Array<{ turnNumber?: number; side?: string; userId?: string | null; legNumber?: number }> } | null)
-      ?.turnMeta || []);
-  const hasPersonalTurnMeta = turnMeta.some((item) => item.side === "B" && item.userId === user.id);
-  const personalTurns = hasPersonalTurnMeta
-    ? (turns || []).filter((turn) =>
-        turnMeta.some((item) => item.side === "B" && item.turnNumber === turn.turn_number && item.userId === user.id)
-      )
-    : turns || [];
-  const stats = calculateDartStats(
-    personalTurns.map((turn) => {
-      const meta = turnMeta.find((item) => item.side === "B" && item.turnNumber === turn.turn_number);
-      return {
-      participantId: "opponent",
-      legNumber: meta?.legNumber || 1,
-      score: turn.score,
-      darts: turn.darts || 3,
-      remainingBefore: turn.remaining_before,
-      remainingAfter: turn.remaining_after,
-      isBust: turn.is_bust,
-      isCheckout: turn.is_checkout
-      };
-    })
+  const details = casualMatch.details as {
+    participantMembers?: { A?: CasualMemberInput[]; B?: CasualMemberInput[] };
+    turnMeta?: CasualTurnMetaEntry[];
+    ratingOutcome?: {
+      B?: { delta?: number };
+      members?: Record<string, CasualRatingOutcome>;
+    };
+  } | null;
+  const turnMeta = details?.turnMeta || [];
+  const linkedMembersB = (details?.participantMembers?.B || []).filter(
+    (member) => member.linked && isUuidValue(member.userId)
   );
-  const ratingDelta =
-    (casualMatch.details as { ratingOutcome?: { B?: { delta?: number } } } | null)?.ratingOutcome?.B?.delta ??
-    (casualMatch.winner_side === "B" ? 10 : -10);
-  const { data: profile, error: profileError } = await admin
+  if (!linkedMembersB.some((member) => member.userId === user.id)) {
+    linkedMembersB.unshift({ userId: user.id, name: casualMatch.player_b_name, linked: true });
+  }
+  const linkedMemberIdsB = [...new Set(linkedMembersB.map((member) => member.userId))];
+  const { data: profiles, error: profileError } = await admin
     .from("profiles")
-    .select("casual_rating, rating")
-    .eq("id", user.id)
-    .single();
-
+    .select("id, display_name, rating, casual_rating")
+    .in("id", linkedMemberIdsB);
   if (profileError) throw new Error(profileError.message);
-  const ratingBefore = profile.casual_rating ?? profile.rating ?? 1000;
-  const ratingAfter = Math.max(100, ratingBefore + ratingDelta);
+  const profileById = new Map((profiles || []).map((item) => [item.id, item]));
+  const ratingDelta =
+    details?.ratingOutcome?.B?.delta ??
+    (casualMatch.winner_side === "B" ? 10 : -10);
 
-  await admin.from("profiles").update({ casual_rating: ratingAfter }).eq("id", user.id);
-  await admin.from("rating_logs").insert({
-    user_id: user.id,
-    casual_match_id: casualMatchId,
-    rating_before: ratingBefore,
-    rating_after: ratingAfter,
-    delta: ratingAfter - ratingBefore,
-    reason: casualMatch.winner_side === "B" ? "match_win" : "match_loss",
-    note: "casual_sparring_confirmed",
-    rating_scope: "general",
-    match_source: "casual"
-  });
-  await admin.rpc(
-    "upsert_general_match_stats",
-    buildStatsRpcPayload({
-      userId: user.id,
+  for (const member of linkedMembersB) {
+    const profile = profileById.get(member.userId);
+    const ratingBefore = ratingFromCasualProfile(profile);
+    const fallbackOutcome: CasualRatingOutcome = {
+      side: "B",
+      name: profile?.display_name || member.name,
+      before: ratingBefore,
+      after: Math.max(100, ratingBefore + ratingDelta),
+      delta: Math.max(100, ratingBefore + ratingDelta) - ratingBefore
+    };
+    await applyCasualLinkedMemberSettlement({
+      admin,
+      casualMatchId,
+      userId: member.userId,
       won: casualMatch.winner_side === "B",
       legsWon: casualMatch.score_b,
       legsLost: casualMatch.score_a,
-      stats
-    })
-  );
+      stats: statsFromCasualRowsForMember((turns || []) as CasualTurnRow[], turnMeta, member.userId),
+      ratingOutcome: details?.ratingOutcome?.members?.[member.userId] || fallbackOutcome,
+      note: member.userId === user.id ? "casual_sparring_confirmed" : "casual_sparring_teammate_confirmed"
+    });
+  }
   await admin
     .from("casual_matches")
     .update({

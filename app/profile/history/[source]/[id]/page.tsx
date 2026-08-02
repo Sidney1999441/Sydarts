@@ -38,13 +38,19 @@ type DbParticipant = {
   user_id?: string | null;
   team_id?: string | null;
 };
-type StatsBucket = "participantStats" | "personalStats" | "userStats";
+type StatsBucket = "participantStats" | "personalStats" | "memberStats" | "userStats";
+type CasualSide = "A" | "B";
 type CasualTurnMeta = {
   turnNumber?: number;
-  side?: "A" | "B";
+  side?: CasualSide;
   legNumber?: number;
   userId?: string | null;
   userName?: string | null;
+};
+type CasualMember = {
+  userId?: string | null;
+  name?: string | null;
+  linked?: boolean | null;
 };
 
 function toNumber(value: number | string | null | undefined) {
@@ -90,6 +96,7 @@ function readStatsEntryFromDetails(details: unknown, key: string, bucket: StatsB
   const stats = (details as {
     participantStats?: Record<string, Partial<DartStats>>;
     personalStats?: Record<string, Partial<DartStats>>;
+    memberStats?: Record<string, Partial<DartStats>>;
     userStats?: Record<string, Partial<DartStats>>;
   } | null)?.[bucket];
   return stats?.[key] ? normalizeDartStats(stats[key]) : null;
@@ -104,6 +111,14 @@ function readCasualTurnMeta(details: unknown) {
     (details as { turnMeta?: CasualTurnMeta[] } | null)?.turnMeta?.filter((item) => item.turnNumber && item.side) ||
     []
   );
+}
+
+function readCasualMemberSide(details: unknown, userId: string): CasualSide | null {
+  const participantMembers = (details as { participantMembers?: { A?: CasualMember[]; B?: CasualMember[] } } | null)
+    ?.participantMembers;
+  if (participantMembers?.A?.some((member) => member.linked && member.userId === userId)) return "A";
+  if (participantMembers?.B?.some((member) => member.linked && member.userId === userId)) return "B";
+  return null;
 }
 
 function statsFromTurns(turns: ScoreTurn[]) {
@@ -259,8 +274,9 @@ export default async function ProfileHistoryDetailPage({
   if (source === "casual") {
     const { data: match } = await supabase.from("casual_matches").select("*").eq("id", id).maybeSingle();
     if (!match) notFound();
-    const isPlayerA = match.player_a_user_id === user.id;
-    const isPlayerB = match.player_b_user_id === user.id;
+    const casualMemberSide = readCasualMemberSide(match.details, user.id);
+    const isPlayerA = match.player_a_user_id === user.id || casualMemberSide === "A";
+    const isPlayerB = match.player_b_user_id === user.id || casualMemberSide === "B";
     if (!isPlayerA && !isPlayerB && match.created_by !== user.id) notFound();
 
     const { data: turns } = await supabase
@@ -268,8 +284,8 @@ export default async function ProfileHistoryDetailPage({
       .select("casual_match_id, side, turn_number, score, darts, remaining_before, remaining_after, is_bust, is_checkout")
       .eq("casual_match_id", id)
       .order("turn_number", { ascending: true });
-    const mySide = isPlayerA ? "A" : "B";
-    const opponentSide = isPlayerA ? "B" : "A";
+    const mySide: CasualSide = casualMemberSide || (isPlayerA ? "A" : "B");
+    const opponentSide: CasualSide = mySide === "A" ? "B" : "A";
     const turnMeta = readCasualTurnMeta(match.details);
     const matchTurns = (turns || []).map((turn) => {
       const meta = turnMeta.find((item) => item.side === turn.side && item.turnNumber === turn.turn_number);
@@ -279,6 +295,7 @@ export default async function ProfileHistoryDetailPage({
     const opponentTurns = matchTurns.filter((turn) => turn.participantId === opponentSide);
     const myPersonalStats = readStatsEntryFromDetails(match.details, mySide, "personalStats");
     const opponentPersonalStats = readStatsEntryFromDetails(match.details, opponentSide, "personalStats");
+    const myMemberStats = readStatsEntryFromDetails(match.details, user.id, "memberStats");
     const result =
       match.confirmation_status === "rejected"
         ? "争议"
@@ -294,16 +311,16 @@ export default async function ProfileHistoryDetailPage({
         subtitle={match.confirmation_status === "pending" ? "待确认切磋" : "普通切磋"}
         playedAt={match.created_at}
         result={result}
-        scoreLabel={isPlayerA ? `${match.score_a}:${match.score_b}` : `${match.score_b}:${match.score_a}`}
-        myName={isPlayerA ? match.player_a_name : match.player_b_name}
-        opponentName={isPlayerA ? match.player_b_name : match.player_a_name}
-        myStats={myPersonalStats || (myTurns.length > 0 ? statsFromTurns(myTurns) : readStatsFromDetails(match.details, mySide))}
+        scoreLabel={mySide === "A" ? `${match.score_a}:${match.score_b}` : `${match.score_b}:${match.score_a}`}
+        myName={mySide === "A" ? match.player_a_name : match.player_b_name}
+        opponentName={mySide === "A" ? match.player_b_name : match.player_a_name}
+        myStats={myMemberStats || myPersonalStats || (myTurns.length > 0 ? statsFromTurns(myTurns) : readStatsFromDetails(match.details, mySide))}
         opponentStats={
           opponentPersonalStats || (opponentTurns.length > 0 ? statsFromTurns(opponentTurns) : readStatsFromDetails(match.details, opponentSide))
         }
         turns={matchTurns}
         confirmationSlot={
-          isPlayerB && match.confirmation_status === "pending" ? (
+          match.player_b_user_id === user.id && match.confirmation_status === "pending" ? (
             <CasualConfirmationActions matchId={match.id} />
           ) : null
         }

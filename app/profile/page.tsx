@@ -1,13 +1,13 @@
 import Link from "next/link";
-import { UserRound } from "lucide-react";
+import type { ReactNode } from "react";
+import { ArrowRight, History, Swords, UserRound } from "lucide-react";
 import { confirmCasualMatchAction, confirmManualResultAction } from "@/lib/actions/matches";
 import { updateSavedTeamProfileAction } from "@/lib/actions/teams";
 import { calculatePlayerLevel, type PlayerLevelStats, type SoftPlayerLevelStats } from "@/lib/algorithms/player-level";
 import { requireUser } from "@/lib/auth/guards";
-import { getMatchRulesSummary } from "@/lib/darts/variants";
 import { hasSupabaseEnv } from "@/lib/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { cn, formatDateTime } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import { SetupNotice } from "@/components/SetupNotice";
 import { CodlPageHeader } from "@/components/CodlPageHeader";
 import { LevelExplanation } from "@/components/LevelExplanation";
@@ -62,20 +62,6 @@ type DbSoftStats = {
   current_rating?: number | null;
 };
 
-type MatchHistoryItem = {
-  id: string;
-  source: "赛事" | "切磋";
-  title: string;
-  href?: string;
-  detailHref: string;
-  playedAt: string;
-  result: "胜" | "负" | "待确认" | "争议";
-  statusLabel: string;
-  scoreLabel: string;
-  myName: string;
-  opponentName: string;
-};
-
 function toNumber(value: number | string | null | undefined) {
   const numeric = Number(value ?? 0);
   return Number.isFinite(numeric) ? numeric : 0;
@@ -85,6 +71,70 @@ function percent(part: number | null | undefined, total: number | null | undefin
   const totalValue = toNumber(total);
   if (totalValue <= 0) return 0;
   return Math.round((toNumber(part) / totalValue) * 100);
+}
+
+function getLevelTone(level: ReturnType<typeof calculatePlayerLevel>) {
+  if (level.level >= 95) {
+    return {
+      header: "border-sky-300 bg-slate-950 text-white",
+      panel: "border-sky-300 bg-slate-950 text-white",
+      badge: "bg-sky-400 text-slate-950",
+      text: "text-sky-200",
+      bar: "bg-sky-400"
+    };
+  }
+  if (level.level >= 83) {
+    return {
+      header: "border-indigo-200 bg-indigo-50",
+      panel: "border-indigo-200 bg-indigo-50 text-indigo-950",
+      badge: "bg-indigo-600 text-white",
+      text: "text-indigo-700",
+      bar: "bg-indigo-600"
+    };
+  }
+  if (level.level >= 70) {
+    return {
+      header: "border-rose-200 bg-rose-50",
+      panel: "border-rose-200 bg-rose-50 text-rose-950",
+      badge: "bg-rose-600 text-white",
+      text: "text-rose-700",
+      bar: "bg-rose-600"
+    };
+  }
+  if (level.level >= 55) {
+    return {
+      header: "border-amber-200 bg-amber-50",
+      panel: "border-amber-200 bg-amber-50 text-amber-950",
+      badge: "bg-amber-500 text-slate-950",
+      text: "text-amber-700",
+      bar: "bg-amber-500"
+    };
+  }
+  if (level.level >= 40) {
+    return {
+      header: "border-cyan-200 bg-cyan-50",
+      panel: "border-cyan-200 bg-cyan-50 text-cyan-950",
+      badge: "bg-cyan-600 text-white",
+      text: "text-cyan-700",
+      bar: "bg-cyan-600"
+    };
+  }
+  if (level.level >= 20) {
+    return {
+      header: "border-emerald-200 bg-emerald-50",
+      panel: "border-emerald-200 bg-emerald-50 text-emerald-950",
+      badge: "bg-emerald-600 text-white",
+      text: "text-emerald-700",
+      bar: "bg-emerald-600"
+    };
+  }
+  return {
+    header: "border-slate-200 bg-slate-50",
+    panel: "border-slate-200 bg-slate-50 text-slate-950",
+    badge: "bg-slate-700 text-white",
+    text: "text-slate-600",
+    bar: "bg-slate-700"
+  };
 }
 
 function toLevelStats(stats?: DbStats | null): PlayerLevelStats {
@@ -138,7 +188,6 @@ export default async function ProfilePage() {
     { data: registrations },
     { data: confirmations },
     { data: pendingCasualMatches },
-    { data: teamMemberships },
     { data: savedTeams }
   ] = await Promise.all([
     supabase.from("user_stats").select("*").eq("user_id", user.id).maybeSingle(),
@@ -163,7 +212,6 @@ export default async function ProfilePage() {
       .eq("confirmation_status", "pending")
       .order("created_at", { ascending: false })
       .limit(6),
-    supabase.from("team_members").select("team_id").eq("user_id", user.id),
     supabase
       .from("saved_teams")
       .select("id, name, avatar_url, status, created_at, updated_at")
@@ -171,57 +219,12 @@ export default async function ProfilePage() {
       .order("updated_at", { ascending: false })
   ]);
 
-  const teamIds = (teamMemberships || []).map((item) => item.team_id);
-  const participantFilters = [`user_id.eq.${user.id}`];
-  if (teamIds.length > 0) participantFilters.push(`team_id.in.(${teamIds.join(",")})`);
-
-  const { data: myParticipants } = await supabase
-    .from("tournament_participants")
-    .select("id, display_name")
-    .or(participantFilters.join(","));
-
-  const myParticipantIds = (myParticipants || []).map((participant) => participant.id);
-  const myParticipantIdSet = new Set(myParticipantIds);
-  const { data: officialMatches } =
-    myParticipantIds.length > 0
-      ? await supabase
-          .from("matches")
-          .select("id, tournament_id, stage, round_number, match_number, participant_a_id, participant_b_id, winner_participant_id, status, score_a, score_b, dart_mode, game_variant, details, created_at, updated_at")
-          .or(`participant_a_id.in.(${myParticipantIds.join(",")}),participant_b_id.in.(${myParticipantIds.join(",")})`)
-          .eq("status", "completed")
-          .order("updated_at", { ascending: false })
-          .limit(30)
-      : { data: [] };
-
-  const { data: casualMatches } = await supabase
-    .from("casual_matches")
-    .select("*")
-    .or(`created_by.eq.${user.id},player_a_user_id.eq.${user.id},player_b_user_id.eq.${user.id}`)
-    .order("created_at", { ascending: false })
-    .limit(30);
-
-  const officialParticipantIds = [
-    ...new Set(
-      (officialMatches || [])
-        .flatMap((match) => [match.participant_a_id, match.participant_b_id])
-        .filter(Boolean)
-    )
-  ] as string[];
-  const tournamentIds = [
-    ...new Set([
-      ...(officialMatches || []).map((match) => match.tournament_id),
-      ...(registrations || []).map((registration) => registration.tournament_id)
-    ])
-  ];
+  const tournamentIds = [...new Set((registrations || []).map((registration) => registration.tournament_id))];
 
   const [
-    { data: officialParticipants },
     { data: tournaments },
     { data: confirmationMatches }
   ] = await Promise.all([
-    officialParticipantIds.length > 0
-      ? supabase.from("tournament_participants").select("id, display_name").in("id", officialParticipantIds)
-      : Promise.resolve({ data: [] }),
     tournamentIds.length > 0
       ? supabase.from("tournaments").select("id, name").in("id", tournamentIds)
       : Promise.resolve({ data: [] }),
@@ -249,7 +252,7 @@ export default async function ProfilePage() {
       : { data: [] };
 
   const participantById = new Map(
-    [...(officialParticipants || []), ...(confirmationParticipants || [])].map((participant) => [
+    (confirmationParticipants || []).map((participant) => [
       participant.id,
       participant
     ])
@@ -272,76 +275,7 @@ export default async function ProfilePage() {
     softRating,
     softStats: toSoftLevelStats(softStats)
   });
-  const history = [
-    ...(officialMatches || []).flatMap((match): MatchHistoryItem[] => {
-      const myParticipantId =
-        [match.participant_a_id, match.participant_b_id].find((participantId) =>
-          participantId ? myParticipantIdSet.has(participantId) : false
-        ) || null;
-      if (!myParticipantId) return [];
-      const opponentParticipantId =
-        myParticipantId === match.participant_a_id ? match.participant_b_id : match.participant_a_id;
-      const myName = participantById.get(myParticipantId)?.display_name || "我方";
-      const opponentName = opponentParticipantId
-        ? participantById.get(opponentParticipantId)?.display_name || "对手"
-        : "对手";
-      const myScore = myParticipantId === match.participant_a_id ? match.score_a : match.score_b;
-      const opponentScore = myParticipantId === match.participant_a_id ? match.score_b : match.score_a;
-
-      return [
-        {
-          id: match.id,
-          source: "赛事",
-          title: tournamentById.get(match.tournament_id)?.name || "赛事比赛",
-          href: `/tournaments/${match.tournament_id}`,
-          detailHref: `/profile/history/official/${match.id}`,
-          playedAt: match.updated_at || match.created_at,
-          result: match.winner_participant_id === myParticipantId ? "胜" : "负",
-          statusLabel: `${match.stage === "group" ? "小组赛" : `淘汰赛 R${match.round_number}`} / ${getMatchRulesSummary({
-            dartMode: match.dart_mode,
-            gameVariant: match.game_variant,
-            legRules: (match.details as { legRules?: unknown } | null)?.legRules
-          })}`,
-          scoreLabel: `${myScore}:${opponentScore}`,
-          myName,
-          opponentName
-        }
-      ];
-    }),
-    ...(casualMatches || []).map((match): MatchHistoryItem => {
-      const isPlayerA = match.player_a_user_id === user.id;
-      const mySide = isPlayerA ? "A" : "B";
-      const statusLabel =
-        match.confirmation_status === "pending"
-          ? "待对手确认"
-          : match.confirmation_status === "rejected"
-            ? "对手已拒绝"
-            : "已记录";
-      const result =
-        match.confirmation_status === "rejected"
-          ? "争议"
-          : match.confirmation_status === "pending" && !isPlayerA
-            ? "待确认"
-            : match.winner_side === mySide
-              ? "胜"
-              : "负";
-
-      return {
-        id: match.id,
-        source: "切磋",
-        title: `${match.player_a_name} vs ${match.player_b_name}`,
-        detailHref: `/profile/history/casual/${match.id}`,
-        playedAt: match.created_at,
-        result,
-        statusLabel,
-        scoreLabel: isPlayerA ? `${match.score_a}:${match.score_b}` : `${match.score_b}:${match.score_a}`,
-        myName: isPlayerA ? match.player_a_name : match.player_b_name,
-        opponentName: isPlayerA ? match.player_b_name : match.player_a_name
-      };
-    })
-  ]
-    .sort((a, b) => new Date(b.playedAt).getTime() - new Date(a.playedAt).getTime())
-    .slice(0, 30);
+  const profileTone = getLevelTone(generalLevel);
   const pendingActionCount = (confirmations || []).length + (pendingCasualMatches || []).length;
 
   return (
@@ -352,6 +286,8 @@ export default async function ProfilePage() {
         description={`${profile?.display_name || user.email} · 普通 ${generalLevel.label} · 赛事 ${tournamentLevel.label}`}
         icon={<UserRound className="h-6 w-6" aria-hidden />}
         art="white"
+        dark={generalLevel.level >= 95}
+        className={profileTone.header}
         actions={
           <div className="rounded-lg border border-wire bg-surface/95 p-3">
             <AvatarUploader
@@ -365,6 +301,28 @@ export default async function ProfilePage() {
           </div>
         }
       />
+
+      <section className={cn("rounded-lg border p-4 shadow-soft sm:p-5", profileTone.panel)}>
+        <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-center">
+          <div className="min-w-0">
+            <span className={cn("inline-flex rounded-full px-3 py-1 text-xs font-black", profileTone.badge)}>
+              {generalLevel.majorRank}
+            </span>
+            <h2 className="mt-3 truncate text-2xl font-black">{profile?.display_name || user.email}</h2>
+            <div className={cn("mt-2 text-sm font-bold", profileTone.text)}>
+              普通 {generalLevel.level} 级 · 赛事 {tournamentLevel.level} 级 · UID {profile?.uid || "------"}
+            </div>
+            <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/70">
+              <div className={cn("h-full", profileTone.bar)} style={{ width: `${generalLevel.progressToNext}%` }} />
+            </div>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-3 lg:w-[420px]">
+            <ProfileQuickLink href="/profile/history" icon={<History className="h-4 w-4" aria-hidden />} label="历史战绩" />
+            <ProfileQuickLink href="/scorer/casual" icon={<Swords className="h-4 w-4" aria-hidden />} label="切磋计分" />
+            <ProfileQuickLink href="/help" icon={<ArrowRight className="h-4 w-4" aria-hidden />} label="规则说明" />
+          </div>
+        </div>
+      </section>
 
       <CombinedStatsPanel
         generalStats={generalStats}
@@ -388,32 +346,6 @@ export default async function ProfilePage() {
         </section>
       </details>
 
-      <section>
-        <div className="mb-4 grid gap-3 sm:flex sm:flex-wrap sm:items-end sm:justify-between">
-          <div>
-            <h2 className="text-xl font-bold">最近 30 局详细记录</h2>
-            <p className="mt-1 text-sm text-muted">
-              新比赛会自动排在最前面，个人页只保留最近 30 局的结算式明细。
-            </p>
-          </div>
-          <Link className="inline-flex min-h-11 touch-manipulation items-center justify-center rounded-lg border border-wire bg-surface px-4 text-sm font-semibold text-board shadow-soft sm:border-0 sm:bg-transparent sm:px-0 sm:shadow-none sm:underline" href="/scorer/casual">
-            打开切磋计分器
-          </Link>
-        </div>
-        <div className="grid gap-4">
-          {history.map((item) => (
-            <HistoryCard key={`${item.source}-${item.id}`} item={item} />
-          ))}
-          {history.length === 0 ? (
-            <Card>
-              <p className="text-sm text-muted">
-                还没有可展示的比赛明细。用计分器完成一局后，这里会出现类似结算页的统计回顾。
-              </p>
-            </Card>
-          ) : null}
-        </div>
-      </section>
-
       <details className="codl-mobile-fold">
         <summary className="cursor-pointer rounded-lg border border-wire bg-surface p-3 text-sm font-black text-board shadow-soft">
           报名与长期队伍
@@ -424,6 +356,21 @@ export default async function ProfilePage() {
         </section>
       </details>
     </div>
+  );
+}
+
+function ProfileQuickLink({ href, icon, label }: { href: string; icon: ReactNode; label: string }) {
+  return (
+    <Link
+      className="flex min-h-12 touch-manipulation items-center justify-between gap-2 rounded-lg border border-white/60 bg-white/80 px-3 text-sm font-black text-primary shadow-sm active:bg-white"
+      href={href}
+    >
+      <span className="flex min-w-0 items-center gap-2">
+        {icon}
+        <span className="truncate">{label}</span>
+      </span>
+      <ArrowRight className="h-4 w-4 shrink-0" aria-hidden />
+    </Link>
   );
 }
 
@@ -535,7 +482,7 @@ function CombinedStatsPanel({
           level={tournamentLevel}
         />
       </div>
-      <details className="mt-4 rounded-lg border border-wire bg-field p-3" open>
+      <details className="mt-4 rounded-lg border border-wire bg-field p-3">
         <summary className="cursor-pointer text-sm font-black text-board">
           完整统计明细
         </summary>
@@ -846,45 +793,6 @@ function SavedTeamCaptainCard({
         ) : null}
       </div>
     </Card>
-  );
-}
-
-function HistoryCard({ item }: { item: MatchHistoryItem }) {
-  return (
-    <Link
-      className="grid min-h-16 touch-manipulation gap-3 rounded-lg border border-wire bg-surface p-3 shadow-soft transition-colors duration-75 active:bg-field sm:grid-cols-[auto_1fr_auto_auto] sm:items-center"
-      href={item.detailHref}
-    >
-      <span
-        className={cn(
-          "w-fit rounded-full px-2 py-1 text-xs font-bold",
-          item.source === "赛事" ? "bg-violet-100 text-violet-700" : "bg-emerald-100 text-emerald-700"
-        )}
-      >
-        {item.source}
-      </span>
-      <span className="min-w-0">
-        <span className="block truncate text-sm font-black text-ink">
-          {item.myName} vs {item.opponentName}
-        </span>
-        <span className="mt-1 block truncate text-xs font-semibold text-muted">
-          {item.title} · {item.statusLabel} · {formatDateTime(item.playedAt)}
-        </span>
-      </span>
-      <span
-        className={cn(
-          "text-lg font-black",
-          item.result === "胜"
-            ? "text-emerald-700"
-            : item.result === "负"
-              ? "text-red-700"
-              : "text-amber-700"
-        )}
-      >
-        {item.result}
-      </span>
-      <span className="text-sm font-black text-board">{item.scoreLabel}</span>
-    </Link>
   );
 }
 

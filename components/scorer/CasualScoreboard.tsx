@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
-import { Search, UserRound, UsersRound } from "lucide-react";
+import { Search, UserRound, UsersRound, X } from "lucide-react";
 import { completeCasualMatchAction } from "@/lib/actions/matches";
 import { searchPlayerProfilesAction } from "@/lib/actions/users";
 import {
@@ -23,6 +23,7 @@ type PlayerSearchResult = {
   uid?: string;
   displayName: string;
 };
+type LinkedPlayerSlot = "opponent" | "myTeammate" | "opponentTeammate";
 
 const PLAYER_A_ID = "me";
 const PLAYER_B_ID = "opponent";
@@ -30,7 +31,19 @@ const LOCAL_MY_TEAMMATE_ID = "local-my-teammate";
 const LOCAL_OPPONENT_ID = "local-opponent";
 const LOCAL_OPPONENT_TEAMMATE_ID = "local-opponent-teammate";
 
-export function CasualScoreboard({ playerId, playerName }: { playerId: string; playerName: string }) {
+function selectedLabel(player: PlayerSearchResult) {
+  return `${player.displayName}${player.uid ? ` · UID ${player.uid}` : ""}`;
+}
+
+export function CasualScoreboard({
+  playerId,
+  playerName,
+  recentOpponents = []
+}: {
+  playerId: string;
+  playerName: string;
+  recentOpponents?: PlayerSearchResult[];
+}) {
   const [step, setStep] = useState<SetupStep>("setup");
   const [opponentMode, setOpponentMode] = useState<OpponentMode>("local");
   const [matchMode, setMatchMode] = useState<MatchMode>("singles");
@@ -38,8 +51,14 @@ export function CasualScoreboard({ playerId, playerName }: { playerId: string; p
   const [myTeammateName, setMyTeammateName] = useState("队友");
   const [opponentTeammateName, setOpponentTeammateName] = useState("对方队友");
   const [opponentQuery, setOpponentQuery] = useState("");
+  const [myTeammateQuery, setMyTeammateQuery] = useState("");
+  const [opponentTeammateQuery, setOpponentTeammateQuery] = useState("");
   const [selectedOpponent, setSelectedOpponent] = useState<PlayerSearchResult | null>(null);
+  const [selectedMyTeammate, setSelectedMyTeammate] = useState<PlayerSearchResult | null>(null);
+  const [selectedOpponentTeammate, setSelectedOpponentTeammate] = useState<PlayerSearchResult | null>(null);
   const [searchResults, setSearchResults] = useState<PlayerSearchResult[]>([]);
+  const [myTeammateSearchResults, setMyTeammateSearchResults] = useState<PlayerSearchResult[]>([]);
+  const [opponentTeammateSearchResults, setOpponentTeammateSearchResults] = useState<PlayerSearchResult[]>([]);
   const [startingScore, setStartingScore] = useState<GameScore>(501);
   const [bestOf, setBestOf] = useState<BestOf>(3);
   const [roundLimit, setRoundLimit] = useState<RoundLimit>("unlimited");
@@ -51,16 +70,25 @@ export function CasualScoreboard({ playerId, playerName }: { playerId: string; p
       ? selectedOpponent?.displayName || "待选择对手"
       : opponentName.trim() || "对手";
   const isDoubles = matchMode === "doubles";
-  const myTeammateDisplayName = myTeammateName.trim() || "队友";
-  const opponentTeammateDisplayName = opponentTeammateName.trim() || "对方队友";
+  const myTeammateDisplayName = selectedMyTeammate?.displayName || myTeammateName.trim() || "队友";
+  const opponentTeammateDisplayName =
+    selectedOpponentTeammate?.displayName || opponentTeammateName.trim() || "对方队友";
   const mySideName = isDoubles ? `${playerName} / ${myTeammateDisplayName}` : playerName;
   const opponentSideName = isDoubles ? `${opponentDisplayName} / ${opponentTeammateDisplayName}` : opponentDisplayName;
   const participantAMembers = useMemo(
     () => [
       { userId: playerId, name: playerName, linked: true },
-      ...(isDoubles ? [{ userId: LOCAL_MY_TEAMMATE_ID, name: myTeammateDisplayName, linked: false }] : [])
+      ...(isDoubles
+        ? [
+            {
+              userId: selectedMyTeammate?.id || LOCAL_MY_TEAMMATE_ID,
+              name: myTeammateDisplayName,
+              linked: Boolean(selectedMyTeammate)
+            }
+          ]
+        : [])
     ],
-    [isDoubles, myTeammateDisplayName, playerId, playerName]
+    [isDoubles, myTeammateDisplayName, playerId, playerName, selectedMyTeammate]
   );
   const participantBMembers = useMemo(
     () => [
@@ -69,29 +97,101 @@ export function CasualScoreboard({ playerId, playerName }: { playerId: string; p
         name: opponentDisplayName,
         linked: opponentMode === "linked" && Boolean(selectedOpponent)
       },
-      ...(isDoubles ? [{ userId: LOCAL_OPPONENT_TEAMMATE_ID, name: opponentTeammateDisplayName, linked: false }] : [])
+      ...(isDoubles
+        ? [
+            {
+              userId:
+                opponentMode === "linked" && selectedOpponentTeammate
+                  ? selectedOpponentTeammate.id
+                  : LOCAL_OPPONENT_TEAMMATE_ID,
+              name: opponentTeammateDisplayName,
+              linked: opponentMode === "linked" && Boolean(selectedOpponentTeammate)
+            }
+          ]
+        : [])
     ],
-    [isDoubles, opponentDisplayName, opponentMode, opponentTeammateDisplayName, selectedOpponent]
+    [isDoubles, opponentDisplayName, opponentMode, opponentTeammateDisplayName, selectedOpponent, selectedOpponentTeammate]
   );
 
-  function searchOpponents() {
+  function searchProfiles(
+    query: string,
+    setResults: (results: PlayerSearchResult[]) => void,
+    emptyMessage = "没有找到匹配的账号，请输入 6 位 UID 或显示名。"
+  ) {
     setSetupMessage("");
     startSearchTransition(async () => {
       try {
-        const results = await searchPlayerProfilesAction(opponentQuery);
-        setSearchResults(results);
+        const results = await searchPlayerProfilesAction(query);
         if (results.length === 0) {
-          setSetupMessage("没有找到匹配的账号，请输入对手的 6 位 UID 或显示名。");
+          setResults([]);
+          setSetupMessage(emptyMessage);
+          return;
         }
+        setResults(results);
       } catch (error) {
         setSetupMessage(error instanceof Error ? error.message : "搜索失败，请稍后重试。");
       }
     });
   }
 
+  function searchOpponents() {
+    searchProfiles(opponentQuery, setSearchResults, "没有找到匹配的对手账号，请输入对手的 6 位 UID 或显示名。");
+  }
+
+  function selectedLinkedIds(slot?: LinkedPlayerSlot) {
+    return [
+      slot === "opponent" ? null : selectedOpponent?.id,
+      slot === "myTeammate" ? null : selectedMyTeammate?.id,
+      slot === "opponentTeammate" ? null : selectedOpponentTeammate?.id,
+      playerId
+    ].filter(Boolean) as string[];
+  }
+
+  function selectLinkedPlayer(slot: LinkedPlayerSlot, player: PlayerSearchResult) {
+    if (selectedLinkedIds(slot).includes(player.id)) {
+      setSetupMessage("同一个账号不能同时作为多个出场人。");
+      return;
+    }
+
+    setSetupMessage("");
+    if (slot === "opponent") {
+      setOpponentMode("linked");
+      setSelectedOpponent(player);
+      setOpponentName(player.displayName);
+      return;
+    }
+    if (slot === "myTeammate") {
+      setSelectedMyTeammate(player);
+      setMyTeammateName(player.displayName);
+      return;
+    }
+    setSelectedOpponentTeammate(player);
+    setOpponentTeammateName(player.displayName);
+  }
+
+  function clearLinkedPlayer(slot: LinkedPlayerSlot) {
+    setSetupMessage("");
+    if (slot === "opponent") {
+      setSelectedOpponent(null);
+      return;
+    }
+    if (slot === "myTeammate") {
+      setSelectedMyTeammate(null);
+      return;
+    }
+    setSelectedOpponentTeammate(null);
+  }
+
   function startScoring() {
     if (opponentMode === "linked" && !selectedOpponent) {
       setSetupMessage("请选择一个对手账号，才能同步记录双方普通数据。");
+      return;
+    }
+    const linkedIds = [...participantAMembers, ...participantBMembers]
+      .filter((member) => member.linked)
+      .map((member) => member.userId);
+    if (new Set(linkedIds).size !== linkedIds.length) {
+      setSetupMessage("同一个账号不能同时作为多个出场人。");
       return;
     }
     setStep("scoring");
@@ -182,16 +282,32 @@ export function CasualScoreboard({ playerId, playerName }: { playerId: string; p
           <div className="rounded-lg border border-wire bg-field p-4">
             <div className="text-sm font-semibold text-muted">我方</div>
             <div className="mt-1 text-lg font-bold">{playerName}</div>
-            {isDoubles ? (
-              <label className="label mt-3">
-                我方队友
-                <input
-                  className="form-input"
-                  value={myTeammateName}
-                  onChange={(event) => setMyTeammateName(event.target.value)}
-                  placeholder="队友"
+           {isDoubles ? (
+              <div className="mt-3 grid gap-3">
+                <label className="label">
+                  我方队友
+                  <input
+                    className="form-input"
+                    value={myTeammateName}
+                    onChange={(event) => {
+                      setMyTeammateName(event.target.value);
+                      setSelectedMyTeammate(null);
+                    }}
+                    placeholder="队友"
+                  />
+                </label>
+                <AccountSearchBox
+                  label="绑定我方队友账号"
+                  query={myTeammateQuery}
+                  selected={selectedMyTeammate}
+                  results={myTeammateSearchResults}
+                  onQueryChange={setMyTeammateQuery}
+                  onSearch={() => searchProfiles(myTeammateQuery, setMyTeammateSearchResults)}
+                  onSelect={(result) => selectLinkedPlayer("myTeammate", result)}
+                  onClear={() => clearLinkedPlayer("myTeammate")}
+                  disabled={isSearching}
                 />
-              </label>
+              </div>
             ) : null}
           </div>
           <div className="grid gap-3">
@@ -229,67 +345,52 @@ export function CasualScoreboard({ playerId, playerName }: { playerId: string; p
               </label>
             ) : (
               <div className="grid gap-3">
-                <label className="label">
-                  搜索对手账号
-                  <div className="flex gap-2">
-                    <input
-                      className="form-input"
-                      value={opponentQuery}
-                      onChange={(event) => setOpponentQuery(event.target.value)}
-                      placeholder="输入 6 位 UID 或显示名"
-                    />
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      onClick={searchOpponents}
-                      disabled={opponentQuery.trim().length < 2 || isSearching}
-                    >
-                      <Search className="h-4 w-4" aria-hidden />
-                      搜索
-                    </Button>
-                  </div>
-                </label>
-                {selectedOpponent ? (
-                  <div className="rounded-lg border border-board bg-emerald-50 p-3 text-sm font-semibold text-emerald-900">
-                    已选择 {selectedOpponent.displayName}
-                  </div>
-                ) : null}
-                <div className="grid gap-2">
-                  {searchResults.map((result) => (
-                    <button
-                      key={result.id}
-                      type="button"
-                      className={`touch-manipulation select-none rounded-lg border p-3 text-left transition-colors duration-75 ${
-                        selectedOpponent?.id === result.id
-                          ? "border-board bg-emerald-50"
-                          : "border-wire bg-surface hover:bg-field active:bg-field"
-                      }`}
-                      onClick={() => {
-                        setSelectedOpponent(result);
-                        setSetupMessage("");
-                      }}
-                    >
-                      <div className="font-bold">{result.displayName}</div>
-                      <div className="mt-1 text-xs text-muted">UID {result.uid || "------"} · {result.id}</div>
-                    </button>
-                  ))}
-                </div>
+                <AccountSearchBox
+                  label="搜索对手账号"
+                  query={opponentQuery}
+                  selected={selectedOpponent}
+                  results={searchResults}
+                  recentOptions={recentOpponents}
+                  onQueryChange={setOpponentQuery}
+                  onSearch={searchOpponents}
+                  onSelect={(result) => selectLinkedPlayer("opponent", result)}
+                  onClear={() => clearLinkedPlayer("opponent")}
+                  disabled={isSearching}
+                />
               </div>
             )}
             {isDoubles ? (
-              <label className="label">
-                对方队友
-                <input
-                  className="form-input"
-                  value={opponentTeammateName}
-                  onChange={(event) => setOpponentTeammateName(event.target.value)}
-                  placeholder="对方队友"
-                />
-              </label>
+              <div className="grid gap-3">
+                <label className="label">
+                  对方队友
+                  <input
+                    className="form-input"
+                    value={opponentTeammateName}
+                    onChange={(event) => {
+                      setOpponentTeammateName(event.target.value);
+                      setSelectedOpponentTeammate(null);
+                    }}
+                    placeholder="对方队友"
+                  />
+                </label>
+                {opponentMode === "linked" ? (
+                  <AccountSearchBox
+                    label="绑定对方队友账号"
+                    query={opponentTeammateQuery}
+                    selected={selectedOpponentTeammate}
+                    results={opponentTeammateSearchResults}
+                    onQueryChange={setOpponentTeammateQuery}
+                    onSearch={() => searchProfiles(opponentTeammateQuery, setOpponentTeammateSearchResults)}
+                    onSelect={(result) => selectLinkedPlayer("opponentTeammate", result)}
+                    onClear={() => clearLinkedPlayer("opponentTeammate")}
+                    disabled={isSearching}
+                  />
+                ) : null}
+              </div>
             ) : null}
             {isDoubles && opponentMode === "linked" ? (
               <p className="rounded-lg bg-field p-3 text-xs font-semibold text-muted">
-                双人切磋会同步当前账号和选中的对手账号，双方队友作为本场出镖人记录。
+                双人切磋会记录四个出镖人；已绑定账号会拆分统计。我方绑定成员保存后写入，对方绑定成员在对手确认后写入。
               </p>
             ) : null}
           </div>
@@ -355,6 +456,104 @@ export function CasualScoreboard({ playerId, playerName }: { playerId: string; p
           开始计分
         </Button>
       </div>
+    </div>
+  );
+}
+
+function AccountSearchBox({
+  label,
+  query,
+  selected,
+  results,
+  recentOptions = [],
+  onQueryChange,
+  onSearch,
+  onSelect,
+  onClear,
+  disabled
+}: {
+  label: string;
+  query: string;
+  selected: PlayerSearchResult | null;
+  results: PlayerSearchResult[];
+  recentOptions?: PlayerSearchResult[];
+  onQueryChange: (value: string) => void;
+  onSearch: () => void;
+  onSelect: (player: PlayerSearchResult) => void;
+  onClear: () => void;
+  disabled?: boolean;
+}) {
+  const selectableRecent = recentOptions.filter((player) => player.id !== selected?.id).slice(0, 6);
+
+  return (
+    <div className="grid gap-2 rounded-lg border border-wire bg-field p-3">
+      <label className="label">
+        {label}
+        <div className="flex gap-2">
+          <input
+            className="form-input"
+            value={query}
+            onChange={(event) => onQueryChange(event.target.value)}
+            placeholder="输入 UID 或显示名"
+          />
+          <Button type="button" variant="secondary" onClick={onSearch} disabled={query.trim().length < 2 || disabled}>
+            <Search className="h-4 w-4" aria-hidden />
+            搜索
+          </Button>
+        </div>
+      </label>
+
+      {selected ? (
+        <div className="flex items-center justify-between gap-2 rounded-lg border border-board bg-emerald-50 p-3 text-sm font-semibold text-emerald-900">
+          <span className="min-w-0 truncate">已绑定 {selectedLabel(selected)}</span>
+          <button
+            type="button"
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-emerald-200 bg-white text-emerald-800"
+            onClick={onClear}
+            aria-label="取消绑定"
+          >
+            <X className="h-4 w-4" aria-hidden />
+          </button>
+        </div>
+      ) : null}
+
+      {selectableRecent.length > 0 ? (
+        <div>
+          <div className="mb-2 text-xs font-bold text-muted">最近对手</div>
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {selectableRecent.map((player) => (
+              <button
+                key={player.id}
+                type="button"
+                className="shrink-0 touch-manipulation rounded-full border border-wire bg-surface px-3 py-2 text-xs font-bold text-board active:bg-board active:text-white"
+                onClick={() => onSelect(player)}
+              >
+                {player.displayName}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {results.length > 0 ? (
+        <div className="grid gap-2">
+          {results.map((result) => (
+            <button
+              key={result.id}
+              type="button"
+              className={`touch-manipulation select-none rounded-lg border p-3 text-left transition-colors duration-75 ${
+                selected?.id === result.id
+                  ? "border-board bg-emerald-50"
+                  : "border-wire bg-surface hover:bg-field active:bg-field"
+              }`}
+              onClick={() => onSelect(result)}
+            >
+              <div className="font-bold">{result.displayName}</div>
+              <div className="mt-1 text-xs text-muted">UID {result.uid || "------"} · {result.id}</div>
+            </button>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
