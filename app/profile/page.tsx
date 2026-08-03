@@ -1,8 +1,9 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { ArrowRight, History, IdCard, Swords, UserRound } from "lucide-react";
+import { ArrowRight, Award, History, IdCard, Swords, UserRound } from "lucide-react";
 import { confirmCasualMatchAction, confirmManualResultAction } from "@/lib/actions/matches";
 import { updateSavedTeamProfileAction } from "@/lib/actions/teams";
+import { buildAchievements, summarizeAchievements } from "@/lib/achievements";
 import { calculatePlayerLevel, type PlayerLevelStats, type SoftPlayerLevelStats } from "@/lib/algorithms/player-level";
 import { requireUser } from "@/lib/auth/guards";
 import { hasSupabaseEnv } from "@/lib/env";
@@ -14,6 +15,7 @@ import { LevelExplanation } from "@/components/LevelExplanation";
 import { AvatarUploader } from "@/components/ui/AvatarUploader";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { PlayerIdentity } from "@/components/ui/PlayerIdentity";
 
 export const dynamic = "force-dynamic";
 
@@ -277,6 +279,8 @@ export default async function ProfilePage() {
   });
   const profileTone = getLevelTone(generalLevel);
   const pendingActionCount = (confirmations || []).length + (pendingCasualMatches || []).length;
+  const achievements = buildAchievements({ generalStats, tournamentStats, softStats });
+  const achievementSummary = summarizeAchievements(achievements);
 
   return (
     <div className="grid gap-5 sm:gap-6">
@@ -305,25 +309,32 @@ export default async function ProfilePage() {
       <section className={cn("rounded-lg border p-4 shadow-soft sm:p-5", profileTone.panel)}>
         <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-center">
           <div className="min-w-0">
-            <span className={cn("inline-flex rounded-full px-3 py-1 text-xs font-black", profileTone.badge)}>
-              {generalLevel.majorRank}
-            </span>
-            <h2 className="mt-3 truncate text-2xl font-black">{profile?.display_name || user.email}</h2>
+            <PlayerIdentity
+              name={profile?.display_name || user.email || "CODL Player"}
+              avatarUrl={profile?.avatar_url}
+              level={generalLevel.level}
+              badge={generalLevel.majorRank}
+              subtitle={`UID ${profile?.uid || "------"}`}
+              size="lg"
+            />
             <div className={cn("mt-2 text-sm font-bold", profileTone.text)}>
-              普通 {generalLevel.level} 级 · 赛事 {tournamentLevel.level} 级 · UID {profile?.uid || "------"}
+              普通 {generalLevel.level} 级 · 赛事 {tournamentLevel.level} 级
             </div>
             <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/70">
               <div className={cn("h-full", profileTone.bar)} style={{ width: `${generalLevel.progressToNext}%` }} />
             </div>
           </div>
-          <div className="grid gap-2 sm:grid-cols-2 lg:w-[520px]">
+          <div className="grid gap-2 sm:grid-cols-2 lg:w-[640px]">
             <ProfileQuickLink href="/profile/history" icon={<History className="h-4 w-4" aria-hidden />} label="历史战绩" />
+            <ProfileQuickLink href="/profile/achievements" icon={<Award className="h-4 w-4" aria-hidden />} label="个人成就" />
             <ProfileQuickLink href="/profile/real-name" icon={<IdCard className="h-4 w-4" aria-hidden />} label="实名认证" />
             <ProfileQuickLink href="/scorer/casual" icon={<Swords className="h-4 w-4" aria-hidden />} label="切磋计分" />
             <ProfileQuickLink href="/help" icon={<ArrowRight className="h-4 w-4" aria-hidden />} label="规则说明" />
           </div>
         </div>
       </section>
+
+      <AchievementPreview summary={achievementSummary} />
 
       <CombinedStatsPanel
         generalStats={generalStats}
@@ -372,6 +383,48 @@ function ProfileQuickLink({ href, icon, label }: { href: string; icon: ReactNode
       </span>
       <ArrowRight className="h-4 w-4 shrink-0" aria-hidden />
     </Link>
+  );
+}
+
+function AchievementPreview({
+  summary
+}: {
+  summary: ReturnType<typeof summarizeAchievements>;
+}) {
+  const featured = summary.unlocked.slice(-3).reverse();
+
+  return (
+    <section className="grid gap-3 rounded-lg border border-wire bg-surface p-4 shadow-soft sm:p-5 lg:grid-cols-[0.7fr_1fr] lg:items-center">
+      <div>
+        <div className="flex items-center gap-2 text-board">
+          <Award className="h-5 w-5" aria-hidden />
+          <h2 className="text-lg font-black text-primary">CODL 成就</h2>
+        </div>
+        <div className="mt-4 flex items-end gap-3">
+          <div className="text-5xl font-black text-board">{summary.unlockedCount}</div>
+          <div className="pb-2 text-sm font-bold text-muted">/ {summary.totalCount} 已解锁</div>
+        </div>
+        <div className="mt-3 h-2 overflow-hidden rounded-full bg-field">
+          <div className="h-full bg-board" style={{ width: `${summary.completion}%` }} />
+        </div>
+        <Link className="mt-4 inline-flex min-h-11 touch-manipulation items-center gap-2 rounded-lg bg-primary px-4 text-sm font-black text-white" href="/profile/achievements">
+          查看全部成就
+          <ArrowRight className="h-4 w-4" aria-hidden />
+        </Link>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-3">
+        {(featured.length > 0 ? featured : summary.next).map((achievement) => (
+          <div key={achievement.id} className="min-h-28 rounded-lg border border-wire bg-field p-3">
+            <div className="text-xs font-black text-board">{achievement.unlocked ? achievement.badge : `${achievement.progress}%`}</div>
+            <div className="mt-2 text-base font-black text-primary">{achievement.title}</div>
+            <div className="mt-1 line-clamp-2 text-xs font-semibold text-muted">{achievement.description}</div>
+          </div>
+        ))}
+        {featured.length === 0 && summary.next.length === 0 ? (
+          <div className="rounded-lg border border-wire bg-field p-3 text-sm font-bold text-muted">成就系统已准备好，完成比赛后自动点亮。</div>
+        ) : null}
+      </div>
+    </section>
   );
 }
 

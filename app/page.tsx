@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, BarChart3, BookOpen, CalendarDays, Gauge, IdCard, ShieldCheck, Trophy } from "lucide-react";
+import { ArrowRight, BarChart3, CalendarDays, Gauge, IdCard, Monitor, ShieldCheck, Trophy } from "lucide-react";
 import { SetupNotice } from "@/components/SetupNotice";
 import { TournamentCard } from "@/components/TournamentCard";
 import { Card } from "@/components/ui/Card";
@@ -185,12 +185,12 @@ function Hero({ platformName, isAdmin }: { platformName: string; isAdmin: boolea
         <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
           <HeroAction href="/tournaments" icon={<CalendarDays className="h-5 w-5" />} label="赛事" />
           <HeroAction href="/scorer" icon={<Gauge className="h-5 w-5" />} label="计分" />
+          <HeroAction href="/display" icon={<Monitor className="h-5 w-5" />} label="大屏" />
           {isAdmin ? (
             <HeroAction href="/admin" icon={<ShieldCheck className="h-5 w-5" />} label="后台" />
           ) : (
             <HeroAction href="/profile" icon={<BarChart3 className="h-5 w-5" />} label="数据" />
           )}
-          <HeroAction href="/help" icon={<BookOpen className="h-5 w-5" />} label="说明" />
         </div>
       </div>
     </section>

@@ -12,6 +12,7 @@ import {
   type ScoringCompletePayload
 } from "@/components/scorer/TouchScoreboard";
 import { Button } from "@/components/ui/Button";
+import { PlayerIdentity } from "@/components/ui/PlayerIdentity";
 
 type GameScore = 501 | 701;
 type BestOf = 3 | 5 | 7;
@@ -22,6 +23,7 @@ type PlayerSearchResult = {
   id: string;
   uid?: string;
   displayName: string;
+  avatarUrl?: string | null;
 };
 type LinkedPlayerSlot = "opponent" | "myTeammate" | "opponentTeammate";
 
@@ -31,17 +33,15 @@ const LOCAL_MY_TEAMMATE_ID = "local-my-teammate";
 const LOCAL_OPPONENT_ID = "local-opponent";
 const LOCAL_OPPONENT_TEAMMATE_ID = "local-opponent-teammate";
 
-function selectedLabel(player: PlayerSearchResult) {
-  return `${player.displayName}${player.uid ? ` · UID ${player.uid}` : ""}`;
-}
-
 export function CasualScoreboard({
   playerId,
   playerName,
+  playerAvatarUrl,
   recentOpponents = []
 }: {
   playerId: string;
   playerName: string;
+  playerAvatarUrl?: string | null;
   recentOpponents?: PlayerSearchResult[];
 }) {
   const [step, setStep] = useState<SetupStep>("setup");
@@ -77,24 +77,26 @@ export function CasualScoreboard({
   const opponentSideName = isDoubles ? `${opponentDisplayName} / ${opponentTeammateDisplayName}` : opponentDisplayName;
   const participantAMembers = useMemo(
     () => [
-      { userId: playerId, name: playerName, linked: true },
+      { userId: playerId, name: playerName, avatarUrl: playerAvatarUrl || null, linked: true },
       ...(isDoubles
         ? [
             {
               userId: selectedMyTeammate?.id || LOCAL_MY_TEAMMATE_ID,
               name: myTeammateDisplayName,
+              avatarUrl: selectedMyTeammate?.avatarUrl || null,
               linked: Boolean(selectedMyTeammate)
             }
           ]
         : [])
     ],
-    [isDoubles, myTeammateDisplayName, playerId, playerName, selectedMyTeammate]
+    [isDoubles, myTeammateDisplayName, playerAvatarUrl, playerId, playerName, selectedMyTeammate]
   );
   const participantBMembers = useMemo(
     () => [
       {
         userId: opponentMode === "linked" && selectedOpponent ? selectedOpponent.id : LOCAL_OPPONENT_ID,
         name: opponentDisplayName,
+        avatarUrl: selectedOpponent?.avatarUrl || null,
         linked: opponentMode === "linked" && Boolean(selectedOpponent)
       },
       ...(isDoubles
@@ -105,6 +107,7 @@ export function CasualScoreboard({
                   ? selectedOpponentTeammate.id
                   : LOCAL_OPPONENT_TEAMMATE_ID,
               name: opponentTeammateDisplayName,
+              avatarUrl: selectedOpponentTeammate?.avatarUrl || null,
               linked: opponentMode === "linked" && Boolean(selectedOpponentTeammate)
             }
           ]
@@ -239,8 +242,8 @@ export function CasualScoreboard({
           </div>
         </section>
         <TouchScoreboard
-          participantA={{ id: PLAYER_A_ID, name: mySideName, members: participantAMembers }}
-          participantB={{ id: PLAYER_B_ID, name: opponentSideName, members: participantBMembers }}
+          participantA={{ id: PLAYER_A_ID, name: mySideName, avatarUrl: playerAvatarUrl || null, members: participantAMembers }}
+          participantB={{ id: PLAYER_B_ID, name: opponentSideName, avatarUrl: selectedOpponent?.avatarUrl || null, members: participantBMembers }}
           startingScore={startingScore}
           bestOf={bestOf}
           defaultParticipantMode={matchMode}
@@ -281,7 +284,13 @@ export function CasualScoreboard({
         <div className="mt-4 grid gap-3 md:grid-cols-2">
           <div className="rounded-lg border border-wire bg-field p-4">
             <div className="text-sm font-semibold text-muted">我方</div>
-            <div className="mt-1 text-lg font-bold">{playerName}</div>
+            <PlayerIdentity
+              className="mt-2"
+              name={playerName}
+              avatarUrl={playerAvatarUrl}
+              subtitle="当前登录选手"
+              size="md"
+            />
            {isDoubles ? (
               <div className="mt-3 grid gap-3">
                 <label className="label">
@@ -505,7 +514,13 @@ function AccountSearchBox({
 
       {selected ? (
         <div className="flex items-center justify-between gap-2 rounded-lg border border-board bg-emerald-50 p-3 text-sm font-semibold text-emerald-900">
-          <span className="min-w-0 truncate">已绑定 {selectedLabel(selected)}</span>
+          <PlayerIdentity
+            name={selected.displayName}
+            avatarUrl={selected.avatarUrl}
+            subtitle={`已绑定 · UID ${selected.uid || "------"}`}
+            size="sm"
+            compact
+          />
           <button
             type="button"
             className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-emerald-200 bg-white text-emerald-800"
@@ -525,10 +540,16 @@ function AccountSearchBox({
               <button
                 key={player.id}
                 type="button"
-                className="shrink-0 touch-manipulation rounded-full border border-wire bg-surface px-3 py-2 text-xs font-bold text-board active:bg-board active:text-white"
+                className="shrink-0 touch-manipulation rounded-full border border-wire bg-surface px-2 py-1.5 text-left active:bg-field"
                 onClick={() => onSelect(player)}
               >
-                {player.displayName}
+                <PlayerIdentity
+                  name={player.displayName}
+                  avatarUrl={player.avatarUrl}
+                  subtitle={player.uid ? `UID ${player.uid}` : null}
+                  size="xs"
+                  compact
+                />
               </button>
             ))}
           </div>
@@ -548,8 +569,13 @@ function AccountSearchBox({
               }`}
               onClick={() => onSelect(result)}
             >
-              <div className="font-bold">{result.displayName}</div>
-              <div className="mt-1 text-xs text-muted">UID {result.uid || "------"} · {result.id}</div>
+              <PlayerIdentity
+                name={result.displayName}
+                avatarUrl={result.avatarUrl}
+                subtitle={`UID ${result.uid || "------"} · ${result.id}`}
+                size="sm"
+                compact
+              />
             </button>
           ))}
         </div>

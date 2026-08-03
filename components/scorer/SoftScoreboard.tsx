@@ -8,7 +8,8 @@ import type { MatchFinishMode, MatchLegRule } from "@/types/domain";
 type ParticipantInfo = {
   id: string;
   name: string;
-  members?: Array<{ userId: string; name: string }>;
+  avatarUrl?: string | null;
+  members?: Array<{ userId: string; name: string; avatarUrl?: string | null }>;
 };
 
 export function SoftScoreboard({

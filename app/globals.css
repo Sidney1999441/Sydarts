@@ -294,6 +294,49 @@ th {
   display: grid;
 }
 
+body.codl-display-active {
+  overflow-x: hidden;
+  background: rgb(var(--color-primary));
+}
+
+body.codl-display-active header,
+body.codl-display-active > nav {
+  display: none;
+}
+
+body.codl-display-active main {
+  max-width: none;
+  padding: 0;
+}
+
+.codl-report-poster {
+  aspect-ratio: 4 / 5;
+}
+
+@media print {
+  body {
+    background: white;
+    padding-bottom: 0;
+  }
+
+  header,
+  body > nav,
+  .codl-backdrop {
+    display: none !important;
+  }
+
+  main {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+
+  .codl-report-poster {
+    min-height: 100vh;
+    border-radius: 0;
+    box-shadow: none;
+  }
+}
+
 @media (max-width: 1023px) {
   body {
     padding-bottom: calc(5.5rem + env(safe-area-inset-bottom));

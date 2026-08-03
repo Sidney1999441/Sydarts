@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { notFound } from "next/navigation";
-import { ArrowLeft, ListChecks, Trophy, UserRound } from "lucide-react";
+import { ArrowLeft, FileImage, ListChecks, UserRound } from "lucide-react";
 import { confirmCasualMatchAction } from "@/lib/actions/matches";
 import { calculateDartStats, type ScoreTurn } from "@/lib/algorithms/scoring";
 import { requireUser } from "@/lib/auth/guards";
@@ -13,6 +13,7 @@ import { CodlPageHeader } from "@/components/CodlPageHeader";
 import { SetupNotice } from "@/components/SetupNotice";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { PlayerIdentity } from "@/components/ui/PlayerIdentity";
 
 export const dynamic = "force-dynamic";
 
@@ -220,6 +221,32 @@ export default async function ProfileHistoryDetailPage({
     const opponentParticipantId =
       myParticipant.id === match.participant_a_id ? match.participant_b_id : match.participant_a_id;
     const opponent = participantRows.find((participant) => participant.id === opponentParticipantId) || null;
+    const avatarTeamIds = [...new Set(participantRows.map((participant) => participant.team_id).filter(Boolean))] as string[];
+    const { data: avatarTeamMembers } =
+      avatarTeamIds.length > 0
+        ? await supabase.from("team_members").select("team_id, user_id").in("team_id", avatarTeamIds)
+        : { data: [] };
+    const avatarUserIds = [
+      ...new Set([
+        ...participantRows.map((participant) => participant.user_id).filter(Boolean),
+        ...(avatarTeamMembers || []).map((member) => member.user_id)
+      ])
+    ] as string[];
+    const { data: avatarProfiles } =
+      avatarUserIds.length > 0
+        ? await supabase.from("profiles").select("id, avatar_url").in("id", avatarUserIds)
+        : { data: [] };
+    const avatarByUserId = new Map((avatarProfiles || []).map((profile) => [profile.id, profile.avatar_url]));
+    function participantAvatarUrl(participant?: DbParticipant | null) {
+      if (!participant) return null;
+      if (participant.user_id) return avatarByUserId.get(participant.user_id) || null;
+      return (
+        (avatarTeamMembers || [])
+          .filter((member) => member.team_id === participant.team_id)
+          .map((member) => avatarByUserId.get(member.user_id) || null)
+          .find(Boolean) || null
+      );
+    }
     const myScore = myParticipant.id === match.participant_a_id ? match.score_a : match.score_b;
     const opponentScore = myParticipant.id === match.participant_a_id ? match.score_b : match.score_a;
     const matchTurns = (turns || []).map((turn) =>
@@ -256,6 +283,8 @@ export default async function ProfileHistoryDetailPage({
         scoreLabel={`${myScore}:${opponentScore}`}
         myName={myParticipant.display_name || "我方"}
         opponentName={opponent?.display_name || "对手"}
+        myAvatarUrl={participantAvatarUrl(myParticipant)}
+        opponentAvatarUrl={participantAvatarUrl(opponent)}
         myStats={myTurns.length > 0 ? statsFromTurns(myTurns) : hasUserStats ? userStats : readStatsFromDetails(match.details, myParticipant.id)}
         opponentStats={
           opponentTurns.length > 0
@@ -267,6 +296,7 @@ export default async function ProfileHistoryDetailPage({
         turns={matchTurns}
         extraHref={`/tournaments/${match.tournament_id}`}
         extraLabel="打开赛事"
+        reportHref={`/reports/official/${match.id}`}
       />
     );
   }
@@ -304,6 +334,14 @@ export default async function ProfileHistoryDetailPage({
           : match.winner_side === mySide
             ? "胜"
             : "负";
+    const casualAvatarUserIds = [match.player_a_user_id, match.player_b_user_id].filter(Boolean) as string[];
+    const { data: casualAvatarProfiles } =
+      casualAvatarUserIds.length > 0
+        ? await supabase.from("profiles").select("id, avatar_url").in("id", casualAvatarUserIds)
+        : { data: [] };
+    const casualAvatarByUserId = new Map((casualAvatarProfiles || []).map((profile) => [profile.id, profile.avatar_url]));
+    const avatarA = match.player_a_user_id ? casualAvatarByUserId.get(match.player_a_user_id) || null : null;
+    const avatarB = match.player_b_user_id ? casualAvatarByUserId.get(match.player_b_user_id) || null : null;
 
     return (
       <HistoryDetailView
@@ -314,11 +352,14 @@ export default async function ProfileHistoryDetailPage({
         scoreLabel={mySide === "A" ? `${match.score_a}:${match.score_b}` : `${match.score_b}:${match.score_a}`}
         myName={mySide === "A" ? match.player_a_name : match.player_b_name}
         opponentName={mySide === "A" ? match.player_b_name : match.player_a_name}
+        myAvatarUrl={mySide === "A" ? avatarA : avatarB}
+        opponentAvatarUrl={mySide === "A" ? avatarB : avatarA}
         myStats={myMemberStats || myPersonalStats || (myTurns.length > 0 ? statsFromTurns(myTurns) : readStatsFromDetails(match.details, mySide))}
         opponentStats={
           opponentPersonalStats || (opponentTurns.length > 0 ? statsFromTurns(opponentTurns) : readStatsFromDetails(match.details, opponentSide))
         }
         turns={matchTurns}
+        reportHref={`/reports/casual/${match.id}`}
         confirmationSlot={
           match.player_b_user_id === user.id && match.confirmation_status === "pending" ? (
             <CasualConfirmationActions matchId={match.id} />
@@ -339,11 +380,14 @@ function HistoryDetailView({
   scoreLabel,
   myName,
   opponentName,
+  myAvatarUrl,
+  opponentAvatarUrl,
   myStats,
   opponentStats,
   turns,
   extraHref,
   extraLabel,
+  reportHref,
   confirmationSlot
 }: {
   title: string;
@@ -353,11 +397,14 @@ function HistoryDetailView({
   scoreLabel: string;
   myName: string;
   opponentName: string;
+  myAvatarUrl?: string | null;
+  opponentAvatarUrl?: string | null;
   myStats: DartStats;
   opponentStats: DartStats;
   turns: DetailTurn[];
   extraHref?: string;
   extraLabel?: string;
+  reportHref?: string;
   confirmationSlot?: ReactNode;
 }) {
   return (
@@ -369,13 +416,24 @@ function HistoryDetailView({
         icon={<UserRound className="h-6 w-6" aria-hidden />}
         art="white"
         actions={
-          <Link
-            className="inline-flex min-h-11 touch-manipulation items-center justify-center gap-2 rounded-lg border border-wire bg-surface px-4 text-sm font-black text-board shadow-soft"
-            href="/profile"
-          >
-            <ArrowLeft className="h-4 w-4" aria-hidden />
-            返回个人页
-          </Link>
+          <div className="grid gap-2 sm:flex">
+            {reportHref ? (
+              <Link
+                className="inline-flex min-h-11 touch-manipulation items-center justify-center gap-2 rounded-lg bg-board px-4 text-sm font-black text-white shadow-soft"
+                href={reportHref}
+              >
+                <FileImage className="h-4 w-4" aria-hidden />
+                CODL 战报
+              </Link>
+            ) : null}
+            <Link
+              className="inline-flex min-h-11 touch-manipulation items-center justify-center gap-2 rounded-lg border border-wire bg-surface px-4 text-sm font-black text-board shadow-soft"
+              href="/profile"
+            >
+              <ArrowLeft className="h-4 w-4" aria-hidden />
+              返回个人页
+            </Link>
+          </div>
         }
       />
 
@@ -385,6 +443,11 @@ function HistoryDetailView({
             <div className="text-sm font-bold text-muted">{subtitle}</div>
             <h2 className="mt-1 break-words text-xl font-black text-primary">{title}</h2>
             <p className="mt-1 text-sm text-muted">{formatDateTime(playedAt)}</p>
+            <div className="mt-4 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:items-center">
+              <PlayerIdentity name={myName} avatarUrl={myAvatarUrl} subtitle="我方" size="md" compact />
+              <div className="rounded-full bg-board px-3 py-1 text-center text-sm font-black text-white">{scoreLabel}</div>
+              <PlayerIdentity name={opponentName} avatarUrl={opponentAvatarUrl} subtitle="对手" size="md" compact />
+            </div>
           </div>
           <div className="rounded-lg bg-field p-4 text-center">
             <div
@@ -407,8 +470,8 @@ function HistoryDetailView({
       </Card>
 
       <section className="grid gap-3 lg:grid-cols-2">
-        <PlayerSummary title="我方数据" name={myName} stats={myStats} highlight />
-        <PlayerSummary title="对手数据" name={opponentName} stats={opponentStats} />
+        <PlayerSummary title="我方数据" name={myName} avatarUrl={myAvatarUrl} stats={myStats} highlight />
+        <PlayerSummary title="对手数据" name={opponentName} avatarUrl={opponentAvatarUrl} stats={opponentStats} />
       </section>
 
       <Card>
@@ -470,11 +533,13 @@ function CasualConfirmationActions({ matchId }: { matchId: string }) {
 function PlayerSummary({
   title,
   name,
+  avatarUrl,
   stats,
   highlight
 }: {
   title: string;
   name: string;
+  avatarUrl?: string | null;
   stats: DartStats;
   highlight?: boolean;
 }) {
@@ -482,7 +547,7 @@ function PlayerSummary({
     <Card className={cn(highlight && "border-board/30 bg-field")}>
       <div className="mb-3">
         <div className="text-sm font-bold">{title}</div>
-        <div className="truncate text-xs font-semibold text-muted">{name}</div>
+        <PlayerIdentity className="mt-2" name={name} avatarUrl={avatarUrl} size="sm" compact />
       </div>
       <dl className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
         <Metric label="均分" value={stats.averagePer3Darts.toFixed(1)} />

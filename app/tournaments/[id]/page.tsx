@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Trophy } from "lucide-react";
+import { FileImage, Monitor, Trophy } from "lucide-react";
 import {
   cancelRegistrationAction,
   registerForTournamentAction,
@@ -16,6 +16,7 @@ import { CodlPageHeader } from "@/components/CodlPageHeader";
 import { TournamentBracket } from "@/components/TournamentBracket";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { PlayerIdentity } from "@/components/ui/PlayerIdentity";
 import type { MatchDartMode, MatchSummary, ParticipantSeed, Tournament } from "@/types/domain";
 
 export const dynamic = "force-dynamic";
@@ -112,10 +113,14 @@ export default async function TournamentDetailPage({
   const teamIds = [
     ...new Set((participants || []).map((participant) => participant.team_id).filter(Boolean))
   ] as string[];
-  const { data: teamMembers } =
+  const [{ data: teamMembers }, { data: participantTeams }] = await Promise.all([
     teamIds.length > 0
-      ? await supabase.from("team_members").select("team_id, user_id").in("team_id", teamIds)
-      : { data: [] };
+      ? supabase.from("team_members").select("team_id, user_id").in("team_id", teamIds)
+      : Promise.resolve({ data: [] }),
+    teamIds.length > 0
+      ? supabase.from("teams").select("id, avatar_url").in("id", teamIds)
+      : Promise.resolve({ data: [] })
+  ]);
   const statUserIds = [
     ...new Set([
       ...(participants || []).map((participant) => participant.user_id).filter(Boolean),
@@ -124,9 +129,10 @@ export default async function TournamentDetailPage({
   ] as string[];
   const { data: statProfiles } =
     statUserIds.length > 0
-      ? await supabase.from("profiles").select("id, uid, display_name").in("id", statUserIds)
+      ? await supabase.from("profiles").select("id, uid, display_name, avatar_url").in("id", statUserIds)
       : { data: [] };
   const statProfileById = new Map((statProfiles || []).map((item) => [item.id, item]));
+  const teamAvatarById = new Map((participantTeams || []).map((team) => [team.id, team.avatar_url]));
   const teamMembersByTeamId = new Map<string, Array<{ userId: string; name: string }>>();
   for (const member of teamMembers || []) {
     const members = teamMembersByTeamId.get(member.team_id) || [];
@@ -138,9 +144,11 @@ export default async function TournamentDetailPage({
     teamMembersByTeamId.set(member.team_id, members);
   }
   const participantMembersById = new Map<string, Array<{ userId: string; name: string }>>();
+  const participantAvatarById = new Map<string, string | null>();
   for (const participant of participants || []) {
     if (participant.participant_type === "user" && participant.user_id) {
       const profileRow = statProfileById.get(participant.user_id);
+      participantAvatarById.set(participant.id, profileRow?.avatar_url || null);
       participantMembersById.set(participant.id, [
         {
           userId: participant.user_id,
@@ -148,7 +156,13 @@ export default async function TournamentDetailPage({
         }
       ]);
     } else if (participant.team_id) {
-      participantMembersById.set(participant.id, teamMembersByTeamId.get(participant.team_id) || []);
+      const members = teamMembersByTeamId.get(participant.team_id) || [];
+      const firstMemberAvatar = (teamMembers || [])
+        .filter((member) => member.team_id === participant.team_id)
+        .map((member) => statProfileById.get(member.user_id)?.avatar_url || null)
+        .find(Boolean) || null;
+      participantAvatarById.set(participant.id, teamAvatarById.get(participant.team_id) || firstMemberAvatar || null);
+      participantMembersById.set(participant.id, members);
     }
   }
 
@@ -170,11 +184,20 @@ export default async function TournamentDetailPage({
         icon={<Trophy className="h-6 w-6" aria-hidden />}
         art="pattern"
         actions={
-          <RegistrationPanel
-            tournament={tournamentData}
-            registration={registration}
-            savedTeams={savedTeams || []}
-          />
+          <div className="grid gap-2">
+            <Link
+              className="inline-flex min-h-11 touch-manipulation items-center justify-center gap-2 rounded-lg bg-primary px-4 text-sm font-black text-white shadow-soft"
+              href={`/tournaments/${id}/display`}
+            >
+              <Monitor className="h-4 w-4" aria-hidden />
+              打开大屏
+            </Link>
+            <RegistrationPanel
+              tournament={tournamentData}
+              registration={registration}
+              savedTeams={savedTeams || []}
+            />
+          </div>
         }
       />
 
@@ -217,7 +240,15 @@ export default async function TournamentDetailPage({
                     {standings.map((row, index) => (
                       <tr key={row.participantId} className="border-t border-wire">
                         <td className="py-2">{index + 1}</td>
-                        <td className="font-semibold">{row.name}</td>
+                        <td className="font-semibold">
+                          <PlayerIdentity
+                            name={row.name}
+                            avatarUrl={participantAvatarById.get(row.participantId)}
+                            subtitle={`Rating ${participantById.get(row.participantId)?.rating || 1000}`}
+                            size="sm"
+                            compact
+                          />
+                        </td>
                         <td>{row.played}</td>
                         <td>{row.wins}</td>
                         <td>{row.losses}</td>
@@ -250,7 +281,13 @@ export default async function TournamentDetailPage({
                   <ul className="mt-3 grid gap-2 text-sm text-muted">
                     {members.map((member) => (
                       <li key={member.id} className="rounded-lg bg-field px-3 py-2">
-                        <span>{member.name}</span>
+                        <PlayerIdentity
+                          name={member.name}
+                          avatarUrl={participantAvatarById.get(member.id)}
+                          subtitle={`Rating ${member.rating}`}
+                          size="sm"
+                          compact
+                        />
                       </li>
                     ))}
                   </ul>
@@ -270,7 +307,8 @@ export default async function TournamentDetailPage({
             matches={knockoutMatches}
             participants={(participants || []).map((participant) => ({
               id: participant.id,
-              display_name: participant.display_name
+              display_name: participant.display_name,
+              avatar_url: participantAvatarById.get(participant.id) || null
             }))}
           />
         </Card>
@@ -305,8 +343,21 @@ export default async function TournamentDetailPage({
                       legRules: match.leg_rules
                     })}
                   </div>
-                  <div className="mt-1 text-base font-bold">
-                    第 {match.round_number} 轮，{participantAName} 对 {participantBName}
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    <PlayerIdentity
+                      name={participantAName}
+                      avatarUrl={match.participant_a_id ? participantAvatarById.get(match.participant_a_id) : null}
+                      subtitle={`比分 ${match.score_a}`}
+                      size="sm"
+                      compact
+                    />
+                    <PlayerIdentity
+                      name={participantBName}
+                      avatarUrl={match.participant_b_id ? participantAvatarById.get(match.participant_b_id) : null}
+                      subtitle={`比分 ${match.score_b}`}
+                      size="sm"
+                      compact
+                    />
                   </div>
                   <div className="mt-1 text-sm text-muted">
                     比分 {match.score_a}:{match.score_b}
@@ -316,6 +367,12 @@ export default async function TournamentDetailPage({
                   {canScore ? (
                     <Link className="rounded-lg bg-board px-3 py-2 text-sm font-black text-white" href={`/scorer/${match.id}`}>
                       计分
+                    </Link>
+                  ) : null}
+                  {match.status === "completed" ? (
+                    <Link className="inline-flex items-center gap-1 rounded-lg border border-wire bg-surface px-3 py-2 text-sm font-black text-board" href={`/reports/official/${match.id}`}>
+                      <FileImage className="h-4 w-4" aria-hidden />
+                      战报
                     </Link>
                   ) : null}
                 </div>

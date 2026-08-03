@@ -6,6 +6,7 @@ import {
   Home,
   LogIn,
   LogOut,
+  Monitor,
   Shield,
   UserPlus,
   UserRound
@@ -13,6 +14,7 @@ import {
 import { signOutAction } from "@/app/auth/actions";
 import { BackButton } from "@/components/BackButton";
 import { Button } from "@/components/ui/Button";
+import { PlayerAvatar } from "@/components/ui/PlayerIdentity";
 import type { SiteThemeSettings } from "@/lib/theme";
 import type { Profile } from "@/types/domain";
 
@@ -20,6 +22,7 @@ const primaryNav = [
   { href: "/", label: "首页", icon: Home },
   { href: "/tournaments", label: "赛事", icon: CalendarDays },
   { href: "/scorer", label: "计分", icon: Gauge },
+  { href: "/display", label: "大屏", icon: Monitor },
   { href: "/profile", label: "个人", icon: UserRound },
   { href: "/help", label: "说明", icon: HelpCircle }
 ];
@@ -38,8 +41,8 @@ export function Header({
     ? [...primaryNav, { href: "/admin", label: "后台", icon: Shield }]
     : primaryNav;
   const dockNav = profile?.role === "admin"
-    ? [primaryNav[1], primaryNav[2], primaryNav[3], { href: "/admin", label: "后台", icon: Shield }, primaryNav[4]]
-    : [primaryNav[1], primaryNav[2], primaryNav[3], primaryNav[4]];
+    ? [primaryNav[1], primaryNav[2], primaryNav[4], { href: "/admin", label: "后台", icon: Shield }, primaryNav[5]]
+    : [primaryNav[1], primaryNav[2], primaryNav[4], primaryNav[5]];
 
   return (
     <>
@@ -64,9 +67,18 @@ export function Header({
           <div className="ml-auto flex items-center gap-2">
             {userEmail ? (
               <>
-                <div className="hidden max-w-[220px] truncate text-sm font-semibold text-white/70 md:block">
-                  {displayName}
-                </div>
+                <Link
+                  className="hidden min-h-12 touch-manipulation items-center gap-2 rounded-lg px-2 text-sm font-semibold text-white/80 transition-colors duration-75 hover:bg-white/10 hover:text-white md:inline-flex"
+                  href="/profile"
+                >
+                  <PlayerAvatar
+                    name={displayName || "CODL"}
+                    avatarUrl={profile?.avatar_url}
+                    size="xs"
+                    className="ring-offset-primary"
+                  />
+                  <span className="max-w-[160px] truncate">{displayName}</span>
+                </Link>
                 <form action={signOutAction}>
                   <Button className="border-white/15 bg-white/10 text-white hover:bg-white/15" variant="secondary" type="submit">
                     <LogOut className="h-4 w-4" aria-hidden />

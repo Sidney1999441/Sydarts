@@ -28,7 +28,13 @@ import {
 import { getLegRuleLabel, getLegStartingScore } from "@/lib/darts/variants";
 import type { ManualMatchStats } from "@/lib/darts/soft-stats";
 import { createResultSubmissionId } from "@/lib/results/submission";
+import {
+  compactPlayerName,
+  composeParticipantMemberName,
+  nameAlreadyContainsMember
+} from "@/lib/scorer/display-names";
 import { Button } from "@/components/ui/Button";
+import { PlayerAvatar, PlayerIdentity } from "@/components/ui/PlayerIdentity";
 import type {
   FirstThrowMode,
   LegParticipantMode,
@@ -41,8 +47,8 @@ import type {
 type GameScore = 301 | 501 | 701;
 type BestOf = 3 | 5 | 7;
 export type RoundLimit = 10 | 15 | 20 | "unlimited";
-type PlayerOption = { userId: string; name: string };
-type ParticipantInfo = { id: string; name: string; members?: PlayerOption[] };
+type PlayerOption = { userId: string; name: string; avatarUrl?: string | null };
+type ParticipantInfo = { id: string; name: string; avatarUrl?: string | null; members?: PlayerOption[] };
 type ThrowerByParticipant = Record<string, string>;
 type ScoringHistoryEntry = {
   state: ScoringState;
@@ -218,6 +224,13 @@ export function TouchScoreboard({
     }
     return map;
   }, [participantA.members, participantB.members]);
+  const memberById = useMemo(() => {
+    const map = new Map<string, PlayerOption>();
+    for (const member of [...(participantA.members || []), ...(participantB.members || [])]) {
+      map.set(member.userId, member);
+    }
+    return map;
+  }, [participantA.members, participantB.members]);
   const activeParticipant = state.participants.find(
     (participant) => participant.participantId === state.activeParticipantId
   );
@@ -287,13 +300,26 @@ export function TouchScoreboard({
       ? lineup.participantAUserIds[0]
       : lineup.participantBUserIds[0];
     const playerName = userId ? memberNames.get(userId) : null;
-    return playerName ? `${names[participantId]} · ${playerName}` : names[participantId];
+    return playerName ? composeParticipantMemberName(names[participantId], playerName) : names[participantId];
   }
 
   function turnDisplayName(turn: ScoreTurn) {
     const playerName = turn.userId ? memberNames.get(turn.userId) : null;
-    if (playerName) return `${names[turn.participantId]} · ${playerName}`;
+    if (playerName) return composeParticipantMemberName(names[turn.participantId], playerName);
     return displayName(turn.participantId, turn.legNumber);
+  }
+
+  function displayAvatarUrl(participantId: string, legNumber = state.currentLeg) {
+    const participant = participantId === participantA.id ? participantA : participantB;
+    const rule = state.legRules[legNumber - 1];
+    const lineup = lineups.find((item) => item.legNumber === legNumber);
+    if (rule?.participantMode === "singles" && lineup) {
+      const userId = participantId === participantA.id
+        ? lineup.participantAUserIds[0]
+        : lineup.participantBUserIds[0];
+      return (userId ? memberById.get(userId)?.avatarUrl : null) || participant.avatarUrl || null;
+    }
+    return participant.avatarUrl || participant.members?.find((member) => member.avatarUrl)?.avatarUrl || null;
   }
 
   function updateLineup(legNumber: number, side: "A" | "B", userId: string) {
@@ -505,6 +531,8 @@ export function TouchScoreboard({
       <OpeningSetupModal
         participantAName={displayName(participantA.id, 1)}
         participantBName={displayName(participantB.id, 1)}
+        participantAAvatarUrl={displayAvatarUrl(participantA.id, 1)}
+        participantBAvatarUrl={displayAvatarUrl(participantB.id, 1)}
         firstThrowMode={firstThrowMode}
         firstThrowModeLocked={Boolean(configuredFirstThrowMode)}
         message={message}
@@ -539,11 +567,19 @@ export function TouchScoreboard({
     ? lineupUserIds(activeParticipant.participantId)
         .map((userId) => ({
           userId,
-          name: memberNames.get(userId) || userId
+          name: compactPlayerName(memberNames.get(userId)) || userId,
+          avatarUrl: memberById.get(userId)?.avatarUrl || null
         }))
     : [];
   const activeThrowerId = activeParticipant ? currentThrowerUserId(activeParticipant.participantId) : "";
-  const activeThrowerName = activeThrowerId ? memberNames.get(activeThrowerId) : null;
+  const activeParticipantName = activeParticipant ? displayName(activeParticipant.participantId) : "已结束";
+  const activeParticipantAvatarUrl = activeParticipant ? displayAvatarUrl(activeParticipant.participantId) : null;
+  const activeThrowerRawName = activeThrowerId ? memberNames.get(activeThrowerId) : null;
+  const activeThrowerAvatarUrl = activeThrowerId ? memberById.get(activeThrowerId)?.avatarUrl || null : null;
+  const activeThrowerName =
+    activeThrowerRawName && !nameAlreadyContainsMember(activeParticipantName, activeThrowerRawName)
+      ? compactPlayerName(activeThrowerRawName)
+      : null;
   const roundLimitReached = isRoundLimitReached();
 
   return (
@@ -557,6 +593,7 @@ export function TouchScoreboard({
               <PlayerPanel
                 key={participant.participantId}
                 name={displayName(participant.participantId)}
+                avatarUrl={displayAvatarUrl(participant.participantId)}
                 isActive={isActive}
                 rule={currentRule}
                 remaining={participant.remaining}
@@ -589,8 +626,18 @@ export function TouchScoreboard({
               <div className="mt-1 truncate text-xs font-semibold text-board">{getLegRuleLabel(currentRule)}</div>
             </div>
             <div className="grid max-w-[48vw] justify-items-end gap-1.5 text-right text-xs text-muted sm:max-w-none sm:text-sm">
-              <div className="max-w-full truncate font-bold text-ink">{activeParticipant ? displayName(activeParticipant.participantId) : "已结束"}</div>
-              {activeThrowerName ? <div className="max-w-full truncate">出镖 {activeThrowerName}</div> : null}
+              <div className="flex max-w-full items-center justify-end gap-2">
+                <PlayerAvatar name={activeParticipantName} avatarUrl={activeParticipantAvatarUrl} size="xs" />
+                <div className="min-w-0">
+                  <div className="max-w-full truncate font-bold text-ink">{activeParticipantName}</div>
+                  {activeThrowerName ? (
+                    <div className="flex max-w-full items-center justify-end gap-1 truncate">
+                      <PlayerAvatar name={activeThrowerName} avatarUrl={activeThrowerAvatarUrl} size="xs" />
+                      <span className="truncate">出镖 {activeThrowerName}</span>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
               <div>剩余 {activeParticipant?.remaining ?? 0}</div>
               <div className="max-w-full truncate">{getFirstThrowModeLabel(firstThrowMode)} · {currentRoundLabel()} · {getRoundLimitLabel(roundLimit)}</div>
               <button
@@ -687,10 +734,12 @@ export function TouchScoreboard({
       ) : null}
 
       {roundLimitReached ? (
-        <RoundLimitWinnerDialog
-          roundLimit={numericRoundLimit || 0}
-          participantAName={displayName(participantA.id)}
-          participantBName={displayName(participantB.id)}
+          <RoundLimitWinnerDialog
+            roundLimit={numericRoundLimit || 0}
+            participantAName={displayName(participantA.id)}
+            participantBName={displayName(participantB.id)}
+            participantAAvatarUrl={displayAvatarUrl(participantA.id)}
+            participantBAvatarUrl={displayAvatarUrl(participantB.id)}
           participantARemaining={state.participants[0].remaining}
           participantBRemaining={state.participants[1].remaining}
           onChooseWinner={chooseRoundLimitWinner}
@@ -707,6 +756,8 @@ function OpeningSetupModal({
   participantBId,
   participantAName,
   participantBName,
+  participantAAvatarUrl,
+  participantBAvatarUrl,
   firstThrowMode,
   firstThrowModeLocked,
   message,
@@ -717,6 +768,8 @@ function OpeningSetupModal({
   participantBId: string;
   participantAName: string;
   participantBName: string;
+  participantAAvatarUrl?: string | null;
+  participantBAvatarUrl?: string | null;
   firstThrowMode: FirstThrowMode;
   firstThrowModeLocked: boolean;
   message: string;
@@ -765,8 +818,8 @@ function OpeningSetupModal({
         </div>
 
         <div className="mt-4 grid gap-2 sm:grid-cols-2">
-          <StarterButton name={participantAName} onClick={() => onChooseStarter(participantAId)} />
-          <StarterButton name={participantBName} onClick={() => onChooseStarter(participantBId)} />
+          <StarterButton name={participantAName} avatarUrl={participantAAvatarUrl} onClick={() => onChooseStarter(participantAId)} />
+          <StarterButton name={participantBName} avatarUrl={participantBAvatarUrl} onClick={() => onChooseStarter(participantBId)} />
         </div>
 
         {message ? <p className="mt-3 text-sm font-semibold text-accent">{message}</p> : null}
@@ -775,7 +828,7 @@ function OpeningSetupModal({
   );
 }
 
-function StarterButton({ name, onClick }: { name: string; onClick: () => void }) {
+function StarterButton({ name, avatarUrl, onClick }: { name: string; avatarUrl?: string | null; onClick: () => void }) {
   return (
     <button
       type="button"
@@ -783,7 +836,7 @@ function StarterButton({ name, onClick }: { name: string; onClick: () => void })
       onClick={onClick}
     >
       <span className="block text-xs font-bold text-muted">先手</span>
-      <span className="mt-1 block truncate text-lg font-black text-ink">{name}</span>
+      <PlayerIdentity className="mt-2" name={name} avatarUrl={avatarUrl} size="sm" compact />
     </button>
   );
 }
@@ -793,6 +846,8 @@ function RoundLimitWinnerDialog({
   participantBId,
   participantAName,
   participantBName,
+  participantAAvatarUrl,
+  participantBAvatarUrl,
   participantARemaining,
   participantBRemaining,
   roundLimit,
@@ -802,6 +857,8 @@ function RoundLimitWinnerDialog({
   participantBId: string;
   participantAName: string;
   participantBName: string;
+  participantAAvatarUrl?: string | null;
+  participantBAvatarUrl?: string | null;
   participantARemaining: number;
   participantBRemaining: number;
   roundLimit: number;
@@ -824,11 +881,13 @@ function RoundLimitWinnerDialog({
         <div className="mt-4 grid gap-2 sm:grid-cols-2">
           <AdjudicationWinnerButton
             name={participantAName}
+            avatarUrl={participantAAvatarUrl}
             remaining={participantARemaining}
             onClick={() => onChooseWinner(participantAId)}
           />
           <AdjudicationWinnerButton
             name={participantBName}
+            avatarUrl={participantBAvatarUrl}
             remaining={participantBRemaining}
             onClick={() => onChooseWinner(participantBId)}
           />
@@ -840,10 +899,12 @@ function RoundLimitWinnerDialog({
 
 function AdjudicationWinnerButton({
   name,
+  avatarUrl,
   remaining,
   onClick
 }: {
   name: string;
+  avatarUrl?: string | null;
   remaining: number;
   onClick: () => void;
 }) {
@@ -854,7 +915,7 @@ function AdjudicationWinnerButton({
       onClick={onClick}
     >
       <span className="block text-xs font-bold text-muted">选择本局胜方</span>
-      <span className="mt-1 block truncate text-lg font-black text-ink">{name}</span>
+      <PlayerIdentity className="mt-2" name={name} avatarUrl={avatarUrl} size="sm" compact />
       <span className="mt-1 block text-xs font-bold text-board">剩余 {remaining}</span>
     </button>
   );
@@ -901,14 +962,20 @@ function ThrowerPicker({
           <button
             key={option.userId}
             type="button"
-            className={`min-h-9 touch-manipulation select-none rounded-lg border px-2 text-xs font-bold transition-colors duration-75 ${
+            className={`min-h-10 touch-manipulation select-none rounded-lg border px-2 py-1 text-left text-xs font-bold transition-colors duration-75 ${
               value === option.userId
                 ? "border-board bg-board text-white"
                 : "border-wire bg-surface text-ink active:bg-field"
             }`}
             onClick={() => onChange(option.userId)}
           >
-            <span className="block truncate">{option.name}</span>
+            <PlayerIdentity
+              name={option.name}
+              avatarUrl={option.avatarUrl}
+              size="xs"
+              compact
+              className={value === option.userId ? "[&_*]:text-white" : ""}
+            />
           </button>
         ))}
       </div>
@@ -918,6 +985,7 @@ function ThrowerPicker({
 
 function PlayerPanel({
   name,
+  avatarUrl,
   isActive,
   rule,
   remaining,
@@ -925,6 +993,7 @@ function PlayerPanel({
   stats
 }: {
   name: string;
+  avatarUrl?: string | null;
   isActive: boolean;
   rule: MatchLegRule;
   remaining: number;
@@ -938,10 +1007,13 @@ function PlayerPanel({
       }`}
     >
       <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <div className="text-xs font-bold text-muted">{isActive ? "当前出镖" : "等待"}</div>
-          <h2 className="mt-0.5 truncate text-sm font-black leading-tight sm:text-lg">{name}</h2>
-          <div className="mt-0.5 hidden truncate text-xs text-muted sm:block">{getLegRuleLabel(rule)}</div>
+        <div className="flex min-w-0 items-start gap-2">
+          <PlayerAvatar name={name} avatarUrl={avatarUrl} size="sm" />
+          <div className="min-w-0">
+            <div className="text-xs font-bold text-muted">{isActive ? "当前出镖" : "等待"}</div>
+            <h2 className="mt-0.5 truncate text-sm font-black leading-tight sm:text-lg">{name}</h2>
+            <div className="mt-0.5 hidden truncate text-xs text-muted sm:block">{getLegRuleLabel(rule)}</div>
+          </div>
         </div>
         <div className="shrink-0 text-right">
           <div className="text-3xl font-black leading-none text-board sm:text-5xl">{remaining}</div>
@@ -1049,7 +1121,7 @@ function SettlementView({
                 {memberRows.map((row) => (
                   <div key={row.member.userId} className="rounded-lg bg-field p-2">
                     <div className="truncate text-xs font-bold text-muted">
-                      {row.participantName} / {row.member.name}
+                      {composeParticipantMemberName(row.participantName, row.member.name)}
                     </div>
                     <dl className="mt-2 grid grid-cols-4 gap-1 text-xs">
                       <Stat label="Avg" value={row.stats.averagePer3Darts} />

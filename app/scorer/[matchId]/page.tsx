@@ -53,18 +53,21 @@ export default async function MatchScorerPage({
   const memberUserIds = [...new Set([...(teamMembers || []).map((member) => member.user_id), ...userIds])] as string[];
   const { data: profiles } =
     memberUserIds.length > 0
-      ? await supabase.from("profiles").select("id, uid, display_name").in("id", memberUserIds)
+      ? await supabase.from("profiles").select("id, uid, display_name, avatar_url").in("id", memberUserIds)
       : { data: [] };
-  const profileById = new Map(
-    (profiles || []).map((profile) => [
-      profile.id,
-      `${profile.display_name || profile.id}${profile.uid ? ` / UID ${profile.uid}` : ""}`
-    ])
-  );
-  const membersByTeamId = new Map<string, Array<{ userId: string; name: string }>>();
+  const profileById = new Map((profiles || []).map((profile) => [profile.id, profile]));
+  function profileDisplayName(userId: string, fallback?: string | null) {
+    const profile = profileById.get(userId);
+    return `${profile?.display_name || fallback || userId}${profile?.uid ? ` / UID ${profile.uid}` : ""}`;
+  }
+  const membersByTeamId = new Map<string, Array<{ userId: string; name: string; avatarUrl?: string | null }>>();
   for (const member of teamMembers || []) {
     const members = membersByTeamId.get(member.team_id) || [];
-    members.push({ userId: member.user_id, name: profileById.get(member.user_id) || member.user_id });
+    members.push({
+      userId: member.user_id,
+      name: profileDisplayName(member.user_id),
+      avatarUrl: profileById.get(member.user_id)?.avatar_url || null
+    });
     membersByTeamId.set(member.team_id, members);
   }
 
@@ -72,7 +75,11 @@ export default async function MatchScorerPage({
   function toParticipantInfo(participantId: string, fallback: string) {
     const participant = participantById.get(participantId);
     const members = participant?.participant_type === "user" && participant.user_id
-      ? [{ userId: participant.user_id, name: profileById.get(participant.user_id) || participant.display_name }]
+      ? [{
+          userId: participant.user_id,
+          name: profileDisplayName(participant.user_id, participant.display_name),
+          avatarUrl: profileById.get(participant.user_id)?.avatar_url || null
+        }]
       : participant?.team_id
         ? membersByTeamId.get(participant.team_id) || []
         : [];
@@ -80,6 +87,7 @@ export default async function MatchScorerPage({
     return {
       id: participantId,
       name: participant?.display_name || fallback,
+      avatarUrl: members.find((member) => member.avatarUrl)?.avatarUrl || null,
       members
     };
   }

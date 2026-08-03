@@ -29,7 +29,7 @@ export default async function CasualScorerPage() {
   ] as string[];
   const { data: recentProfiles } =
     recentIds.length > 0
-      ? await supabase.from("profiles").select("id, uid, display_name").in("id", recentIds)
+      ? await supabase.from("profiles").select("id, uid, display_name, avatar_url").in("id", recentIds)
       : { data: [] };
   const profileById = new Map((recentProfiles || []).map((item) => [item.id, item]));
   const recentOpponents = recentIds.slice(0, 8).map((id) => {
@@ -41,9 +41,17 @@ export default async function CasualScorerPage() {
       displayName:
         profile?.display_name ||
         (fallback?.player_a_user_id === id ? fallback.player_a_name : fallback?.player_b_name) ||
-        "对手"
+        "对手",
+      avatarUrl: profile?.avatar_url || null
     };
   });
 
-  return <CasualScoreboard playerId={user.id} playerName={playerName} recentOpponents={recentOpponents} />;
+  return (
+    <CasualScoreboard
+      playerId={user.id}
+      playerName={playerName}
+      playerAvatarUrl={profile?.avatar_url}
+      recentOpponents={recentOpponents}
+    />
+  );
 }

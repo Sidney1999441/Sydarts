@@ -9,6 +9,7 @@ import { cn, formatDateTime } from "@/lib/utils";
 import { CodlPageHeader } from "@/components/CodlPageHeader";
 import { SetupNotice } from "@/components/SetupNotice";
 import { Card } from "@/components/ui/Card";
+import { PlayerAvatar } from "@/components/ui/PlayerIdentity";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +29,8 @@ type MatchHistoryItem = {
   scoreLabel: string;
   myName: string;
   opponentName: string;
+  myAvatarUrl?: string | null;
+  opponentAvatarUrl?: string | null;
 };
 
 function readCasualMemberSide(details: unknown, userId: string): CasualSide | null {
@@ -97,7 +100,7 @@ export default async function ProfileHistoryPage() {
 
   const [{ data: officialParticipants }, { data: tournaments }] = await Promise.all([
     officialParticipantIds.length > 0
-      ? supabase.from("tournament_participants").select("id, display_name").in("id", officialParticipantIds)
+      ? supabase.from("tournament_participants").select("id, display_name, user_id, team_id").in("id", officialParticipantIds)
       : Promise.resolve({ data: [] }),
     tournamentIds.length > 0
       ? supabase.from("tournaments").select("id, name").in("id", tournamentIds)
@@ -135,6 +138,44 @@ export default async function ProfileHistoryPage() {
   for (const match of [...(directCasualMatches || []), ...(casualMatchesAsA || []), ...(casualMatchesAsB || [])]) {
     casualMatchesById.set(match.id, match);
   }
+  const officialParticipantRows = (officialParticipants || []) as Array<{
+    id: string;
+    display_name: string;
+    user_id?: string | null;
+    team_id?: string | null;
+  }>;
+  const officialTeamIds = [...new Set(officialParticipantRows.map((participant) => participant.team_id).filter(Boolean))] as string[];
+  const { data: officialTeamMembers } =
+    officialTeamIds.length > 0
+      ? await admin.from("team_members").select("team_id, user_id").in("team_id", officialTeamIds)
+      : { data: [] };
+  const casualUserIds = Array.from(casualMatchesById.values())
+    .flatMap((match) => [match.player_a_user_id, match.player_b_user_id])
+    .filter(Boolean) as string[];
+  const avatarUserIds = [
+    ...new Set([
+      ...officialParticipantRows.map((participant) => participant.user_id).filter(Boolean),
+      ...(officialTeamMembers || []).map((member) => member.user_id),
+      ...casualUserIds
+    ])
+  ] as string[];
+  const { data: avatarProfiles } =
+    avatarUserIds.length > 0
+      ? await admin.from("profiles").select("id, avatar_url").in("id", avatarUserIds)
+      : { data: [] };
+  const avatarProfileById = new Map((avatarProfiles || []).map((profile) => [profile.id, profile.avatar_url]));
+  const participantAvatarById = new Map<string, string | null>();
+  for (const participant of officialParticipantRows) {
+    if (participant.user_id) {
+      participantAvatarById.set(participant.id, avatarProfileById.get(participant.user_id) || null);
+      continue;
+    }
+    const firstTeamMemberAvatar = (officialTeamMembers || [])
+      .filter((member) => member.team_id === participant.team_id)
+      .map((member) => avatarProfileById.get(member.user_id) || null)
+      .find(Boolean) || null;
+    participantAvatarById.set(participant.id, firstTeamMemberAvatar);
+  }
 
   const history = [
     ...(officialMatches || []).flatMap((match): MatchHistoryItem[] => {
@@ -167,7 +208,9 @@ export default async function ProfileHistoryPage() {
           })}`,
           scoreLabel: `${myScore}:${opponentScore}`,
           myName,
-          opponentName
+          opponentName,
+          myAvatarUrl: participantAvatarById.get(myParticipantId) || null,
+          opponentAvatarUrl: opponentParticipantId ? participantAvatarById.get(opponentParticipantId) || null : null
         }
       ];
     }),
@@ -200,7 +243,15 @@ export default async function ProfileHistoryPage() {
         statusLabel: `${casualModeLabel(match.details)} / ${statusLabel}`,
         scoreLabel: mySide === "A" ? `${match.score_a}:${match.score_b}` : `${match.score_b}:${match.score_a}`,
         myName: mySide === "A" ? match.player_a_name : match.player_b_name,
-        opponentName: mySide === "A" ? match.player_b_name : match.player_a_name
+        opponentName: mySide === "A" ? match.player_b_name : match.player_a_name,
+        myAvatarUrl:
+          mySide === "A"
+            ? avatarProfileById.get(match.player_a_user_id) || null
+            : avatarProfileById.get(match.player_b_user_id) || null,
+        opponentAvatarUrl:
+          mySide === "A"
+            ? avatarProfileById.get(match.player_b_user_id) || null
+            : avatarProfileById.get(match.player_a_user_id) || null
       };
     })
   ]
@@ -256,8 +307,12 @@ function HistoryCard({ item }: { item: MatchHistoryItem }) {
         {item.source}
       </span>
       <span className="min-w-0">
-        <span className="block truncate text-sm font-black text-ink">
-          {item.myName} vs {item.opponentName}
+        <span className="flex min-w-0 items-center gap-2">
+          <PlayerAvatar name={item.myName} avatarUrl={item.myAvatarUrl} size="sm" />
+          <span className="min-w-0 truncate text-sm font-black text-ink">{item.myName}</span>
+          <span className="shrink-0 text-xs font-black text-muted">vs</span>
+          <PlayerAvatar name={item.opponentName} avatarUrl={item.opponentAvatarUrl} size="sm" />
+          <span className="min-w-0 truncate text-sm font-black text-ink">{item.opponentName}</span>
         </span>
         <span className="mt-1 block truncate text-xs font-semibold text-muted">
           {item.title} · {item.statusLabel} · {formatDateTime(item.playedAt)}

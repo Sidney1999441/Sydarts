@@ -2,11 +2,13 @@ import { GitBranch, Trophy } from "lucide-react";
 import { updateKnockoutMatchPairingAction } from "@/lib/actions/tournaments";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/Button";
+import { PlayerIdentity } from "@/components/ui/PlayerIdentity";
 import type { MatchStatus } from "@/types/domain";
 
 type BracketParticipant = {
   id: string;
   display_name: string;
+  avatar_url?: string | null;
 };
 
 type BracketMatch = {
@@ -78,7 +80,13 @@ function ParticipantLine({
         isWinner ? "border-board bg-board text-white" : "border-wire bg-field text-ink"
       )}
     >
-      <span className="min-w-0 truncate font-black">{participant?.display_name || placeholder}</span>
+      <PlayerIdentity
+        name={participant?.display_name || placeholder}
+        avatarUrl={participant?.avatar_url}
+        size="xs"
+        compact
+        className={isWinner ? "[&_*]:text-white" : ""}
+      />
       <span className={cn("text-base font-black", isWinner ? "text-white" : "text-board")}>
         {scoreLabel(match, side)}
       </span>

@@ -12,12 +12,14 @@ import {
   type ManualMatchStats
 } from "@/lib/darts/soft-stats";
 import { createResultSubmissionId } from "@/lib/results/submission";
+import { compactPlayerName, composeParticipantMemberName } from "@/lib/scorer/display-names";
 import { Button } from "@/components/ui/Button";
+import { PlayerIdentity } from "@/components/ui/PlayerIdentity";
 import type { MatchFinishMode, MatchLegLineup, MatchLegResult, MatchLegRule } from "@/types/domain";
 import type { ScoringCompletePayload } from "@/components/scorer/TouchScoreboard";
 
-type PlayerOption = { userId: string; name: string };
-type ParticipantInfo = { id: string; name: string; members?: PlayerOption[] };
+type PlayerOption = { userId: string; name: string; avatarUrl?: string | null };
+type ParticipantInfo = { id: string; name: string; avatarUrl?: string | null; members?: PlayerOption[] };
 type LineupSide = "A" | "B";
 type SoftLegEntry = {
   legNumber: number;
@@ -117,6 +119,13 @@ export function SoftMatchScoreboard({
     }
     return map;
   }, [participantA.members, participantB.members]);
+  const memberById = useMemo(() => {
+    const map = new Map<string, PlayerOption>();
+    for (const member of [...(participantA.members || []), ...(participantB.members || [])]) {
+      map.set(member.userId, member);
+    }
+    return map;
+  }, [participantA.members, participantB.members]);
   const currentFields = getSoftStatFields(currentRule?.gameVariant);
   const needsSideScores =
     currentRule?.gameVariant === "soft_half_it" || isSoftHighScoreVariant(currentRule?.gameVariant);
@@ -124,12 +133,14 @@ export function SoftMatchScoreboard({
     ...(currentLineup?.participantAUserIds || []).map((userId) => ({
       userId,
       sideName: participantA.name,
-      name: memberNames.get(userId) || userId
+      name: compactPlayerName(memberNames.get(userId)) || userId,
+      avatarUrl: memberById.get(userId)?.avatarUrl || null
     })),
     ...(currentLineup?.participantBUserIds || []).map((userId) => ({
       userId,
       sideName: participantB.name,
-      name: memberNames.get(userId) || userId
+      name: compactPlayerName(memberNames.get(userId)) || userId,
+      avatarUrl: memberById.get(userId)?.avatarUrl || null
     }))
   ];
 
@@ -529,7 +540,12 @@ export function SoftMatchScoreboard({
           {currentUsers.map((player, index) => (
             <details key={player.userId} className="rounded-lg bg-field p-3" open={index === 0}>
               <summary className="cursor-pointer text-sm font-bold">
-                {player.sideName} / {player.name}
+                <PlayerIdentity
+                  name={composeParticipantMemberName(player.sideName, player.name)}
+                  avatarUrl={player.avatarUrl}
+                  size="sm"
+                  compact
+                />
               </summary>
               <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-4">
                 {currentFields.map((field) => (

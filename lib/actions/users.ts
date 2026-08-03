@@ -156,7 +156,7 @@ export async function searchPlayerProfilesAction(query: string) {
   const isUid = /^[0-9]{1,6}$/.test(keyword);
   const request = admin
     .from("profiles")
-    .select("id, uid, display_name")
+    .select("id, uid, display_name, avatar_url")
     .neq("id", user.id)
     .eq("status", "active")
     .limit(8);
@@ -171,6 +171,7 @@ export async function searchPlayerProfilesAction(query: string) {
   return (data || []).map((profile) => ({
     id: profile.id,
     uid: profile.uid,
-    displayName: profile.display_name || "Unnamed player"
+    displayName: profile.display_name || "Unnamed player",
+    avatarUrl: profile.avatar_url || null
   }));
 }
