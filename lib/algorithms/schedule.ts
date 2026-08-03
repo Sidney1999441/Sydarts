@@ -4,6 +4,10 @@ export type GeneratedMatchWithDartMode = GeneratedMatch & {
   forceDartMode?: MatchDartMode;
 };
 
+export type LeaguePlayoffSeed = ParticipantSeed & {
+  rank: number;
+};
+
 function nextPowerOfTwo(value: number) {
   let result = 1;
   while (result < value) result *= 2;
@@ -121,6 +125,99 @@ export function generateSingleEliminationBracket(participants: ParticipantSeed[]
 
     previousRoundIds = currentRoundIds;
   }
+
+  return matches;
+}
+
+export function generateLeaguePlayoffBracket(rankedParticipants: LeaguePlayoffSeed[]) {
+  if (rankedParticipants.length < 8) {
+    throw new Error("League playoffs require at least eight ranked participants.");
+  }
+
+  const byRank = new Map(rankedParticipants.slice(0, 8).map((participant) => [participant.rank, participant]));
+  const getSeed = (rank: number) => {
+    const participant = byRank.get(rank);
+    if (!participant) throw new Error(`Missing league rank ${rank}.`);
+    return participant;
+  };
+
+  const matches: GeneratedMatch[] = [
+    {
+      tempId: "P-R1-M1",
+      stage: "knockout",
+      roundNumber: 1,
+      matchNumber: 1,
+      participantAId: getSeed(5).id,
+      participantBId: getSeed(8).id,
+      status: "not_started",
+      nextMatchTempId: "P-R2-M1",
+      nextMatchSlot: "B"
+    },
+    {
+      tempId: "P-R1-M2",
+      stage: "knockout",
+      roundNumber: 1,
+      matchNumber: 2,
+      participantAId: getSeed(6).id,
+      participantBId: getSeed(7).id,
+      status: "not_started",
+      nextMatchTempId: "P-R2-M2",
+      nextMatchSlot: "B"
+    },
+    {
+      tempId: "P-R2-M1",
+      stage: "knockout",
+      roundNumber: 2,
+      matchNumber: 1,
+      participantAId: getSeed(4).id,
+      participantBId: null,
+      status: "not_started",
+      nextMatchTempId: "P-R3-M1",
+      nextMatchSlot: "B"
+    },
+    {
+      tempId: "P-R2-M2",
+      stage: "knockout",
+      roundNumber: 2,
+      matchNumber: 2,
+      participantAId: getSeed(3).id,
+      participantBId: null,
+      status: "not_started",
+      nextMatchTempId: "P-R3-M2",
+      nextMatchSlot: "B"
+    },
+    {
+      tempId: "P-R3-M1",
+      stage: "knockout",
+      roundNumber: 3,
+      matchNumber: 1,
+      participantAId: getSeed(1).id,
+      participantBId: null,
+      status: "not_started",
+      nextMatchTempId: "P-R4-M1",
+      nextMatchSlot: "A"
+    },
+    {
+      tempId: "P-R3-M2",
+      stage: "knockout",
+      roundNumber: 3,
+      matchNumber: 2,
+      participantAId: getSeed(2).id,
+      participantBId: null,
+      status: "not_started",
+      nextMatchTempId: "P-R4-M1",
+      nextMatchSlot: "B"
+    },
+    {
+      tempId: "P-R4-M1",
+      stage: "knockout",
+      roundNumber: 4,
+      matchNumber: 1,
+      participantAId: null,
+      participantBId: null,
+      status: "not_started"
+    }
+  ];
 
   return matches;
 }

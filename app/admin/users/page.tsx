@@ -20,6 +20,34 @@ import { Card } from "@/components/ui/Card";
 
 export const dynamic = "force-dynamic";
 
+const adminUserSelectBase =
+  "id, uid, display_name, avatar_url, bio, phone, role, rating, skill_level, tournament_rating, casual_rating, soft_rating, tournament_skill_level, casual_skill_level, soft_skill_level, status, created_at, updated_at";
+const adminUserSelectWithRealName = `${adminUserSelectBase}, real_name, id_card_number, real_name_submitted_at`;
+
+type AdminUserRow = {
+  id: string;
+  uid?: string | null;
+  display_name?: string | null;
+  avatar_url?: string | null;
+  bio?: string | null;
+  phone?: string | null;
+  role?: string | null;
+  rating?: number | null;
+  skill_level?: string | null;
+  tournament_rating?: number | null;
+  casual_rating?: number | null;
+  soft_rating?: number | null;
+  tournament_skill_level?: string | null;
+  casual_skill_level?: string | null;
+  soft_skill_level?: string | null;
+  real_name?: string | null;
+  id_card_number?: string | null;
+  real_name_submitted_at?: string | null;
+  status?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
 type DbStats = {
   user_id: string;
   matches_played?: number | null;
@@ -68,6 +96,11 @@ function percent(part: number | null | undefined, total: number | null | undefin
   const totalValue = toNumber(total);
   if (totalValue <= 0) return 0;
   return Math.round((toNumber(part) / totalValue) * 100);
+}
+
+function maskIdCardNumber(value?: string | null) {
+  if (!value || value.length < 8) return "未登记";
+  return `${value.slice(0, 3)}***********${value.slice(-4)}`;
 }
 
 function toLevelStats(stats?: DbStats | null): PlayerLevelStats {
@@ -119,25 +152,40 @@ export default async function AdminUsersPage({
   const { q = "" } = (await searchParams) || {};
   const keyword = q.trim();
   const supabase = await createSupabaseServerClient();
-  let query = supabase
-    .from("profiles")
-    .select(
-      "id, uid, display_name, avatar_url, bio, phone, role, rating, skill_level, tournament_rating, casual_rating, soft_rating, tournament_skill_level, casual_skill_level, soft_skill_level, status, created_at, updated_at"
-    )
-    .order("created_at", { ascending: false })
-    .limit(60);
 
-  if (keyword) {
-    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(keyword)) {
-      query = query.eq("id", keyword);
-    } else if (/^[0-9]+$/.test(keyword)) {
-      query = query.ilike("uid", `${keyword}%`);
-    } else {
-      query = query.ilike("display_name", `%${keyword}%`);
+  const buildUsersQuery = (select: string) => {
+    let query = supabase
+      .from("profiles")
+      .select(select)
+      .order("created_at", { ascending: false })
+      .limit(60);
+
+    if (keyword) {
+      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(keyword)) {
+        query = query.eq("id", keyword);
+      } else if (/^[0-9]+$/.test(keyword)) {
+        query = query.ilike("uid", `${keyword}%`);
+      } else {
+        query = query.ilike("display_name", `%${keyword}%`);
+      }
     }
+
+    return query;
+  };
+
+  const { data: usersWithRealName, error: usersError } = await buildUsersQuery(adminUserSelectWithRealName);
+  let users = (usersWithRealName || []) as unknown as AdminUserRow[];
+
+  if (usersError) {
+    const { data: fallbackUsers } = await buildUsersQuery(adminUserSelectBase);
+    users = ((fallbackUsers || []) as unknown as AdminUserRow[]).map((user) => ({
+      ...user,
+      real_name: null,
+      id_card_number: null,
+      real_name_submitted_at: null
+    }));
   }
 
-  const { data: users } = await query;
   const userIds = (users || []).map((user) => user.id);
   const statsSelect =
     "user_id,matches_played,wins,losses,legs_played,legs_won,total_scored_points,total_darts,average_per_3_darts,highest_turn_score,highest_checkout,bust_count,count_high_checkout,count_80_plus,count_100_plus,count_140_plus,count_170_plus,count_180";
@@ -223,6 +271,15 @@ export default async function AdminUsersPage({
                       <div className="truncate text-lg font-black">{user.display_name || "未命名用户"}</div>
                       <div className="text-xs font-bold text-board">UID {user.uid || "------"}</div>
                       <div className="truncate text-xs text-muted">{user.id}</div>
+                      <div className="mt-2 flex flex-wrap gap-1 text-xs font-bold">
+                        {user.real_name && user.id_card_number ? (
+                          <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-emerald-700">
+                            已实名 {user.real_name} / {maskIdCardNumber(user.id_card_number)}
+                          </span>
+                        ) : (
+                          <span className="rounded-full bg-amber-50 px-2.5 py-1 text-amber-700">未实名</span>
+                        )}
+                      </div>
                     </div>
                   </div>
                   <div className="text-right text-xs font-semibold text-muted">
@@ -274,7 +331,7 @@ export default async function AdminUsersPage({
                   </label>
                   <label className="label">
                     角色
-                    <select className="form-input" name="role" defaultValue={user.role}>
+                    <select className="form-input" name="role" defaultValue={user.role || "user"}>
                       <option value="user">user</option>
                       <option value="admin">admin</option>
                     </select>

@@ -1151,6 +1151,33 @@ async function settleTournamentMatch(input: {
   });
 
   if (error) throw new Error(error.message);
+
+  if (input.winnerParticipantId) {
+    const { data: match, error: matchError } = await input.admin
+      .from("matches")
+      .select("next_match_id, next_match_slot")
+      .eq("id", input.matchId)
+      .maybeSingle();
+    if (matchError) throw new Error(matchError.message);
+
+    if (match?.next_match_id && (match.next_match_slot === "A" || match.next_match_slot === "B")) {
+      const nextSlotColumn = match.next_match_slot === "A" ? "participant_a_id" : "participant_b_id";
+      const manualSlotKey = match.next_match_slot === "A" ? "manualSlotA" : "manualSlotB";
+      const { data: nextMatch, error: nextMatchError } = await input.admin
+        .from("matches")
+        .select("details")
+        .eq("id", match.next_match_id)
+        .maybeSingle();
+      if (nextMatchError) throw new Error(nextMatchError.message);
+      if ((nextMatch?.details as Record<string, unknown> | null)?.[manualSlotKey]) return;
+
+      const { error: advanceError } = await input.admin
+        .from("matches")
+        .update({ [nextSlotColumn]: input.winnerParticipantId })
+        .eq("id", match.next_match_id);
+      if (advanceError) throw new Error(advanceError.message);
+    }
+  }
 }
 
 export async function completeScoredMatchAction(payload: unknown) {

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { ArrowRight, History, Swords, UserRound } from "lucide-react";
+import { ArrowRight, History, IdCard, Swords, UserRound } from "lucide-react";
 import { confirmCasualMatchAction, confirmManualResultAction } from "@/lib/actions/matches";
 import { updateSavedTeamProfileAction } from "@/lib/actions/teams";
 import { calculatePlayerLevel, type PlayerLevelStats, type SoftPlayerLevelStats } from "@/lib/algorithms/player-level";
@@ -316,8 +316,9 @@ export default async function ProfilePage() {
               <div className={cn("h-full", profileTone.bar)} style={{ width: `${generalLevel.progressToNext}%` }} />
             </div>
           </div>
-          <div className="grid gap-2 sm:grid-cols-3 lg:w-[420px]">
+          <div className="grid gap-2 sm:grid-cols-2 lg:w-[520px]">
             <ProfileQuickLink href="/profile/history" icon={<History className="h-4 w-4" aria-hidden />} label="历史战绩" />
+            <ProfileQuickLink href="/profile/real-name" icon={<IdCard className="h-4 w-4" aria-hidden />} label="实名认证" />
             <ProfileQuickLink href="/scorer/casual" icon={<Swords className="h-4 w-4" aria-hidden />} label="切磋计分" />
             <ProfileQuickLink href="/help" icon={<ArrowRight className="h-4 w-4" aria-hidden />} label="规则说明" />
           </div>

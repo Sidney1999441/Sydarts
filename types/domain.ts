@@ -5,6 +5,7 @@ export type TournamentType = "individual" | "doubles" | "team";
 export type TournamentFormat =
   | "round_robin"
   | "single_elimination"
+  | "league_playoff"
   | "double_elimination";
 export type DartMode = "steel" | "soft" | "mixed_alternating";
 export type MatchDartMode = "steel" | "soft";
@@ -106,6 +107,9 @@ export type Profile = {
   tournament_skill_level?: SkillLevel | null;
   casual_skill_level?: SkillLevel | null;
   soft_skill_level?: SkillLevel | null;
+  real_name?: string | null;
+  id_card_number?: string | null;
+  real_name_submitted_at?: string | null;
 };
 
 export type SavedTeamStatus = "active" | "archived";

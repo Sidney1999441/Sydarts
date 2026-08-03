@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { requireAdmin, requireUser } from "@/lib/auth/guards";
 import { getInitialRatingTier, ratingToSkillLevel } from "@/lib/algorithms/player-level";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -23,6 +24,37 @@ function parseOption(value: string, allowed: Set<string>, fallback: string) {
 
 function parseSkillLevel(value: FormDataEntryValue | null, rating: number) {
   return parseOption(fromFormString(value), skillLevels, ratingToSkillLevel(rating));
+}
+
+function normalizeRealName(value: FormDataEntryValue | null) {
+  return fromFormString(value).replace(/\s+/g, " ").trim();
+}
+
+function normalizeIdCardNumber(value: FormDataEntryValue | null) {
+  return fromFormString(value).replace(/[\s-]/g, "").toUpperCase();
+}
+
+function isValidBirthDate(value: string) {
+  const year = Number(value.slice(0, 4));
+  const month = Number(value.slice(4, 6));
+  const day = Number(value.slice(6, 8));
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day &&
+    year >= 1900 &&
+    date.getTime() <= Date.now()
+  );
+}
+
+function isValidIdCardNumber(value: string) {
+  if (!/^[0-9]{17}[0-9X]$/.test(value)) return false;
+  if (!isValidBirthDate(value.slice(6, 14))) return false;
+  const weights = [7, 9, 10, 5, 8, 4, 2, 1, 6, 3, 7, 9, 10, 5, 8, 4, 2];
+  const checkCodes = ["1", "0", "X", "9", "8", "7", "6", "5", "4", "3", "2"];
+  const sum = weights.reduce((total, weight, index) => total + Number(value[index]) * weight, 0);
+  return checkCodes[sum % 11] === value[17];
 }
 
 export async function updateUserAdminFieldsAction(formData: FormData) {
@@ -78,6 +110,39 @@ export async function updateUserAdminFieldsAction(formData: FormData) {
 
   revalidatePath("/admin/users");
   revalidatePath("/profile");
+}
+
+export async function updateRealNameProfileAction(formData: FormData) {
+  const { user } = await requireUser();
+  const realName = normalizeRealName(formData.get("real_name"));
+  const idCardNumber = normalizeIdCardNumber(formData.get("id_card_number"));
+
+  if (realName.length < 2 || realName.length > 40) {
+    throw new Error("真实姓名需为 2-40 个字符。");
+  }
+  if (!/^[\u4e00-\u9fa5A-Za-z·.\s-]+$/.test(realName)) {
+    throw new Error("真实姓名只能包含中英文、空格、点号或连字符。");
+  }
+  if (!isValidIdCardNumber(idCardNumber)) {
+    throw new Error("请输入有效的 18 位身份证号码。");
+  }
+
+  const supabase = createSupabaseAdminClient();
+  const { error } = await supabase
+    .from("profiles")
+    .update({
+      real_name: realName,
+      id_card_number: idCardNumber,
+      real_name_submitted_at: new Date().toISOString()
+    })
+    .eq("id", user.id);
+
+  if (error) throw new Error(error.message);
+
+  revalidatePath("/");
+  revalidatePath("/profile");
+  revalidatePath("/profile/real-name");
+  redirect("/profile");
 }
 
 export async function searchPlayerProfilesAction(query: string) {

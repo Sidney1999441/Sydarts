@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { generateBalancedTeams, generateGroups, generatePreferredBalancedTeams } from "@/lib/algorithms/grouping";
 import {
   expandMixedDartRoundRobinMatches,
+  generateLeaguePlayoffBracket,
   generateRoundRobinMatches,
   generateSingleEliminationBracket
 } from "@/lib/algorithms/schedule";
@@ -392,6 +393,31 @@ describe("team-first tournament algorithms", () => {
     expect(roundOne).toBe("soft");
     expect(roundTwo).toBe("steel");
     expect(getMatchGameVariant({ matchDartMode: roundOne, softGame: "soft_cricket" })).toBe("soft_cricket");
+  });
+
+  it("builds CODL league playoff bracket from ranked standings", () => {
+    const ranked = Array.from({ length: 8 }, (_, index) => ({
+      id: `p${index + 1}`,
+      name: `Rank ${index + 1}`,
+      rating: 1000,
+      rank: index + 1
+    }));
+    const bracket = generateLeaguePlayoffBracket(ranked);
+
+    expect(bracket).toHaveLength(7);
+    expect(bracket.map((match) => `${match.roundNumber}-${match.matchNumber}:${match.participantAId || "TBD"}-${match.participantBId || "TBD"}`)).toEqual([
+      "1-1:p5-p8",
+      "1-2:p6-p7",
+      "2-1:p4-TBD",
+      "2-2:p3-TBD",
+      "3-1:p1-TBD",
+      "3-2:p2-TBD",
+      "4-1:TBD-TBD"
+    ]);
+    expect(bracket[0].nextMatchTempId).toBe("P-R2-M1");
+    expect(bracket[0].nextMatchSlot).toBe("B");
+    expect(bracket[4].nextMatchTempId).toBe("P-R4-M1");
+    expect(bracket[4].nextMatchSlot).toBe("A");
   });
 
   it("uses separate custom templates for mixed alternating rounds", () => {

@@ -1,11 +1,12 @@
 import { CalendarRange } from "lucide-react";
-import { generateGroupsAndScheduleAction } from "@/lib/actions/tournaments";
+import { generateGroupsAndScheduleAction, generateLeaguePlayoffsAction } from "@/lib/actions/tournaments";
 import { requireAdmin } from "@/lib/auth/guards";
 import { getMatchRulesSummary } from "@/lib/darts/variants";
 import { hasSupabaseEnv } from "@/lib/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { SetupNotice } from "@/components/SetupNotice";
 import { CodlPageHeader } from "@/components/CodlPageHeader";
+import { TournamentBracket } from "@/components/TournamentBracket";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 
@@ -29,6 +30,9 @@ export default async function ScheduleAdminPage({
       supabase.from("matches").select("*").eq("tournament_id", id).order("round_number").order("match_number")
     ]);
   const participantById = new Map((participants || []).map((participant) => [participant.id, participant]));
+  const groupMatches = (matches || []).filter((match) => match.stage === "group");
+  const knockoutMatches = (matches || []).filter((match) => match.stage === "knockout");
+  const isLeaguePlayoff = tournament?.format === "league_playoff";
 
   return (
     <div className="grid gap-6">
@@ -40,14 +44,37 @@ export default async function ScheduleAdminPage({
         art="white"
       />
       <Card>
-        <form action={generateGroupsAndScheduleAction} className="flex flex-wrap items-end gap-3">
-          <input type="hidden" name="tournament_id" value={id} />
-          <label className="label w-40">
-            分组数量
-            <input className="form-input" type="number" min={1} name="group_count" defaultValue={2} />
-          </label>
-          <Button type="submit">自动分组并生成赛程</Button>
-        </form>
+        <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-end">
+          <form action={generateGroupsAndScheduleAction} className="flex flex-wrap items-end gap-3">
+            <input type="hidden" name="tournament_id" value={id} />
+            <label className="label w-40">
+              分组数量
+              <input
+                className="form-input"
+                type="number"
+                min={1}
+                name="group_count"
+                defaultValue={isLeaguePlayoff ? 1 : 2}
+                disabled={isLeaguePlayoff}
+              />
+            </label>
+            {isLeaguePlayoff ? <input type="hidden" name="group_count" value={1} /> : null}
+            <Button type="submit">
+              {isLeaguePlayoff ? "生成联赛赛程" : "自动分组并生成赛程"}
+            </Button>
+          </form>
+          {isLeaguePlayoff ? (
+            <form action={generateLeaguePlayoffsAction} className="flex flex-wrap items-end gap-3">
+              <input type="hidden" name="tournament_id" value={id} />
+              <Button type="submit" variant="secondary">根据当前排名生成季后赛</Button>
+            </form>
+          ) : null}
+        </div>
+        {isLeaguePlayoff ? (
+          <p className="mt-3 text-sm font-semibold text-muted">
+            复合赛制先生成一个整体联赛；联赛结果录入后，再按排名生成季后赛：1-2 名进四强，5v8、6v7，胜者分别挑战 4、3，争夺另外两个四强席位。
+          </p>
+        ) : null}
       </Card>
       <section className="grid gap-4 lg:grid-cols-[0.8fr_1.2fr]">
         <Card>
@@ -73,9 +100,9 @@ export default async function ScheduleAdminPage({
           </div>
         </Card>
         <Card>
-          <h2 className="text-lg font-bold">对阵</h2>
+          <h2 className="text-lg font-bold">{isLeaguePlayoff ? "联赛对阵" : "对阵"}</h2>
           <div className="mt-4 grid gap-3">
-            {(matches || []).map((match) => (
+            {(isLeaguePlayoff ? groupMatches : matches || []).map((match) => (
               <div key={match.id} className="rounded-lg border border-wire p-4 text-sm">
                 <div className="font-semibold text-muted">
                   {match.stage} / R{match.round_number} M{match.match_number} / {match.status}
@@ -92,10 +119,29 @@ export default async function ScheduleAdminPage({
                 </div>
               </div>
             ))}
-            {(matches || []).length === 0 ? <p className="text-sm text-muted">暂无赛程。</p> : null}
+            {(isLeaguePlayoff ? groupMatches : matches || []).length === 0 ? <p className="text-sm text-muted">暂无赛程。</p> : null}
           </div>
         </Card>
       </section>
+      {knockoutMatches.length > 0 || tournament?.format === "single_elimination" || isLeaguePlayoff ? (
+        <Card>
+          <TournamentBracket
+            title={isLeaguePlayoff ? "季后赛树状对阵" : "淘汰赛树状对阵"}
+            matches={knockoutMatches}
+            participants={(participants || []).map((participant) => ({
+              id: participant.id,
+              display_name: participant.display_name
+            }))}
+            manualEdit={{
+              tournamentId: id,
+              participants: (participants || []).map((participant) => ({
+                id: participant.id,
+                display_name: participant.display_name
+              }))
+            }}
+          />
+        </Card>
+      ) : null}
     </div>
   );
 }

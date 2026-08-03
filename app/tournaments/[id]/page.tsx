@@ -13,11 +13,18 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { formatDateTime } from "@/lib/utils";
 import { SetupNotice } from "@/components/SetupNotice";
 import { CodlPageHeader } from "@/components/CodlPageHeader";
+import { TournamentBracket } from "@/components/TournamentBracket";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import type { MatchDartMode, MatchSummary, ParticipantSeed, Tournament } from "@/types/domain";
 
 export const dynamic = "force-dynamic";
+
+type MatchRow = MatchSummary & {
+  stage: "group" | "knockout";
+  round_number: number;
+  match_number: number;
+};
 
 export default async function TournamentDetailPage({
   params
@@ -90,8 +97,18 @@ export default async function TournamentDetailPage({
     rating: participant.rating_snapshot || 1000
   }));
   const participantById = new Map(participantSeeds.map((participant) => [participant.id, participant]));
-  const standings = updateTournamentStandings(participantSeeds, (matches || []) as MatchSummary[]);
   const tournamentData = tournament as Tournament;
+  const matchRows = (matches || []) as MatchRow[];
+  const groupMatches = matchRows.filter((match) => match.stage === "group");
+  const knockoutMatches = matchRows.filter((match) => match.stage === "knockout");
+  const standings = updateTournamentStandings(
+    participantSeeds,
+    (tournamentData.format === "single_elimination"
+      ? []
+      : groupMatches.length > 0
+        ? groupMatches
+        : matchRows) as MatchSummary[]
+  );
   const teamIds = [
     ...new Set((participants || []).map((participant) => participant.team_id).filter(Boolean))
   ] as string[];
@@ -165,7 +182,7 @@ export default async function TournamentDetailPage({
         <dl className="grid gap-3 text-sm md:grid-cols-4">
           <Info label="地点" value={tournamentData.location || "待定"} />
           <Info label="比赛开始" value={formatDateTime(tournamentData.tournament_start_at)} />
-          <Info label="赛制" value={tournamentData.format === "round_robin" ? "小组循环" : "淘汰赛"} />
+          <Info label="赛制" value={getTournamentFormatLabel(tournamentData.format)} />
           <Info label="参赛" value={`${participantSeeds.length}/${tournamentData.max_participants}`} />
           <Info label="类型" value={`${tournamentData.tournament_type} / 每队 ${tournamentData.team_size} 人`} />
           <Info label="镖种" value={getDartModeLabel(tournamentData.dart_mode)} />
@@ -176,45 +193,50 @@ export default async function TournamentDetailPage({
         </dl>
       </Card>
 
-      <section className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
-        <Card>
-          <h2 className="text-lg font-bold">排名</h2>
-          <div className="mt-4 overflow-x-auto">
-            <table className="w-full min-w-[560px] text-left text-sm">
-              <thead className="text-muted">
-                <tr>
-                  <th className="py-2">#</th>
-                  <th>队伍/选手</th>
-                  <th>场</th>
-                  <th>胜</th>
-                  <th>负</th>
-                  <th>Leg +/-</th>
-                  <th>积分</th>
-                </tr>
-              </thead>
-              <tbody>
-                {standings.map((row, index) => (
-                  <tr key={row.participantId} className="border-t border-wire">
-                    <td className="py-2">{index + 1}</td>
-                    <td className="font-semibold">{row.name}</td>
-                    <td>{row.played}</td>
-                    <td>{row.wins}</td>
-                    <td>{row.losses}</td>
-                    <td>{row.legDiff}</td>
-                    <td>{row.points}</td>
-                  </tr>
-                ))}
-                {standings.length === 0 ? (
-                  <tr>
-                    <td className="py-4 text-muted" colSpan={7}>暂无排名数据。</td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </table>
-          </div>
-        </Card>
+      {tournamentData.format !== "single_elimination" || (groups || []).length > 0 ? (
+        <section className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
+          {tournamentData.format !== "single_elimination" ? (
+            <Card>
+              <h2 className="text-lg font-bold">
+                {tournamentData.format === "league_playoff" ? "联赛排名" : "排名"}
+              </h2>
+              <div className="mt-4 overflow-x-auto">
+                <table className="w-full min-w-[560px] text-left text-sm">
+                  <thead className="text-muted">
+                    <tr>
+                      <th className="py-2">#</th>
+                      <th>队伍/选手</th>
+                      <th>场</th>
+                      <th>胜</th>
+                      <th>负</th>
+                      <th>Leg +/-</th>
+                      <th>积分</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {standings.map((row, index) => (
+                      <tr key={row.participantId} className="border-t border-wire">
+                        <td className="py-2">{index + 1}</td>
+                        <td className="font-semibold">{row.name}</td>
+                        <td>{row.played}</td>
+                        <td>{row.wins}</td>
+                        <td>{row.losses}</td>
+                        <td>{row.legDiff}</td>
+                        <td>{row.points}</td>
+                      </tr>
+                    ))}
+                    {standings.length === 0 ? (
+                      <tr>
+                        <td className="py-4 text-muted" colSpan={7}>暂无排名数据。</td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          ) : null}
 
-        <Card>
+          <Card>
           <h2 className="text-lg font-bold">分组</h2>
           <div className="mt-4 grid gap-4 md:grid-cols-2">
             {(groups || []).map((group) => {
@@ -237,13 +259,30 @@ export default async function TournamentDetailPage({
             })}
             {(groups || []).length === 0 ? <p className="text-sm text-muted">暂未生成分组。</p> : null}
           </div>
-        </Card>
-      </section>
+          </Card>
+        </section>
+      ) : null}
 
-      <Card>
-        <h2 className="text-lg font-bold">赛程</h2>
-        <div className="mt-4 grid gap-3">
-          {(matches || []).map((match) => {
+      {knockoutMatches.length > 0 ? (
+        <Card>
+          <TournamentBracket
+            title={tournamentData.format === "league_playoff" ? "季后赛对阵" : "淘汰赛对阵"}
+            matches={knockoutMatches}
+            participants={(participants || []).map((participant) => ({
+              id: participant.id,
+              display_name: participant.display_name
+            }))}
+          />
+        </Card>
+      ) : null}
+
+      {(groupMatches.length > 0 || knockoutMatches.length === 0) ? (
+        <Card>
+          <h2 className="text-lg font-bold">
+            {tournamentData.format === "league_playoff" ? "联赛赛程" : "赛程"}
+          </h2>
+          <div className="mt-4 grid gap-3">
+            {(groupMatches.length > 0 ? groupMatches : matchRows).map((match) => {
             const dartMode = ((match.dart_mode || "steel") === "soft" ? "soft" : "steel") as MatchDartMode;
             const participantAName = participantById.get(match.participant_a_id || "")?.name || "TBD";
             const participantBName = participantById.get(match.participant_b_id || "")?.name || "TBD";
@@ -283,11 +322,19 @@ export default async function TournamentDetailPage({
               </div>
             );
           })}
-          {(matches || []).length === 0 ? <p className="text-sm text-muted">暂无赛程。</p> : null}
-        </div>
-      </Card>
+            {matchRows.length === 0 ? <p className="text-sm text-muted">暂无赛程。</p> : null}
+          </div>
+        </Card>
+      ) : null}
     </div>
   );
+}
+
+function getTournamentFormatLabel(format: Tournament["format"]) {
+  if (format === "round_robin") return "小组循环";
+  if (format === "single_elimination") return "单淘汰赛";
+  if (format === "league_playoff") return "联赛 + 季后赛";
+  return "双淘汰赛";
 }
 
 function Info({ label, value }: { label: string; value: string }) {

@@ -309,6 +309,7 @@ export function TournamentForm({
           <select className="form-input" name="format" defaultValue={tournament?.format || "round_robin"}>
             <option value="round_robin">小组循环</option>
             <option value="single_elimination">单淘汰赛</option>
+            <option value="league_playoff">联赛 + 季后赛</option>
             <option value="double_elimination" disabled>双淘汰赛开发中</option>
           </select>
         </label>

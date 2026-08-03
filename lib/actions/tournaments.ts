@@ -6,9 +6,11 @@ import { z } from "zod";
 import { generateGroups, generatePreferredBalancedTeams } from "@/lib/algorithms/grouping";
 import {
   expandMixedDartRoundRobinMatches,
+  generateLeaguePlayoffBracket,
   generateRoundRobinMatches,
   generateSingleEliminationBracket
 } from "@/lib/algorithms/schedule";
+import { updateTournamentStandings } from "@/lib/algorithms/standings";
 import { requireAdmin, requireUser } from "@/lib/auth/guards";
 import { isSnowGame, resolveMatchLegRules, selectMatchLegRules, validateMatchLegRules } from "@/lib/darts/variants";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -55,7 +57,7 @@ const tournamentSchema = z
     max_participants: z.coerce.number().int().min(2),
     tournament_type: z.enum(["individual", "doubles", "team"]),
     team_size: z.coerce.number().int().min(1).max(8),
-    format: z.enum(["round_robin", "single_elimination", "double_elimination"]),
+    format: z.enum(["round_robin", "single_elimination", "double_elimination", "league_playoff"]),
     dart_mode: z.enum(["steel", "soft", "mixed_alternating"]),
     dart_game: z.coerce.number().pipe(z.union([z.literal(301), z.literal(501), z.literal(701)])),
     soft_game: z.enum([
@@ -1052,7 +1054,7 @@ export async function generateGroupsAndScheduleAction(formData: FormData) {
     }
   } else {
     const groups = generateGroups(seeds, {
-      groupCount,
+      groupCount: tournament.format === "league_playoff" ? 1 : groupCount,
       balanced: Boolean(tournament.balanced_grouping_enabled)
     });
 
@@ -1113,5 +1115,179 @@ export async function generateGroupsAndScheduleAction(formData: FormData) {
 
   await supabase.from("tournaments").update({ status: "in_progress" }).eq("id", tournamentId);
   revalidatePath(`/admin/tournaments/${tournamentId}/schedule`);
+  revalidatePath(`/tournaments/${tournamentId}`);
+}
+
+export async function generateLeaguePlayoffsAction(formData: FormData) {
+  await requireAdmin();
+  const tournamentId = fromFormString(formData.get("tournament_id"));
+  const supabase = await createSupabaseServerClient();
+
+  const { data: tournament, error: tournamentError } = await supabase
+    .from("tournaments")
+    .select("id, format, tournament_type, team_size, dart_mode, dart_game, soft_game, mixed_first_dart_mode, match_rule_mode, match_leg_rules, match_finish_mode, first_throw_mode, best_of")
+    .eq("id", tournamentId)
+    .single();
+
+  if (tournamentError) throw new Error(tournamentError.message);
+  if (tournament.format !== "league_playoff") {
+    throw new Error("只有联赛 + 季后赛赛制可以从联赛排名生成季后赛。");
+  }
+
+  const { data: participants, error: participantsError } = await supabase
+    .from("tournament_participants")
+    .select("id, display_name, rating_snapshot")
+    .eq("tournament_id", tournamentId)
+    .eq("status", "active")
+    .order("seed");
+
+  if (participantsError) throw new Error(participantsError.message);
+  const seeds: ParticipantSeed[] = (participants || []).map((participant) => ({
+    id: participant.id,
+    name: participant.display_name,
+    rating: participant.rating_snapshot || 1000
+  }));
+  if (seeds.length < 8) {
+    throw new Error("生成季后赛至少需要 8 个参赛主体。");
+  }
+
+  const { data: groupMatches, error: matchError } = await supabase
+    .from("matches")
+    .select("*")
+    .eq("tournament_id", tournamentId)
+    .eq("stage", "group");
+
+  if (matchError) throw new Error(matchError.message);
+
+  const standings = updateTournamentStandings(seeds, groupMatches || []);
+  const playoffSeeds = standings.slice(0, 8).map((row, index) => {
+    const participant = seeds.find((seed) => seed.id === row.participantId);
+    if (!participant) throw new Error(`找不到联赛第 ${index + 1} 名参赛主体。`);
+    return {
+      ...participant,
+      rank: index + 1
+    };
+  });
+
+  await supabase
+    .from("matches")
+    .delete()
+    .eq("tournament_id", tournamentId)
+    .eq("stage", "knockout");
+
+  const generated = generateLeaguePlayoffBracket(playoffSeeds);
+  const rankByParticipantId = new Map(playoffSeeds.map((participant) => [participant.id, participant.rank]));
+  const getSlotLabel = (participantId: string | null, fallback: string) => {
+    if (!participantId) return fallback;
+    const rank = rankByParticipantId.get(participantId);
+    return rank ? `联赛第 ${rank} 名` : fallback;
+  };
+  const getRoundLabel = (roundNumber: number) =>
+    roundNumber === 1
+      ? "5-8 名附加赛"
+      : roundNumber === 2
+        ? "季后赛席位赛"
+        : roundNumber === 3
+          ? "四强赛"
+          : "决赛";
+
+  const { data: insertedMatches, error: insertError } = await supabase
+    .from("matches")
+    .insert(
+      generated.map((match) => ({
+        tournament_id: tournamentId,
+        stage: match.stage,
+        round_number: match.roundNumber,
+        match_number: match.matchNumber,
+        participant_a_id: match.participantAId,
+        participant_b_id: match.participantBId,
+        status: match.status,
+        ...buildMatchRuleSnapshot({
+          ...(tournament as unknown as ParsedTournamentForm),
+          roundNumber: match.roundNumber
+        }),
+        details: {
+          tempId: match.tempId,
+          playoff: true,
+          playoffRoundLabel: getRoundLabel(match.roundNumber),
+          slotALabel: getSlotLabel(match.participantAId, "待定"),
+          slotBLabel: getSlotLabel(match.participantBId, "待晋级")
+        }
+      }))
+    )
+    .select("id, details");
+
+  if (insertError) throw new Error(insertError.message);
+
+  const idByTempId = new Map(
+    (insertedMatches || []).map((match) => [
+      (match.details as { tempId?: string } | null)?.tempId,
+      match.id
+    ])
+  );
+
+  for (const match of generated) {
+    const matchId = idByTempId.get(match.tempId);
+    const nextMatchId = match.nextMatchTempId ? idByTempId.get(match.nextMatchTempId) : undefined;
+    if (!matchId || !nextMatchId || !match.nextMatchSlot) continue;
+
+    const { error: linkError } = await supabase
+      .from("matches")
+      .update({
+        next_match_id: nextMatchId,
+        next_match_slot: match.nextMatchSlot
+      })
+      .eq("id", matchId);
+    if (linkError) throw new Error(linkError.message);
+  }
+
+  revalidatePath(`/admin/tournaments/${tournamentId}/schedule`);
+  revalidatePath(`/admin/tournaments/${tournamentId}/results`);
+  revalidatePath(`/tournaments/${tournamentId}`);
+}
+
+export async function updateKnockoutMatchPairingAction(formData: FormData) {
+  await requireAdmin();
+  const tournamentId = fromFormString(formData.get("tournament_id"));
+  const matchId = fromFormString(formData.get("match_id"));
+  const participantAId = fromFormString(formData.get("participant_a_id")) || null;
+  const participantBId = fromFormString(formData.get("participant_b_id")) || null;
+  const supabase = await createSupabaseServerClient();
+
+  if (!tournamentId || !matchId) throw new Error("缺少赛事或比赛 ID。");
+
+  const { data: match, error: matchError } = await supabase
+    .from("matches")
+    .select("details")
+    .eq("id", matchId)
+    .eq("tournament_id", tournamentId)
+    .eq("stage", "knockout")
+    .maybeSingle();
+  if (matchError) throw new Error(matchError.message);
+
+  const { error } = await supabase
+    .from("matches")
+    .update({
+      participant_a_id: participantAId,
+      participant_b_id: participantBId,
+      winner_participant_id: null,
+      score_a: 0,
+      score_b: 0,
+      status: "not_started",
+      details: {
+        ...((match?.details as Record<string, unknown> | null) || {}),
+        manualPairing: true,
+        manualSlotA: Boolean(participantAId),
+        manualSlotB: Boolean(participantBId)
+      }
+    })
+    .eq("id", matchId)
+    .eq("tournament_id", tournamentId)
+    .eq("stage", "knockout");
+
+  if (error) throw new Error(error.message);
+
+  revalidatePath(`/admin/tournaments/${tournamentId}/schedule`);
+  revalidatePath(`/admin/tournaments/${tournamentId}/results`);
   revalidatePath(`/tournaments/${tournamentId}`);
 }

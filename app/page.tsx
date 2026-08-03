@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, BarChart3, BookOpen, CalendarDays, Gauge, ShieldCheck, Trophy } from "lucide-react";
+import { ArrowRight, BarChart3, BookOpen, CalendarDays, Gauge, IdCard, ShieldCheck, Trophy } from "lucide-react";
 import { SetupNotice } from "@/components/SetupNotice";
 import { TournamentCard } from "@/components/TournamentCard";
 import { Card } from "@/components/ui/Card";
@@ -75,10 +75,13 @@ export default async function HomePage() {
   }
 
   const activeTournaments = tournaments || [];
+  const needsRealName = Boolean(user && (!profile?.real_name || !profile?.id_card_number));
 
   return (
     <div className="grid gap-5">
       <Hero platformName={platformName} isAdmin={profile?.role === "admin"} />
+
+      {needsRealName ? <RealNamePrompt /> : null}
 
       <section className="grid gap-3 md:grid-cols-3">
         <MiniMetric label="用户" value={profile?.display_name || "访客"} />
@@ -127,6 +130,34 @@ export default async function HomePage() {
         </Card>
       </section>
     </div>
+  );
+}
+
+function RealNamePrompt() {
+  return (
+    <section className="relative overflow-hidden rounded-lg border border-board bg-slate-950 p-4 text-white shadow-[0_18px_45px_rgb(8_121_184/0.22)] sm:p-5">
+      <div className="absolute -right-10 -top-12 h-36 w-36 rounded-full border-[32px] border-board/30" aria-hidden />
+      <div className="relative grid gap-4 lg:grid-cols-[1fr_auto] lg:items-center">
+        <div className="flex gap-3">
+          <span className="grid h-12 w-12 shrink-0 place-items-center rounded-lg bg-board text-white">
+            <IdCard className="h-6 w-6" aria-hidden />
+          </span>
+          <div className="min-w-0">
+            <h2 className="text-lg font-black sm:text-xl">请完成实名认证</h2>
+            <p className="mt-1 text-sm font-semibold leading-6 text-white/75">
+              赛事报名、现场核验和成绩归档需要真实姓名与身份证号。完成后这条提示会自动消失。
+            </p>
+          </div>
+        </div>
+        <Link
+          className="inline-flex min-h-12 touch-manipulation items-center justify-center gap-2 rounded-lg bg-white px-5 text-sm font-black text-primary shadow-sm active:bg-field"
+          href="/profile/real-name"
+        >
+          开始实名
+          <ArrowRight className="h-4 w-4" aria-hidden />
+        </Link>
+      </div>
+    </section>
   );
 }
 
