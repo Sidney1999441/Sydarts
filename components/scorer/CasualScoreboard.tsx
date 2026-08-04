@@ -223,20 +223,21 @@ export function CasualScoreboard({
 
   if (step === "scoring") {
     return (
-      <div className="grid gap-2">
-        <section className="relative overflow-hidden rounded-lg border border-wire bg-surface/95 px-3 py-2 shadow-[0_14px_34px_rgb(17_24_39/0.06)]">
+      <div className="codl-casual-score-shell grid gap-2">
+        <section className="codl-casual-score-header relative overflow-hidden rounded-lg border border-wire bg-surface/95 px-2 py-1.5 shadow-[0_14px_34px_rgb(17_24_39/0.06)] sm:px-3 sm:py-2">
           <div className="codl-panel-art" aria-hidden />
           <div className="relative flex items-center justify-between gap-3">
             <div className="min-w-0">
-              <div className="text-xs font-black uppercase text-board">平时切磋</div>
-              <h1 className="truncate text-base font-black">
+              <div className="text-[10px] font-black uppercase text-board sm:text-xs">平时切磋</div>
+              <h1 className="hidden truncate text-base font-black sm:block">
                 {mySideName} vs {opponentSideName}
               </h1>
-              <p className="truncate text-xs text-muted">
-                {matchMode === "doubles" ? "双人" : "单人"} · {startingScore} · BO{bestOf} · {roundLimit === "unlimited" ? "不限轮" : `${roundLimit} 轮上限`} · {opponentMode === "linked" ? "双方确认后同步" : "只记录到我的普通数据"}
+              <p className="truncate text-xs font-bold text-muted">
+                {matchMode === "doubles" ? "双人" : "单人"} · {startingScore} · BO{bestOf}
+                <span className="hidden sm:inline"> · {roundLimit === "unlimited" ? "不限轮" : `${roundLimit} 轮上限`} · {opponentMode === "linked" ? "双方确认后同步" : "只记录到我的普通数据"}</span>
               </p>
             </div>
-            <Button type="button" variant="secondary" onClick={() => setStep("setup")}>
+            <Button className="min-h-9 px-3 text-xs sm:min-h-11 sm:text-sm" type="button" variant="secondary" onClick={() => setStep("setup")}>
               设置
             </Button>
           </div>

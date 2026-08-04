@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import {
   BarChart3,
   Check,
@@ -82,6 +82,23 @@ const firstThrowModeOptions: Array<{ value: FirstThrowMode; label: string; descr
 const scorerDialogBackdropClass =
   "fixed inset-0 z-[100] grid place-items-end overflow-y-auto bg-slate-950/50 p-3 pb-[calc(5.75rem+env(safe-area-inset-bottom))] sm:place-items-center sm:pb-3";
 const scorerDialogPanelClass = "max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain";
+const mobileQuickScores: QuickScoreOption[] = [
+  { value: 180, label: "180" },
+  { value: 140, label: "140" },
+  { value: 100, label: "100" },
+  { value: 85, label: "85" },
+  { value: 81, label: "81" },
+  { value: 60, label: "60" },
+  { value: 45, label: "45" },
+  { value: 41, label: "41" },
+  { value: 0, label: "Oh No", tone: "miss" }
+];
+
+type QuickScoreOption = {
+  value: number;
+  label: string;
+  tone?: "miss";
+};
 
 function getNumericRoundLimit(limit: RoundLimit) {
   return limit === "unlimited" ? null : limit;
@@ -93,6 +110,13 @@ function getRoundLimitLabel(limit: RoundLimit) {
 
 function getFirstThrowModeLabel(mode: FirstThrowMode) {
   return firstThrowModeOptions.find((option) => option.value === mode)?.label || "轮先";
+}
+
+function compactSideName(name: string) {
+  const clean = compactPlayerName(name).replace(/\s+/g, " ").trim();
+  const parts = clean.split(/\s*\/\s*/).filter(Boolean);
+  if (parts.length > 1) return `${parts[0]} +${parts.length - 1}`;
+  return clean;
 }
 
 function defaultRules(startingScore: GameScore, bestOf: BestOf, participantMode: LegParticipantMode): MatchLegRule[] {
@@ -210,6 +234,18 @@ export function TouchScoreboard({
   const [isPending, startTransition] = useTransition();
   const submissionIdRef = useRef(createResultSubmissionId());
 
+  useEffect(() => {
+    if (!lineupConfirmed) {
+      document.body.classList.remove("codl-scoreboard-active");
+      return;
+    }
+
+    document.body.classList.add("codl-scoreboard-active");
+    return () => {
+      document.body.classList.remove("codl-scoreboard-active");
+    };
+  }, [lineupConfirmed]);
+
   const names = useMemo(
     () => ({
       [participantA.id]: participantA.name,
@@ -235,7 +271,19 @@ export function TouchScoreboard({
     (participant) => participant.participantId === state.activeParticipantId
   );
   const currentRule = state.legRules[state.currentLeg - 1] || state.legRules[0];
-  const quickScores = [180, 140, 100, 85, 81, 60, 45, 41, 26, 0];
+  const quickScores: QuickScoreOption[] = [
+    { value: 180, label: "180" },
+    { value: 170, label: "170" },
+    { value: 140, label: "140" },
+    { value: 100, label: "100" },
+    { value: 85, label: "85" },
+    { value: 81, label: "81" },
+    { value: 60, label: "60" },
+    { value: 45, label: "45" },
+    { value: 41, label: "41" },
+    { value: 20, label: "20" },
+    { value: 0, label: "Oh No", tone: "miss" }
+  ];
   const numericRoundLimit = getNumericRoundLimit(roundLimit);
 
   function currentLegTurns(scoringState = state) {
@@ -581,11 +629,12 @@ export function TouchScoreboard({
       ? compactPlayerName(activeThrowerRawName)
       : null;
   const roundLimitReached = isRoundLimitReached();
+  const lastTurn = state.turns.at(-1) || null;
 
   return (
-    <div className="relative grid gap-2 rounded-lg pb-20 lg:h-[calc(100dvh-7rem)] lg:min-h-[560px] lg:overflow-hidden lg:pb-0">
-      <div className="grid min-h-0 gap-2 lg:h-full lg:grid-cols-[0.86fr_1.14fr]">
-        <section className="grid min-h-0 grid-cols-2 grid-rows-[auto_auto] gap-1.5 lg:grid-cols-1 lg:grid-rows-[1fr_1fr_auto] lg:gap-2">
+    <div className="codl-touch-scoreboard relative grid gap-1.5 rounded-lg pb-20 lg:h-[calc(100dvh-7rem)] lg:min-h-[560px] lg:gap-2 lg:overflow-hidden lg:pb-0">
+      <div className="codl-scoreboard-grid grid min-h-0 gap-2 lg:h-full lg:grid-cols-[0.86fr_1.14fr]">
+        <section className="codl-score-players grid min-h-0 grid-cols-2 grid-rows-[auto_auto] gap-1 lg:grid-cols-1 lg:grid-rows-[1fr_1fr_auto] lg:gap-2">
           {state.participants.map((participant) => {
             const stats = calculateDartStats(participant.turns);
             const isActive = state.activeParticipantId === participant.participantId;
@@ -602,7 +651,7 @@ export function TouchScoreboard({
               />
             );
           })}
-          <div className="col-span-2 grid grid-cols-3 gap-1.5 lg:col-span-1 lg:gap-2">
+          <div className="codl-score-actions col-span-2 grid grid-cols-3 gap-1 lg:col-span-1 lg:gap-2">
             <SmallAction onClick={undoLast} disabled={history.length === 0}>
               <Undo2 className="h-4 w-4" aria-hidden />
               撤销
@@ -618,18 +667,19 @@ export function TouchScoreboard({
           </div>
         </section>
 
-        <section className="grid min-h-0 gap-2 rounded-lg border border-wire bg-surface p-2 shadow-soft sm:p-3">
-          <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
+        <section className="codl-score-input grid min-h-0 gap-1.5 rounded-lg border border-wire bg-surface p-1.5 shadow-soft sm:gap-2 sm:p-3">
+          <div className="hidden grid-cols-[minmax(0,1fr)_auto] items-start gap-2 sm:grid">
             <div className="min-w-0">
-              <div className="text-xs font-bold text-muted">本轮输入</div>
-              <div className="text-4xl font-black leading-none text-ink">{scoreInput || "0"}</div>
-              <div className="mt-1 truncate text-xs font-semibold text-board">{getLegRuleLabel(currentRule)}</div>
+              <div className="text-[11px] font-bold text-muted sm:text-xs">本轮输入</div>
+              <div className="text-5xl font-black leading-none text-ink sm:text-4xl">{scoreInput || "0"}</div>
+              <div className="mt-1 truncate text-[11px] font-semibold text-board sm:text-xs">{getLegRuleLabel(currentRule)}</div>
             </div>
-            <div className="grid max-w-[48vw] justify-items-end gap-1.5 text-right text-xs text-muted sm:max-w-none sm:text-sm">
+            <div className="grid max-w-[48vw] justify-items-end gap-1 text-right text-xs text-muted sm:max-w-none sm:gap-1.5 sm:text-sm">
               <div className="flex max-w-full items-center justify-end gap-2">
                 <PlayerAvatar name={activeParticipantName} avatarUrl={activeParticipantAvatarUrl} size="xs" />
                 <div className="min-w-0">
-                  <div className="max-w-full truncate font-bold text-ink">{activeParticipantName}</div>
+                  <div className="max-w-full truncate font-bold text-ink sm:hidden">{compactSideName(activeParticipantName)}</div>
+                  <div className="hidden max-w-full truncate font-bold text-ink sm:block">{activeParticipantName}</div>
                   {activeThrowerName ? (
                     <div className="flex max-w-full items-center justify-end gap-1 truncate">
                       <PlayerAvatar name={activeThrowerName} avatarUrl={activeThrowerAvatarUrl} size="xs" />
@@ -638,11 +688,11 @@ export function TouchScoreboard({
                   ) : null}
                 </div>
               </div>
-              <div>剩余 {activeParticipant?.remaining ?? 0}</div>
-              <div className="max-w-full truncate">{getFirstThrowModeLabel(firstThrowMode)} · {currentRoundLabel()} · {getRoundLimitLabel(roundLimit)}</div>
+              <div className="hidden sm:block">剩余 {activeParticipant?.remaining ?? 0}</div>
+              <div className="max-w-full truncate text-[11px] sm:text-sm">{getFirstThrowModeLabel(firstThrowMode)} · {currentRoundLabel()}</div>
               <button
                 type="button"
-                className="inline-flex min-h-10 touch-manipulation select-none items-center justify-center gap-1.5 rounded-lg bg-board px-3 text-xs font-bold text-white transition-colors duration-75 active:bg-board/90 disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-11 sm:gap-2 sm:px-4 sm:text-sm"
+                className="hidden min-h-10 touch-manipulation select-none items-center justify-center gap-1.5 rounded-lg bg-board px-3 text-xs font-bold text-white transition-colors duration-75 active:bg-board/90 disabled:cursor-not-allowed disabled:opacity-50 sm:inline-flex sm:min-h-11 sm:gap-2 sm:px-4 sm:text-sm"
                 onClick={confirmInput}
                 disabled={scoreInput.length === 0 || roundLimitReached}
               >
@@ -660,20 +710,24 @@ export function TouchScoreboard({
             />
           ) : null}
 
-          <div className="grid grid-cols-5 gap-1">
+          <div className="hidden grid-cols-6 gap-1 sm:grid">
             {quickScores.map((quickScore) => (
               <button
-                key={quickScore}
+                key={quickScore.label}
                 type="button"
-                className="min-h-9 touch-manipulation select-none rounded-lg border border-wire bg-field px-2 text-sm font-black text-ink transition-colors duration-75 active:bg-board/10"
-                onClick={() => requestScore(quickScore)}
+                className={`min-h-9 touch-manipulation select-none rounded-lg border px-2 text-sm font-black transition-colors duration-75 ${
+                  quickScore.tone === "miss"
+                    ? "border-red-200 bg-red-50 text-red-700 active:bg-red-100"
+                    : "border-wire bg-field text-ink active:bg-board/10"
+                }`}
+                onClick={() => requestScore(quickScore.value)}
               >
-                {quickScore}
+                {quickScore.label}
               </button>
             ))}
           </div>
 
-          <div className="grid min-h-0 grid-cols-3 gap-1.5 sm:gap-2">
+          <div className="hidden min-h-0 grid-cols-3 gap-1.5 sm:grid sm:gap-2">
             {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((digit) => (
               <KeyButton key={digit} onClick={() => appendDigit(digit)}>
                 {digit}
@@ -689,6 +743,52 @@ export function TouchScoreboard({
               C
             </KeyButton>
           </div>
+
+          <div className="codl-mobile-keypad grid grid-cols-[4.7rem_minmax(0,1fr)] gap-1.5 sm:hidden">
+            <div className="codl-mobile-quick-grid grid content-stretch gap-1">
+              {mobileQuickScores.map((quickScore) => (
+                <QuickScoreButton
+                  key={quickScore.label}
+                  tone={quickScore.tone}
+                  onClick={() => requestScore(quickScore.value)}
+                >
+                  {quickScore.label}
+                </QuickScoreButton>
+              ))}
+            </div>
+            <div className="codl-number-pad grid grid-cols-3 gap-1.5">
+              {["7", "8", "9", "4", "5", "6", "1", "2", "3"].map((digit) => (
+                <KeyButton key={digit} onClick={() => appendDigit(digit)}>
+                  {digit}
+                </KeyButton>
+              ))}
+              <KeyButton onClick={() => appendDigit("0")}>
+                0
+              </KeyButton>
+              <KeyButton onClick={() => setScoreInput((current) => current.slice(0, -1))} disabled={scoreInput.length === 0}>
+                ←
+              </KeyButton>
+              <KeyButton onClick={() => setScoreInput("")} disabled={scoreInput.length === 0}>
+                C
+              </KeyButton>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            className="codl-enter-score-button grid min-h-16 touch-manipulation select-none place-items-center rounded-lg bg-amber-400 px-3 text-center text-lg font-black text-slate-950 shadow-sm transition-colors duration-75 active:bg-amber-300 disabled:cursor-not-allowed disabled:opacity-45 sm:hidden"
+            onClick={confirmInput}
+            disabled={scoreInput.length === 0 || roundLimitReached}
+          >
+            <span className="text-2xl leading-none">{scoreInput || "0"}</span>
+            <span className="text-xs uppercase tracking-normal">ENTER SCORE</span>
+          </button>
+
+          <LastTurnPanel
+            turn={lastTurn}
+            currentLeg={state.currentLeg}
+            turnDisplayName={turnDisplayName}
+          />
 
           {message ? <p className="text-xs font-semibold text-accent">{message}</p> : null}
         </section>
@@ -955,14 +1055,14 @@ function ThrowerPicker({
   onChange: (userId: string) => void;
 }) {
   return (
-    <div className="grid gap-1.5 rounded-lg bg-field p-2">
+    <div className="codl-thrower-picker grid gap-1.5 rounded-lg bg-field p-2">
       <div className="text-xs font-bold text-muted">本轮出镖人</div>
-      <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+      <div className="codl-thrower-picker-options grid grid-cols-2 gap-1.5 sm:grid-cols-3">
         {options.map((option) => (
           <button
             key={option.userId}
             type="button"
-            className={`min-h-10 touch-manipulation select-none rounded-lg border px-2 py-1 text-left text-xs font-bold transition-colors duration-75 ${
+            className={`codl-thrower-picker-button min-h-10 touch-manipulation select-none rounded-lg border px-2 py-1 text-left text-xs font-bold transition-colors duration-75 ${
               value === option.userId
                 ? "border-board bg-board text-white"
                 : "border-wire bg-surface text-ink active:bg-field"
@@ -1002,25 +1102,36 @@ function PlayerPanel({
 }) {
   return (
     <div
-      className={`grid min-h-0 gap-1.5 rounded-lg border bg-surface p-2 shadow-soft sm:gap-2 sm:p-3 ${
-        isActive ? "border-board ring-2 ring-board/15" : "border-wire"
+      className={`codl-player-panel grid min-h-0 overflow-hidden rounded-lg border p-2 shadow-soft sm:gap-2 sm:bg-surface sm:p-3 ${
+        isActive
+          ? "border-board bg-board text-white ring-2 ring-board/15 sm:text-ink"
+          : "border-slate-700 bg-slate-800 text-white sm:border-wire sm:text-ink"
       }`}
     >
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex min-w-0 items-start gap-2">
-          <PlayerAvatar name={name} avatarUrl={avatarUrl} size="sm" />
+      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
+        <div className="flex min-w-0 items-start gap-1.5 sm:gap-2">
+          <PlayerAvatar name={name} avatarUrl={avatarUrl} size="xs" className="sm:h-9 sm:w-9" />
           <div className="min-w-0">
-            <div className="text-xs font-bold text-muted">{isActive ? "当前出镖" : "等待"}</div>
-            <h2 className="mt-0.5 truncate text-sm font-black leading-tight sm:text-lg">{name}</h2>
+            <div className={`text-[10px] font-black uppercase sm:text-xs ${isActive ? "text-white/70 sm:text-muted" : "text-white/55 sm:text-muted"}`}>
+              {isActive ? "出镖" : "等待"} · L{legsWon}
+            </div>
+            <h2 className="mt-0.5 min-w-0 truncate text-xs font-black leading-tight sm:text-lg">
+              <span className="sm:hidden">{compactSideName(name)}</span>
+              <span className="hidden sm:inline">{name}</span>
+            </h2>
             <div className="mt-0.5 hidden truncate text-xs text-muted sm:block">{getLegRuleLabel(rule)}</div>
           </div>
         </div>
         <div className="shrink-0 text-right">
-          <div className="text-3xl font-black leading-none text-board sm:text-5xl">{remaining}</div>
-          <div className="mt-0.5 text-[11px] font-semibold text-muted sm:text-xs">L {legsWon}</div>
+          <div className={`text-4xl font-black leading-none sm:text-5xl ${isActive ? "text-white sm:text-board" : "text-white/90 sm:text-board"}`}>
+            {remaining}
+          </div>
         </div>
       </div>
-      <dl className="grid grid-cols-4 gap-1 text-[11px]">
+      <div className={`codl-player-ppr -mx-2 -mb-2 mt-1 px-2 py-1 text-center text-[11px] font-black sm:hidden ${isActive ? "bg-slate-950/25 text-white" : "bg-slate-950/35 text-white/85"}`}>
+        PPR {stats.averagePer3Darts}
+      </div>
+      <dl className="hidden grid-cols-4 gap-1 text-[11px] sm:grid">
         <CompactStat label="均分" value={stats.averagePer3Darts} marker={<Gauge className="h-3.5 w-3.5" aria-hidden />} />
         <CompactStat label="最高轮" value={stats.highestTurnScore} marker={<Target className="h-3.5 w-3.5" aria-hidden />} />
         <CompactStat label="100+" value={stats.count100Plus} marker={<StatTextMark>100+</StatTextMark>} />
@@ -1323,6 +1434,75 @@ function SmallAction({
   );
 }
 
+function LastTurnPanel({
+  turn,
+  currentLeg,
+  turnDisplayName
+}: {
+  turn: ScoreTurn | null;
+  currentLeg: number;
+  turnDisplayName: (turn: ScoreTurn) => string;
+}) {
+  if (!turn) {
+    return (
+      <section className="codl-last-turn-panel grid min-h-20 content-center gap-1 rounded-lg border border-dashed border-sky-200 bg-sky-50/70 px-3 py-2 text-sm sm:hidden">
+        <div className="text-xs font-black text-board">上一轮记录</div>
+        <div className="font-black text-ink">暂无记录</div>
+        <div className="codl-last-turn-detail text-xs font-semibold text-muted">第 {currentLeg} 局等待出镖</div>
+      </section>
+    );
+  }
+
+  const statusLabel = turn.isCheckout ? "结镖" : turn.isBust ? "爆镖" : "剩余";
+  const statusClass = turn.isCheckout
+    ? "text-emerald-700"
+    : turn.isBust
+      ? "text-red-700"
+      : "text-board";
+
+  return (
+    <section className="codl-last-turn-panel grid min-h-20 gap-1 rounded-lg border border-sky-100 bg-sky-50/80 px-3 py-2 text-sm shadow-sm sm:hidden">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-xs font-black text-board">上一轮记录</div>
+          <div className="truncate font-black text-ink">{compactSideName(turnDisplayName(turn))}</div>
+        </div>
+        <div className={`shrink-0 text-3xl font-black leading-none ${statusClass}`}>{turn.score}</div>
+      </div>
+      <div className="codl-last-turn-detail flex items-center justify-between gap-2 text-xs font-bold text-muted">
+        <span>第 {turn.legNumber} 局 · {turn.darts || 3} 镖</span>
+        <span className={statusClass}>
+          {statusLabel} {turn.remainingBefore} → {turn.remainingAfter}
+        </span>
+      </div>
+    </section>
+  );
+}
+
+function QuickScoreButton({
+  children,
+  tone,
+  onClick
+}: {
+  children: ReactNode;
+  tone?: "miss";
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={`codl-quick-score min-h-10 touch-manipulation select-none rounded-lg border px-1 font-black shadow-sm transition-colors duration-75 ${
+        tone === "miss"
+          ? "border-red-300 bg-red-600 text-sm leading-none text-white active:bg-red-500"
+          : "border-amber-200 bg-amber-100 text-lg text-slate-800 active:bg-amber-200"
+      }`}
+      onClick={onClick}
+    >
+      {children}
+    </button>
+  );
+}
+
 function KeyButton({
   children,
   disabled,
@@ -1335,7 +1515,7 @@ function KeyButton({
   return (
     <button
       type="button"
-      className="min-h-11 touch-manipulation select-none rounded-lg border border-wire bg-surface text-xl font-black text-ink shadow-sm transition-colors duration-75 active:bg-field disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-10"
+      className="codl-score-key min-h-16 touch-manipulation select-none rounded-lg border border-wire bg-surface text-3xl font-black text-ink shadow-sm transition-colors duration-75 active:bg-field disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-10 sm:text-xl"
       disabled={disabled}
       onClick={onClick}
     >
