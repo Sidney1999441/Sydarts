@@ -1115,7 +1115,7 @@ function PlayerPanel({
             <div className={`text-[10px] font-black uppercase sm:text-xs ${isActive ? "text-white/70 sm:text-muted" : "text-white/55 sm:text-muted"}`}>
               {isActive ? "出镖" : "等待"} · L{legsWon}
             </div>
-            <h2 className="mt-0.5 min-w-0 truncate text-xs font-black leading-tight sm:text-lg">
+            <h2 className="codl-player-name mt-0.5 min-w-0 truncate text-xs font-black leading-tight sm:text-lg">
               <span className="sm:hidden">{compactSideName(name)}</span>
               <span className="hidden sm:inline">{name}</span>
             </h2>
@@ -1123,7 +1123,7 @@ function PlayerPanel({
           </div>
         </div>
         <div className="shrink-0 text-right">
-          <div className={`text-4xl font-black leading-none sm:text-5xl ${isActive ? "text-white sm:text-board" : "text-white/90 sm:text-board"}`}>
+          <div className={`codl-player-score text-4xl font-black leading-none sm:text-5xl ${isActive ? "text-white sm:text-board" : "text-white/90 sm:text-board"}`}>
             {remaining}
           </div>
         </div>
