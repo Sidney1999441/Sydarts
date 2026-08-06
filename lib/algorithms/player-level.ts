@@ -75,6 +75,9 @@ const rankBands: Array<{ name: MajorRank; minLevel: number }> = [
   { name: "归一", minLevel: 95 }
 ];
 
+const steelAverageFloor = 25;
+const steelAverageCeiling = 110;
+
 export function ratingToSkillLevel(rating?: number | null): CoarseSkillLevel {
   const value = numberOrZero(rating);
   if (value >= 1700) return "Pro";
@@ -143,7 +146,7 @@ export function calculatePlayerLevel(input: {
 
   const winRate = matchesPlayed > 0 ? wins / matchesPlayed : 0;
   const legsWinRate = legsPlayed > 0 ? legsWon / legsPlayed : winRate;
-  const averageScore = normalize(averagePer3Darts, 25, 82);
+  const averageScore = normalize(averagePer3Darts, steelAverageFloor, steelAverageCeiling);
   const resultScore = normalize(winRate, 0.25, 0.82);
   const legsScore = normalize(legsWinRate, 0.25, 0.82);
   const ratingScore = normalize(rating, 950, 1850);

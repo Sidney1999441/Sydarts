@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import {
+  ArrowLeftRight,
   BarChart3,
   Check,
   Clock3,
@@ -79,6 +80,11 @@ const firstThrowModeOptions: Array<{ value: FirstThrowMode; label: string; descr
   { value: "loser", label: "负先", description: "上一局负方下一局先手" }
 ];
 
+const firstThrowRuntimeModeOptions: Array<{ value: FirstThrowMode; label: string; description: string }> = [
+  ...firstThrowModeOptions,
+  { value: "fixed", label: "固定先", description: "所选基准方每局先手" }
+];
+
 const scorerDialogBackdropClass =
   "fixed inset-0 z-[100] grid place-items-end overflow-y-auto bg-slate-950/50 p-3 pb-[calc(5.75rem+env(safe-area-inset-bottom))] sm:place-items-center sm:pb-3";
 const scorerDialogPanelClass = "max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain";
@@ -109,6 +115,7 @@ function getRoundLimitLabel(limit: RoundLimit) {
 }
 
 function getFirstThrowModeLabel(mode: FirstThrowMode) {
+  if (mode === "fixed") return "固定先";
   return firstThrowModeOptions.find((option) => option.value === mode)?.label || "轮先";
 }
 
@@ -165,6 +172,8 @@ export function TouchScoreboard({
   matchFinishMode = "majority",
   initialRoundLimit = "unlimited",
   initialFirstThrowMode = null,
+  suggestedFirstParticipantId = null,
+  firstThrowHandicapNotice = null,
   saveLabel,
   successMessage,
   onComplete
@@ -178,6 +187,8 @@ export function TouchScoreboard({
   matchFinishMode?: MatchFinishMode;
   initialRoundLimit?: RoundLimit;
   initialFirstThrowMode?: FirstThrowMode | null;
+  suggestedFirstParticipantId?: string | null;
+  firstThrowHandicapNotice?: string | null;
   saveLabel: string;
   successMessage: string;
   onComplete: (payload: ScoringCompletePayload) => Promise<void>;
@@ -193,7 +204,10 @@ export function TouchScoreboard({
       ((participantA.members?.length || 0) > 1 || (participantB.members?.length || 0) > 1)
   );
   const configuredFirstThrowMode =
-    initialFirstThrowMode === "alternate" || initialFirstThrowMode === "winner" || initialFirstThrowMode === "loser"
+    initialFirstThrowMode === "alternate" ||
+    initialFirstThrowMode === "winner" ||
+    initialFirstThrowMode === "loser" ||
+    initialFirstThrowMode === "fixed"
       ? initialFirstThrowMode
       : null;
   const defaultFirstThrowMode = configuredFirstThrowMode || "alternate";
@@ -229,6 +243,7 @@ export function TouchScoreboard({
   const [scoreInput, setScoreInput] = useState("");
   const [checkoutScore, setCheckoutScore] = useState<number | null>(null);
   const [showDetails, setShowDetails] = useState(false);
+  const [showFirstThrowAdjuster, setShowFirstThrowAdjuster] = useState(false);
   const [message, setMessage] = useState("");
   const [isSaved, setIsSaved] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -407,14 +422,38 @@ export function TouchScoreboard({
     submissionIdRef.current = createResultSubmissionId();
   }
 
-  function chooseFirstParticipant(participantId: string) {
-    setState(createFreshState(lineups, participantId, firstThrowMode));
+  function chooseFirstParticipant(participantId: string, nextFirstThrowMode: FirstThrowMode = firstThrowMode) {
+    setFirstThrowMode(nextFirstThrowMode);
+    setState(createFreshState(lineups, participantId, nextFirstThrowMode));
     setFirstParticipantId(participantId);
     setActiveThrowerByParticipant(defaultThrowers(lineups, participantA, participantB));
     setHistory([]);
     setScoreInput("");
     setCheckoutScore(null);
     setMessage("");
+    setIsSaved(false);
+    submissionIdRef.current = createResultSubmissionId();
+  }
+
+  function adjustFirstThrow(input: {
+    activeParticipantId: string;
+    firstParticipantId: string;
+    firstThrowMode: FirstThrowMode;
+  }) {
+    if (state.winnerParticipantId) return;
+    setHistory((current) => [...current, { state, throwers: activeThrowerByParticipant }]);
+    setFirstParticipantId(input.firstParticipantId);
+    setFirstThrowMode(input.firstThrowMode);
+    setState((current) => ({
+      ...current,
+      activeParticipantId: input.activeParticipantId,
+      firstParticipantId: input.firstParticipantId,
+      firstThrowMode: input.firstThrowMode
+    }));
+    setScoreInput("");
+    setCheckoutScore(null);
+    setShowFirstThrowAdjuster(false);
+    setMessage("已调整先后手。");
     setIsSaved(false);
     submissionIdRef.current = createResultSubmissionId();
   }
@@ -497,7 +536,8 @@ export function TouchScoreboard({
   }
 
   function resetMatch() {
-    setState(createFreshState(lineups, null, firstThrowMode));
+    setFirstThrowMode(defaultFirstThrowMode);
+    setState(createFreshState(lineups, null, defaultFirstThrowMode));
     setFirstParticipantId(null);
     setActiveThrowerByParticipant(defaultThrowers(lineups, participantA, participantB));
     setHistory([]);
@@ -582,12 +622,20 @@ export function TouchScoreboard({
         participantAAvatarUrl={displayAvatarUrl(participantA.id, 1)}
         participantBAvatarUrl={displayAvatarUrl(participantB.id, 1)}
         firstThrowMode={firstThrowMode}
-        firstThrowModeLocked={Boolean(configuredFirstThrowMode)}
+        systemDefaultFirstThrowMode={configuredFirstThrowMode}
+        firstThrowHandicapNotice={firstThrowHandicapNotice}
         message={message}
         onFirstThrowModeChange={setFirstThrowMode}
         onChooseStarter={chooseFirstParticipant}
+        onApplySuggestedFirstLeg={() => {
+          if (suggestedFirstParticipantId) chooseFirstParticipant(suggestedFirstParticipantId, firstThrowMode);
+        }}
+        onApplySuggestedAllLegs={() => {
+          if (suggestedFirstParticipantId) chooseFirstParticipant(suggestedFirstParticipantId, "fixed");
+        }}
         participantAId={participantA.id}
         participantBId={participantB.id}
+        suggestedFirstParticipantId={suggestedFirstParticipantId}
       />
     );
   }
@@ -651,7 +699,7 @@ export function TouchScoreboard({
               />
             );
           })}
-          <div className="codl-score-actions col-span-2 grid grid-cols-3 gap-1 lg:col-span-1 lg:gap-2">
+          <div className="codl-score-actions col-span-2 grid grid-cols-4 gap-1 lg:col-span-1 lg:gap-2">
             <SmallAction onClick={undoLast} disabled={history.length === 0}>
               <Undo2 className="h-4 w-4" aria-hidden />
               撤销
@@ -659,6 +707,10 @@ export function TouchScoreboard({
             <SmallAction onClick={() => setShowDetails((value) => !value)}>
               {showDetails ? <EyeOff className="h-4 w-4" aria-hidden /> : <Eye className="h-4 w-4" aria-hidden />}
               详情
+            </SmallAction>
+            <SmallAction onClick={() => setShowFirstThrowAdjuster(true)}>
+              <ArrowLeftRight className="h-4 w-4" aria-hidden />
+              先手
             </SmallAction>
             <SmallAction onClick={resetMatch}>
               <RotateCcw className="h-4 w-4" aria-hidden />
@@ -805,6 +857,22 @@ export function TouchScoreboard({
         />
       ) : null}
 
+      {showFirstThrowAdjuster ? (
+        <FirstThrowAdjuster
+          participantAId={participantA.id}
+          participantBId={participantB.id}
+          participantAName={displayName(participantA.id)}
+          participantBName={displayName(participantB.id)}
+          participantAAvatarUrl={displayAvatarUrl(participantA.id)}
+          participantBAvatarUrl={displayAvatarUrl(participantB.id)}
+          activeParticipantId={state.activeParticipantId}
+          firstParticipantId={state.firstParticipantId}
+          firstThrowMode={state.firstThrowMode}
+          onApply={adjustFirstThrow}
+          onClose={() => setShowFirstThrowAdjuster(false)}
+        />
+      ) : null}
+
       {checkoutScore !== null ? (
         <div className={scorerDialogBackdropClass}>
           <div className={`${scorerDialogPanelClass} w-full max-w-sm rounded-lg bg-surface p-5 shadow-soft`}>
@@ -859,10 +927,14 @@ function OpeningSetupModal({
   participantAAvatarUrl,
   participantBAvatarUrl,
   firstThrowMode,
-  firstThrowModeLocked,
+  systemDefaultFirstThrowMode,
+  firstThrowHandicapNotice,
   message,
   onFirstThrowModeChange,
-  onChooseStarter
+  onChooseStarter,
+  onApplySuggestedFirstLeg,
+  onApplySuggestedAllLegs,
+  suggestedFirstParticipantId
 }: {
   participantAId: string;
   participantBId: string;
@@ -871,10 +943,14 @@ function OpeningSetupModal({
   participantAAvatarUrl?: string | null;
   participantBAvatarUrl?: string | null;
   firstThrowMode: FirstThrowMode;
-  firstThrowModeLocked: boolean;
+  systemDefaultFirstThrowMode?: FirstThrowMode | null;
+  firstThrowHandicapNotice?: string | null;
   message: string;
   onFirstThrowModeChange: (mode: FirstThrowMode) => void;
   onChooseStarter: (participantId: string) => void;
+  onApplySuggestedFirstLeg: () => void;
+  onApplySuggestedAllLegs: () => void;
+  suggestedFirstParticipantId?: string | null;
 }) {
   return (
     <div className={scorerDialogBackdropClass}>
@@ -890,13 +966,35 @@ function OpeningSetupModal({
           </div>
         </div>
 
+        {firstThrowHandicapNotice ? (
+          <div className="mt-4 grid gap-2 rounded-lg border border-board/25 bg-board/10 p-3 text-sm font-bold text-board">
+            <div>{firstThrowHandicapNotice}</div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <button
+                type="button"
+                className="min-h-11 touch-manipulation select-none rounded-lg bg-board px-3 text-white transition-colors duration-75 active:bg-board/90"
+                onClick={onApplySuggestedFirstLeg}
+              >
+                一键弱方先手
+              </button>
+              <button
+                type="button"
+                className="min-h-11 touch-manipulation select-none rounded-lg border border-board/30 bg-surface px-3 text-board transition-colors duration-75 active:bg-field"
+                onClick={onApplySuggestedAllLegs}
+              >
+                每局弱方先手
+              </button>
+            </div>
+          </div>
+        ) : null}
+
         <div className="mt-4 rounded-lg bg-field p-3">
           <div className="text-sm font-bold text-ink">先手交替模式</div>
-          {firstThrowModeLocked ? (
+          {systemDefaultFirstThrowMode ? (
             <div className="mt-2 rounded-lg border border-board/25 bg-surface px-3 py-2 text-sm font-bold text-board">
-              赛事已设置：{firstThrowModeOptions.find((option) => option.value === firstThrowMode)?.label || "轮先"}
+              赛事默认：{getFirstThrowModeLabel(systemDefaultFirstThrowMode)}
             </div>
-          ) : (
+          ) : null}
             <div className="mt-3 grid gap-2 sm:grid-cols-3">
               {firstThrowModeOptions.map((option) => (
                 <button
@@ -914,12 +1012,21 @@ function OpeningSetupModal({
                 </button>
               ))}
             </div>
-          )}
         </div>
 
         <div className="mt-4 grid gap-2 sm:grid-cols-2">
-          <StarterButton name={participantAName} avatarUrl={participantAAvatarUrl} onClick={() => onChooseStarter(participantAId)} />
-          <StarterButton name={participantBName} avatarUrl={participantBAvatarUrl} onClick={() => onChooseStarter(participantBId)} />
+          <StarterButton
+            name={participantAName}
+            avatarUrl={participantAAvatarUrl}
+            recommended={suggestedFirstParticipantId === participantAId}
+            onClick={() => onChooseStarter(participantAId)}
+          />
+          <StarterButton
+            name={participantBName}
+            avatarUrl={participantBAvatarUrl}
+            recommended={suggestedFirstParticipantId === participantBId}
+            onClick={() => onChooseStarter(participantBId)}
+          />
         </div>
 
         {message ? <p className="mt-3 text-sm font-semibold text-accent">{message}</p> : null}
@@ -928,14 +1035,191 @@ function OpeningSetupModal({
   );
 }
 
-function StarterButton({ name, avatarUrl, onClick }: { name: string; avatarUrl?: string | null; onClick: () => void }) {
+function FirstThrowAdjuster({
+  participantAId,
+  participantBId,
+  participantAName,
+  participantBName,
+  participantAAvatarUrl,
+  participantBAvatarUrl,
+  activeParticipantId,
+  firstParticipantId,
+  firstThrowMode,
+  onApply,
+  onClose
+}: {
+  participantAId: string;
+  participantBId: string;
+  participantAName: string;
+  participantBName: string;
+  participantAAvatarUrl?: string | null;
+  participantBAvatarUrl?: string | null;
+  activeParticipantId: string;
+  firstParticipantId: string;
+  firstThrowMode: FirstThrowMode;
+  onApply: (input: {
+    activeParticipantId: string;
+    firstParticipantId: string;
+    firstThrowMode: FirstThrowMode;
+  }) => void;
+  onClose: () => void;
+}) {
+  const [nextActiveParticipantId, setNextActiveParticipantId] = useState(activeParticipantId);
+  const [nextFirstParticipantId, setNextFirstParticipantId] = useState(firstParticipantId);
+  const [nextFirstThrowMode, setNextFirstThrowMode] = useState<FirstThrowMode>(firstThrowMode);
+
+  return (
+    <div className={scorerDialogBackdropClass}>
+      <div className={`${scorerDialogPanelClass} w-full max-w-lg rounded-lg border border-wire bg-surface p-4 shadow-soft sm:p-5`}>
+        <div className="flex items-start gap-3">
+          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-board text-white">
+            <ArrowLeftRight className="h-5 w-5" aria-hidden />
+          </div>
+          <div>
+            <div className="text-xs font-black uppercase text-board">先后手调整</div>
+            <h2 className="mt-1 text-xl font-black">调整出镖顺序</h2>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-3">
+          <div className="rounded-lg bg-field p-3">
+            <div className="text-sm font-bold text-ink">当前出镖方</div>
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              <SideChoiceButton
+                label="当前出镖"
+                name={participantAName}
+                avatarUrl={participantAAvatarUrl}
+                active={nextActiveParticipantId === participantAId}
+                onClick={() => setNextActiveParticipantId(participantAId)}
+              />
+              <SideChoiceButton
+                label="当前出镖"
+                name={participantBName}
+                avatarUrl={participantBAvatarUrl}
+                active={nextActiveParticipantId === participantBId}
+                onClick={() => setNextActiveParticipantId(participantBId)}
+              />
+            </div>
+          </div>
+
+          <div className="rounded-lg bg-field p-3">
+            <div className="text-sm font-bold text-ink">基准先手方</div>
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              <SideChoiceButton
+                label="基准先手"
+                name={participantAName}
+                avatarUrl={participantAAvatarUrl}
+                active={nextFirstParticipantId === participantAId}
+                onClick={() => setNextFirstParticipantId(participantAId)}
+              />
+              <SideChoiceButton
+                label="基准先手"
+                name={participantBName}
+                avatarUrl={participantBAvatarUrl}
+                active={nextFirstParticipantId === participantBId}
+                onClick={() => setNextFirstParticipantId(participantBId)}
+              />
+            </div>
+          </div>
+
+          <div className="rounded-lg bg-field p-3">
+            <div className="text-sm font-bold text-ink">后续先手模式</div>
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              {firstThrowRuntimeModeOptions.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={`min-h-14 touch-manipulation select-none rounded-lg border px-3 text-left transition-colors duration-75 ${
+                    nextFirstThrowMode === option.value
+                      ? "border-board bg-board text-white"
+                      : "border-wire bg-surface text-ink active:bg-field"
+                  }`}
+                  onClick={() => setNextFirstThrowMode(option.value)}
+                >
+                  <span className="block text-base font-black">{option.label}</span>
+                  <span className="mt-1 block text-xs font-semibold opacity-80">{option.description}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            className="min-h-12 touch-manipulation select-none rounded-lg border border-wire bg-surface px-4 text-sm font-bold transition-colors duration-75 active:bg-field"
+            onClick={onClose}
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            className="min-h-12 touch-manipulation select-none rounded-lg bg-board px-4 text-sm font-bold text-white transition-colors duration-75 active:bg-board/90"
+            onClick={() =>
+              onApply({
+                activeParticipantId: nextActiveParticipantId,
+                firstParticipantId: nextFirstParticipantId,
+                firstThrowMode: nextFirstThrowMode
+              })
+            }
+          >
+            应用
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SideChoiceButton({
+  label,
+  name,
+  avatarUrl,
+  active,
+  onClick
+}: {
+  label: string;
+  name: string;
+  avatarUrl?: string | null;
+  active: boolean;
+  onClick: () => void;
+}) {
   return (
     <button
       type="button"
-      className="min-h-16 touch-manipulation select-none rounded-lg border border-wire bg-surface px-4 text-left transition-colors duration-75 active:border-board active:bg-board/10"
+      className={`min-h-16 touch-manipulation select-none rounded-lg border px-4 text-left transition-colors duration-75 ${
+        active ? "border-board bg-board text-white" : "border-wire bg-surface text-ink active:bg-field"
+      }`}
       onClick={onClick}
     >
-      <span className="block text-xs font-bold text-muted">先手</span>
+      <span className={`block text-xs font-bold ${active ? "text-white/80" : "text-muted"}`}>{label}</span>
+      <PlayerIdentity className={`mt-2 ${active ? "[&_*]:text-white" : ""}`} name={name} avatarUrl={avatarUrl} size="sm" compact />
+    </button>
+  );
+}
+
+function StarterButton({
+  name,
+  avatarUrl,
+  recommended = false,
+  onClick
+}: {
+  name: string;
+  avatarUrl?: string | null;
+  recommended?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={`min-h-16 touch-manipulation select-none rounded-lg border px-4 text-left transition-colors duration-75 active:border-board active:bg-board/10 ${
+        recommended ? "border-board bg-board/10 shadow-[0_0_0_1px_rgb(14_127_190/0.18)]" : "border-wire bg-surface"
+      }`}
+      onClick={onClick}
+    >
+      <span className={`block text-xs font-bold ${recommended ? "text-board" : "text-muted"}`}>
+        {recommended ? "补偿推荐先手" : "先手"}
+      </span>
       <PlayerIdentity className="mt-2" name={name} avatarUrl={avatarUrl} size="sm" compact />
     </button>
   );

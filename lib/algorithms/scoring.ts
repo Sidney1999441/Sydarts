@@ -98,6 +98,9 @@ function otherParticipantId(state: ScoringState, participantId: string) {
 }
 
 function getStarterForLeg(state: ScoringState, legNumber: number, previousWinnerParticipantId?: string | null) {
+  if (state.firstThrowMode === "fixed") {
+    return state.firstParticipantId;
+  }
   if (state.firstThrowMode === "winner" && previousWinnerParticipantId) {
     return previousWinnerParticipantId;
   }
@@ -143,7 +146,7 @@ export function createScoringState(input: {
   const firstParticipantId =
     input.firstParticipantId === input.participantBId ? input.participantBId : input.participantAId;
   const firstThrowMode =
-    input.firstThrowMode === "winner" || input.firstThrowMode === "loser"
+    input.firstThrowMode === "winner" || input.firstThrowMode === "loser" || input.firstThrowMode === "fixed"
       ? input.firstThrowMode
       : "alternate";
 

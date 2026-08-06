@@ -10,7 +10,7 @@ export type TournamentFormat =
 export type DartMode = "steel" | "soft" | "mixed_alternating";
 export type MatchDartMode = "steel" | "soft";
 export type MatchFinishMode = "majority" | "play_all";
-export type FirstThrowMode = "alternate" | "winner" | "loser";
+export type FirstThrowMode = "alternate" | "winner" | "loser" | "fixed";
 export type SoftGameVariant =
   | "soft_301"
   | "soft_501"

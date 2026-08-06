@@ -7,6 +7,7 @@ import {
   generateSingleEliminationBracket
 } from "@/lib/algorithms/schedule";
 import { adjudicateCurrentLegWinner, applyTurn, calculateDartStats, createScoringState } from "@/lib/algorithms/scoring";
+import { resolveFirstThrowHandicap } from "@/lib/algorithms/first-throw-handicap";
 import { updateTournamentStandings } from "@/lib/algorithms/standings";
 import { updateUserRating } from "@/lib/algorithms/rating";
 import { calculatePlayerLevel, getInitialRatingTier, initialRatingTiers, ratingToSkillLevel } from "@/lib/algorithms/player-level";
@@ -219,6 +220,48 @@ describe("team-first tournament algorithms", () => {
     expect(state.participants[0].legsWon).toBe(1);
     expect(state.currentLeg).toBe(2);
     expect(state.activeParticipantId).toBe("team-2");
+  });
+
+  it("keeps the selected first participant starting every leg in fixed-start mode", () => {
+    let state = createScoringState({
+      participantAId: "team-1",
+      participantBId: "team-2",
+      startingScore: 301,
+      bestOf: 3,
+      firstParticipantId: "team-2",
+      firstThrowMode: "fixed"
+    });
+
+    state = applyTurn(state, 180);
+    state = applyTurn(state, 0);
+    state = applyTurn(state, 121);
+
+    expect(state.participants[1].legsWon).toBe(1);
+    expect(state.currentLeg).toBe(2);
+    expect(state.activeParticipantId).toBe("team-2");
+  });
+
+  it("recommends the weaker side first when first-throw handicap is triggered", () => {
+    const handicap = resolveFirstThrowHandicap({
+      participantA: { id: "strong", rating: 1900 },
+      participantB: { id: "weaker", rating: 1000 },
+      threshold: 10
+    });
+
+    expect(handicap.strongerParticipantId).toBe("strong");
+    expect(handicap.firstParticipantId).toBe("weaker");
+    expect(handicap.levelGap).toBeGreaterThanOrEqual(10);
+  });
+
+  it("does not recommend first-throw handicap below the threshold", () => {
+    const handicap = resolveFirstThrowHandicap({
+      participantA: { id: "team-1", rating: 1200 },
+      participantB: { id: "team-2", rating: 1250 },
+      threshold: 10
+    });
+
+    expect(handicap.firstParticipantId).toBeNull();
+    expect(handicap.strongerParticipantId).toBeNull();
   });
 
   it("records the exact thrower for team scoring turns", () => {
@@ -536,6 +579,24 @@ describe("team-first tournament algorithms", () => {
     expect(level.level).toBeLessThan(20);
     expect(level.level).toBeGreaterThanOrEqual(1);
     expect(level.level).toBeLessThanOrEqual(99);
+  });
+
+  it("does not cap steel 01 average at office-league high averages", () => {
+    const strongOfficeAverage = calculatePlayerLevel({
+      rating: 1000,
+      stats: {
+        averagePer3Darts: 82
+      }
+    });
+    const eliteAverage = calculatePlayerLevel({
+      rating: 1000,
+      stats: {
+        averagePer3Darts: 110
+      }
+    });
+
+    expect(strongOfficeAverage.components.average).toBe(67.1);
+    expect(eliteAverage.components.average).toBe(100);
   });
 
   it("maps rating tracks to the legacy coarse skill buckets consistently", () => {

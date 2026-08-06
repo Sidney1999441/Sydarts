@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { Gauge } from "lucide-react";
 import { requireUser } from "@/lib/auth/guards";
+import { resolveFirstThrowHandicap } from "@/lib/algorithms/first-throw-handicap";
 import { getLegStartingScore, getMatchRulesSummary, resolveMatchLegRules } from "@/lib/darts/variants";
 import { hasSupabaseEnv } from "@/lib/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -39,7 +40,7 @@ export default async function MatchScorerPage({
       .single(),
     supabase
       .from("tournament_participants")
-      .select("id, display_name, user_id, team_id, participant_type")
+      .select("id, display_name, user_id, team_id, participant_type, rating_snapshot")
       .in("id", [match.participant_a_id, match.participant_b_id])
   ]);
 
@@ -48,7 +49,7 @@ export default async function MatchScorerPage({
   const userIds = [...new Set(participantRows.map((participant) => participant.user_id).filter(Boolean))] as string[];
   const { data: teamMembers } =
     teamIds.length > 0
-      ? await supabase.from("team_members").select("team_id, user_id").in("team_id", teamIds)
+      ? await supabase.from("team_members").select("team_id, user_id, rating_snapshot").in("team_id", teamIds)
       : { data: [] };
   const memberUserIds = [...new Set([...(teamMembers || []).map((member) => member.user_id), ...userIds])] as string[];
   const { data: profiles } =
@@ -94,6 +95,20 @@ export default async function MatchScorerPage({
 
   const participantA = toParticipantInfo(match.participant_a_id, "A");
   const participantB = toParticipantInfo(match.participant_b_id, "B");
+  function participantAverageRating(participantId: string) {
+    const participant = participantById.get(participantId);
+    if (!participant) return 1000;
+    if (participant.team_id) {
+      const ratings = (teamMembers || [])
+        .filter((member) => member.team_id === participant.team_id)
+        .map((member) => Number(member.rating_snapshot || 0))
+        .filter((rating) => rating > 0);
+      if (ratings.length > 0) {
+        return ratings.reduce((total, rating) => total + rating, 0) / ratings.length;
+      }
+    }
+    return Number(participant.rating_snapshot || 1000);
+  }
   const tournamentData = tournament as Tournament | null;
   const legRules = (Array.isArray(match.leg_rules) && match.leg_rules.length > 0
     ? match.leg_rules
@@ -113,6 +128,19 @@ export default async function MatchScorerPage({
   const matchDartMode = (firstRule?.dartMode || match.dart_mode || "steel") as "steel" | "soft";
   const matchFinishMode = (match.match_finish_mode || tournamentData?.match_finish_mode || "majority") as MatchFinishMode;
   const firstThrowMode = (match.first_throw_mode || tournamentData?.first_throw_mode || null) as FirstThrowMode | null;
+  const firstThrowHandicap = resolveFirstThrowHandicap({
+    participantA: {
+      id: participantA.id,
+      rating: participantAverageRating(participantA.id)
+    },
+    participantB: {
+      id: participantB.id,
+      rating: participantAverageRating(participantB.id)
+    }
+  });
+  const firstThrowHandicapNotice = firstThrowHandicap.firstParticipantId
+    ? `检测到双方平均等级差 ${firstThrowHandicap.levelGap} 级，可一键让 ${firstThrowHandicap.firstParticipantId === participantA.id ? participantA.name : participantB.name} 先手。`
+    : null;
 
   return (
     <div className="grid gap-6">
@@ -152,6 +180,8 @@ export default async function MatchScorerPage({
           legRules={legRules}
           matchFinishMode={matchFinishMode}
           firstThrowMode={firstThrowMode}
+          suggestedFirstParticipantId={firstThrowHandicap.firstParticipantId}
+          firstThrowHandicapNotice={firstThrowHandicapNotice}
         />
       )}
     </div>

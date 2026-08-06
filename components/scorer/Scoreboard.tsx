@@ -22,7 +22,9 @@ export function Scoreboard({
   bestOf,
   legRules,
   matchFinishMode,
-  firstThrowMode
+  firstThrowMode,
+  suggestedFirstParticipantId,
+  firstThrowHandicapNotice
 }: {
   matchId: string;
   participantA: ParticipantInfo;
@@ -32,6 +34,8 @@ export function Scoreboard({
   legRules: MatchLegRule[];
   matchFinishMode: MatchFinishMode;
   firstThrowMode?: FirstThrowMode | null;
+  suggestedFirstParticipantId?: string | null;
+  firstThrowHandicapNotice?: string | null;
 }) {
   async function saveOfficialResult(payload: ScoringCompletePayload) {
     await completeScoredMatchAction({
@@ -55,6 +59,8 @@ export function Scoreboard({
       legRules={legRules}
       matchFinishMode={matchFinishMode}
       initialFirstThrowMode={firstThrowMode}
+      suggestedFirstParticipantId={suggestedFirstParticipantId}
+      firstThrowHandicapNotice={firstThrowHandicapNotice}
       saveLabel="上传结果"
       successMessage="比赛结果已上传，并写入赛事数据和普通数据。"
       onComplete={saveOfficialResult}
