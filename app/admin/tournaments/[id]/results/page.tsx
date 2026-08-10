@@ -186,14 +186,14 @@ function ManualStatsFields({
       <div className="text-xs font-bold text-muted">{title}</div>
       <div className="text-[11px] font-semibold text-muted">
         {dartMode === "soft"
-          ? "软镖 01 录均分和拆分；米老鼠录 MPR、总标数、5/6/7 标、帽子戏法和白马。"
+          ? "软镖 01 可录 PPR 或 PPD，PPD 提交后会自动换算为 PPR；米老鼠录 MPR、总标数、5/6/7 标、帽子戏法和白马。"
           : "可录入三镖均分、180、100+、140+、最高拆和高拆。"}
       </div>
       {members.map((member) => (
         <div key={member.userId} className="grid gap-2">
           <div className="text-xs font-semibold text-muted">{member.name}</div>
           <div className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-7">
-            <input className="form-input" type="number" step="0.01" min={0} name={`stats_${member.userId}_average_score`} placeholder={dartMode === "soft" ? "01均分" : "三镖均分"} />
+            <input className="form-input" type="number" step="0.01" min={0} name={`stats_${member.userId}_average_score`} placeholder={dartMode === "soft" ? "PPR/均分" : "三镖均分"} />
             {dartMode === "steel" ? (
               <>
                 <input className="form-input" type="number" min={0} name={`stats_${member.userId}_count_100_plus`} placeholder="100+" />
@@ -202,6 +202,7 @@ function ManualStatsFields({
               </>
             ) : (
               <>
+                <input className="form-input" type="number" step="0.01" min={0} name={`stats_${member.userId}_average_ppd`} placeholder="PPD" />
                 <input className="form-input" type="number" step="0.01" min={0} name={`stats_${member.userId}_average_mpr`} placeholder="MPR" />
                 <input className="form-input" type="number" min={0} name={`stats_${member.userId}_total_marks`} placeholder="总标数" />
                 <input className="form-input" type="number" min={0} name={`stats_${member.userId}_count_5_marks`} placeholder="5标" />

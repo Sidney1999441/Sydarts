@@ -1,9 +1,11 @@
 import {
   addTournamentTeamMemberAction,
   adminAddRegistrationByUserIdAction,
+  createTournamentTeamManualAction,
   generateTeamsAction,
   registerSavedTeamForTournamentAction,
   removeTournamentTeamMemberAction,
+  replaceTournamentTeamMembersAction,
   saveTournamentTeamAsSavedAction,
   updateRegistrationStatusAction,
   updateTournamentTeamAction
@@ -161,6 +163,45 @@ export default async function ParticipantsAdminPage({
 
       {Number(tournament?.team_size || 1) > 1 ? (
         <Card>
+          <div className="grid gap-4 lg:grid-cols-[0.85fr_1.15fr]">
+            <div>
+              <h2 className="text-lg font-bold">手动创建赛事队伍</h2>
+              <p className="mt-2 text-sm leading-6 text-muted">
+                直接输入队名和本队队员 UID，系统会创建赛事队伍、参赛主体，并把队员同步为 confirmed 报名。
+              </p>
+              <p className="mt-2 text-xs font-semibold text-board">
+                可先添加 1 人占位，之后再补齐；本赛事每队最多 {tournament?.team_size || 2} 人，队员不能同时属于另一支 active 队伍。
+              </p>
+            </div>
+            <form action={createTournamentTeamManualAction} className="grid gap-3">
+              <input type="hidden" name="tournament_id" value={id} />
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="label">
+                  队伍名称
+                  <input className="form-input" name="team_name" placeholder="例如：蓝圈二队" />
+                </label>
+                <label className="label">
+                  队长 UID
+                  <input className="form-input" name="captain_identifier" placeholder="不填则默认第一行队员" />
+                </label>
+              </div>
+              <label className="label">
+                队员 UID
+                <textarea
+                  className="form-input min-h-28"
+                  name="member_identifiers"
+                  placeholder={`每行一个 UID，可先填 1 人，最多 ${tournament?.team_size || 2} 人`}
+                  required
+                />
+              </label>
+              <Button type="submit">创建赛事队伍</Button>
+            </form>
+          </div>
+        </Card>
+      ) : null}
+
+      {Number(tournament?.team_size || 1) > 1 ? (
+        <Card>
           <div className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
             <div>
               <h2 className="text-lg font-bold">长期队伍复用</h2>
@@ -240,6 +281,33 @@ export default async function ParticipantsAdminPage({
                       <input className="form-input" name="captain_identifier" defaultValue={captain?.uid || ""} placeholder="6 位 UID" />
                     </label>
                     <Button type="submit" variant="secondary">保存队伍</Button>
+                  </form>
+                ) : null}
+                {team ? (
+                  <form action={replaceTournamentTeamMembersAction} className="grid gap-2 rounded-lg border border-board/20 bg-board/5 p-3">
+                    <input type="hidden" name="tournament_id" value={id} />
+                    <input type="hidden" name="team_id" value={team.id} />
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <label className="label">
+                        队长 UID
+                        <input className="form-input" name="captain_identifier" defaultValue={captain?.uid || ""} placeholder="不填则默认第一行队员" />
+                      </label>
+                      <div className="rounded-lg bg-surface/80 p-3 text-xs font-semibold leading-5 text-muted">
+                        可先保存 1 人，后续再补齐；会同步报名、队长、队伍总 rating 和参赛主体快照。
+                      </div>
+                    </div>
+                    <label className="label">
+                      队员 UID
+                      <textarea
+                        className="form-input min-h-24"
+                        name="member_identifiers"
+                        defaultValue={teamMembers
+                          .map((member) => profileById.get(member.user_id)?.uid || member.user_id)
+                          .join("\n")}
+                        required
+                      />
+                    </label>
+                    <Button type="submit" variant="secondary">保存整队队员</Button>
                   </form>
                 ) : null}
                 {teamMembers.length > 0 ? (

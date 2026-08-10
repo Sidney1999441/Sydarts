@@ -529,6 +529,232 @@ export async function adminAddRegistrationByUserIdAction(formData: FormData) {
   revalidatePath(`/admin/tournaments/${tournamentId}/participants`);
 }
 
+async function assertNoOtherActiveTeamMembership(input: {
+  tournamentId: string;
+  teamId?: string;
+  userIds: string[];
+}) {
+  const admin = createSupabaseAdminClient();
+  const { data: teams, error: teamsError } = await admin
+    .from("teams")
+    .select("id, name")
+    .eq("tournament_id", input.tournamentId)
+    .eq("status", "active");
+  if (teamsError) throw new Error(teamsError.message);
+
+  const otherTeamIds = (teams || [])
+    .filter((team) => team.id !== input.teamId)
+    .map((team) => team.id);
+  if (otherTeamIds.length === 0 || input.userIds.length === 0) return;
+
+  const { data: memberships, error } = await admin
+    .from("team_members")
+    .select("team_id, user_id")
+    .in("team_id", otherTeamIds)
+    .in("user_id", input.userIds);
+  if (error) throw new Error(error.message);
+  if (!memberships || memberships.length === 0) return;
+
+  const teamById = new Map((teams || []).map((team) => [team.id, team]));
+  const userNames = memberships.map((membership) => {
+    const team = teamById.get(membership.team_id);
+    return `${membership.user_id} 已在 ${team?.name || membership.team_id}`;
+  });
+  throw new Error(`队员已在其他赛事队伍中：${userNames.join("；")}`);
+}
+
+function buildMemberRows(input: {
+  teamId: string;
+  profiles: Awaited<ReturnType<typeof resolveProfilesByIdentifiers>>;
+  captainUserId: string;
+}) {
+  return input.profiles.map((profile) => ({
+    team_id: input.teamId,
+    user_id: profile.id,
+    rating_snapshot: profile.tournament_rating ?? profile.rating ?? 1000,
+    skill_level_snapshot: profile.tournament_skill_level ?? profile.skill_level ?? "Beginner",
+    role: profile.id === input.captainUserId ? "captain" : "member"
+  }));
+}
+
+async function upsertTournamentRegistrations(input: {
+  tournamentId: string;
+  profiles: Awaited<ReturnType<typeof resolveProfilesByIdentifiers>>;
+}) {
+  const admin = createSupabaseAdminClient();
+  const { error } = await admin.from("tournament_registrations").upsert(
+    input.profiles.map((profile) => ({
+      tournament_id: input.tournamentId,
+      user_id: profile.id,
+      status: "confirmed",
+      rating_snapshot: profile.tournament_rating ?? profile.rating ?? 1000,
+      skill_level_snapshot: profile.tournament_skill_level ?? profile.skill_level ?? "Beginner"
+    })),
+    { onConflict: "tournament_id,user_id" }
+  );
+  if (error) throw new Error(error.message);
+}
+
+async function resolveManualTeamMembers(input: {
+  tournamentId: string;
+  teamId?: string;
+  memberIdentifiers: string[];
+  captainIdentifier?: string;
+}) {
+  const admin = createSupabaseAdminClient();
+  const { data: tournament, error: tournamentError } = await admin
+    .from("tournaments")
+    .select("id, tournament_type, team_size")
+    .eq("id", input.tournamentId)
+    .single();
+  if (tournamentError) throw new Error(tournamentError.message);
+
+  const teamSize = Number(tournament.team_size || 1);
+  if (teamSize <= 1 || tournament.tournament_type === "individual") {
+    throw new Error("只有双人赛或队制赛可以手动创建/编辑队伍。");
+  }
+  if (input.memberIdentifiers.length < 1) {
+    throw new Error("请至少输入 1 个队员 UID。");
+  }
+  if (input.memberIdentifiers.length > teamSize) {
+    throw new Error(`本赛事每队最多 ${teamSize} 人，请删掉多余的队员 UID。`);
+  }
+
+  const profiles = await resolveProfilesByIdentifiers(input.memberIdentifiers);
+  const userIds = profiles.map((profile) => profile.id);
+  if (new Set(userIds).size !== userIds.length) {
+    throw new Error("队员 UID 不能重复。");
+  }
+
+  const captain = input.captainIdentifier
+    ? await resolveProfileByIdentifier(input.captainIdentifier)
+    : profiles[0];
+  if (!profiles.some((profile) => profile.id === captain.id)) {
+    throw new Error("队长必须包含在本队队员 UID 列表中。");
+  }
+
+  await assertNoOtherActiveTeamMembership({
+    tournamentId: input.tournamentId,
+    teamId: input.teamId,
+    userIds
+  });
+
+  return { tournament, profiles, captain };
+}
+
+export async function createTournamentTeamManualAction(formData: FormData) {
+  await requireAdmin();
+  const tournamentId = fromFormString(formData.get("tournament_id"));
+  const teamName = fromFormString(formData.get("team_name"));
+  const captainIdentifier = fromFormString(formData.get("captain_identifier"));
+  const memberIdentifiers = parseIdentifierList(formData.get("member_identifiers"));
+  const admin = createSupabaseAdminClient();
+
+  const { profiles, captain } = await resolveManualTeamMembers({
+    tournamentId,
+    memberIdentifiers,
+    captainIdentifier: captainIdentifier || undefined
+  });
+  const name = teamName || `${captain.display_name || captain.uid || "CODL"} 队`;
+  const totalRating = profiles.reduce(
+    (total, profile) => total + Number(profile.tournament_rating ?? profile.rating ?? 1000),
+    0
+  );
+
+  const { data: currentParticipants, error: participantsError } = await admin
+    .from("tournament_participants")
+    .select("seed")
+    .eq("tournament_id", tournamentId);
+  if (participantsError) throw new Error(participantsError.message);
+  const nextSeed = Math.max(0, ...(currentParticipants || []).map((participant) => Number(participant.seed || 0))) + 1;
+
+  const { data: createdTeam, error: teamError } = await admin
+    .from("teams")
+    .insert({
+      tournament_id: tournamentId,
+      name,
+      total_rating: totalRating,
+      captain_user_id: captain.id,
+      status: "active"
+    })
+    .select("id")
+    .single();
+  if (teamError) throw new Error(teamError.message);
+
+  const { error: memberError } = await admin.from("team_members").insert(
+    buildMemberRows({
+      teamId: createdTeam.id,
+      profiles,
+      captainUserId: captain.id
+    })
+  );
+  if (memberError) throw new Error(memberError.message);
+
+  await upsertTournamentRegistrations({ tournamentId, profiles });
+
+  const { error: participantError } = await admin.from("tournament_participants").insert({
+    tournament_id: tournamentId,
+    team_id: createdTeam.id,
+    participant_type: "team",
+    display_name: name,
+    rating_snapshot: totalRating,
+    seed: nextSeed,
+    status: "active"
+  });
+  if (participantError) throw new Error(participantError.message);
+
+  revalidatePath(`/admin/tournaments/${tournamentId}/participants`);
+  revalidatePath(`/tournaments/${tournamentId}`);
+}
+
+export async function replaceTournamentTeamMembersAction(formData: FormData) {
+  await requireAdmin();
+  const tournamentId = fromFormString(formData.get("tournament_id"));
+  const teamId = fromFormString(formData.get("team_id"));
+  const captainIdentifier = fromFormString(formData.get("captain_identifier"));
+  const memberIdentifiers = parseIdentifierList(formData.get("member_identifiers"));
+  const admin = createSupabaseAdminClient();
+
+  const { profiles, captain } = await resolveManualTeamMembers({
+    tournamentId,
+    teamId,
+    memberIdentifiers,
+    captainIdentifier: captainIdentifier || undefined
+  });
+
+  const { data: team, error: teamError } = await admin
+    .from("teams")
+    .select("id")
+    .eq("id", teamId)
+    .eq("tournament_id", tournamentId)
+    .single();
+  if (teamError || !team) throw new Error(teamError?.message || "找不到赛事队伍。");
+
+  const { error: deleteError } = await admin.from("team_members").delete().eq("team_id", teamId);
+  if (deleteError) throw new Error(deleteError.message);
+
+  const { error: memberError } = await admin.from("team_members").insert(
+    buildMemberRows({
+      teamId,
+      profiles,
+      captainUserId: captain.id
+    })
+  );
+  if (memberError) throw new Error(memberError.message);
+
+  const { error: teamUpdateError } = await admin
+    .from("teams")
+    .update({ captain_user_id: captain.id })
+    .eq("id", teamId);
+  if (teamUpdateError) throw new Error(teamUpdateError.message);
+
+  await upsertTournamentRegistrations({ tournamentId, profiles });
+  await syncTournamentTeamSnapshot({ tournamentId, teamId });
+
+  revalidatePath(`/admin/tournaments/${tournamentId}/participants`);
+  revalidatePath(`/tournaments/${tournamentId}`);
+}
+
 async function loadConfirmedPlayers(tournamentId: string): Promise<PlayerSeed[]> {
   const supabase = await createSupabaseServerClient();
   const { data: registrations, error } = await supabase
@@ -684,7 +910,7 @@ export async function generateTeamsAction(formData: FormData) {
 }
 
 export async function updateTournamentTeamAction(formData: FormData) {
-  await requireAdmin();
+  const { user, profile } = await requireUser();
   const tournamentId = fromFormString(formData.get("tournament_id"));
   const teamId = fromFormString(formData.get("team_id"));
   const name = fromFormString(formData.get("name"));
@@ -692,6 +918,23 @@ export async function updateTournamentTeamAction(formData: FormData) {
   const admin = createSupabaseAdminClient();
 
   if (!name) throw new Error("请输入队伍名称。");
+
+  const { data: team, error: teamError } = await admin
+    .from("teams")
+    .select("id, captain_user_id")
+    .eq("id", teamId)
+    .eq("tournament_id", tournamentId)
+    .single();
+  if (teamError) throw new Error(teamError.message);
+
+  const isAdmin = profile?.role === "admin";
+  const captainUserId = team.captain_user_id || (await getTeamCaptainUserId(teamId));
+  if (!isAdmin && captainUserId !== user.id) {
+    throw new Error("只有队长或管理员可以编辑这个赛事队伍。");
+  }
+  if (!isAdmin && captainIdentifier) {
+    throw new Error("只有管理员可以更换队长。");
+  }
 
   const { error } = await admin
     .from("teams")
@@ -708,7 +951,7 @@ export async function updateTournamentTeamAction(formData: FormData) {
     .eq("tournament_id", tournamentId)
     .eq("team_id", teamId);
 
-  if (captainIdentifier) {
+  if (isAdmin && captainIdentifier) {
     await ensureTeamCaptain({ tournamentId, teamId, captainIdentifier });
   } else {
     await syncTournamentTeamSnapshot({ tournamentId, teamId });
@@ -716,6 +959,7 @@ export async function updateTournamentTeamAction(formData: FormData) {
 
   revalidatePath(`/admin/tournaments/${tournamentId}/participants`);
   revalidatePath(`/tournaments/${tournamentId}`);
+  revalidatePath("/teams");
 }
 
 export async function addTournamentTeamMemberAction(formData: FormData) {
@@ -734,6 +978,30 @@ export async function addTournamentTeamMemberAction(formData: FormData) {
     .eq("tournament_id", tournamentId)
     .single();
   if (teamError) throw new Error(teamError.message);
+
+  const { data: tournament, error: tournamentError } = await admin
+    .from("tournaments")
+    .select("team_size")
+    .eq("id", tournamentId)
+    .single();
+  if (tournamentError) throw new Error(tournamentError.message);
+
+  const { data: currentMembers, error: currentMembersError } = await admin
+    .from("team_members")
+    .select("user_id")
+    .eq("team_id", teamId);
+  if (currentMembersError) throw new Error(currentMembersError.message);
+
+  const alreadyInThisTeam = (currentMembers || []).some((member) => member.user_id === profile.id);
+  const teamSize = Number(tournament.team_size || 1);
+  if (!alreadyInThisTeam && (currentMembers || []).length >= teamSize) {
+    throw new Error(`这支队伍已经满员，本赛事每队最多 ${teamSize} 人。`);
+  }
+  await assertNoOtherActiveTeamMembership({
+    tournamentId,
+    teamId,
+    userIds: [profile.id]
+  });
 
   const { error } = await admin.from("team_members").upsert(
     {
@@ -803,7 +1071,7 @@ export async function removeTournamentTeamMemberAction(formData: FormData) {
 }
 
 export async function saveTournamentTeamAsSavedAction(formData: FormData) {
-  await requireAdmin();
+  const { user, profile } = await requireUser();
   const tournamentId = fromFormString(formData.get("tournament_id"));
   const teamId = fromFormString(formData.get("team_id"));
   const admin = createSupabaseAdminClient();
@@ -818,6 +1086,9 @@ export async function saveTournamentTeamAsSavedAction(formData: FormData) {
 
   const captainUserId = team.captain_user_id || (await getTeamCaptainUserId(teamId));
   if (!captainUserId) throw new Error("保存长期队伍前需要先设置队长。");
+  if (profile?.role !== "admin" && captainUserId !== user.id) {
+    throw new Error("只有队长或管理员可以把这个赛事队伍保存为长期队伍。");
+  }
 
   if (team.saved_team_id) {
     const { error: updateError } = await admin
@@ -855,6 +1126,8 @@ export async function saveTournamentTeamAsSavedAction(formData: FormData) {
   }
 
   revalidatePath(`/admin/tournaments/${tournamentId}/participants`);
+  revalidatePath(`/tournaments/${tournamentId}`);
+  revalidatePath("/teams");
   revalidatePath("/profile");
 }
 

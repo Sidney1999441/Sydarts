@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { ArrowRight, Award, History, IdCard, Swords, UserRound } from "lucide-react";
+import { ArrowRight, Award, History, IdCard, Swords, UserRound, UsersRound } from "lucide-react";
 import { confirmCasualMatchAction, confirmManualResultAction } from "@/lib/actions/matches";
 import { updateSavedTeamProfileAction } from "@/lib/actions/teams";
 import { buildAchievements, summarizeAchievements } from "@/lib/achievements";
@@ -328,6 +328,7 @@ export default async function ProfilePage() {
             <ProfileQuickLink href="/profile/history" icon={<History className="h-4 w-4" aria-hidden />} label="历史战绩" />
             <ProfileQuickLink href="/profile/achievements" icon={<Award className="h-4 w-4" aria-hidden />} label="个人成就" />
             <ProfileQuickLink href="/profile/real-name" icon={<IdCard className="h-4 w-4" aria-hidden />} label="实名认证" />
+            <ProfileQuickLink href="/teams" icon={<UsersRound className="h-4 w-4" aria-hidden />} label="我的队伍" />
             <ProfileQuickLink href="/scorer/casual" icon={<Swords className="h-4 w-4" aria-hidden />} label="切磋计分" />
             <ProfileQuickLink href="/help" icon={<ArrowRight className="h-4 w-4" aria-hidden />} label="规则说明" />
           </div>

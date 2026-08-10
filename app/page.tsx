@@ -8,6 +8,7 @@ import { hasSupabaseEnv } from "@/lib/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { defaultSiteTheme } from "@/lib/theme";
 import { formatDateTime } from "@/lib/utils";
+import { APP_VERSION } from "@/lib/version";
 import type { Tournament } from "@/types/domain";
 
 export const dynamic = "force-dynamic";
@@ -170,6 +171,9 @@ function Hero({ platformName, isAdmin }: { platformName: string; isAdmin: boolea
           <div className="codl-page-kicker">
             <span className="codl-rule" aria-hidden />
             Caliburn Office Darts League 2026
+            <span className="ml-2 rounded-full border border-board/25 bg-board/10 px-2 py-0.5 text-[11px] text-board">
+              {APP_VERSION}
+            </span>
           </div>
           <img
             src="/codl/codl-logo-light.png"

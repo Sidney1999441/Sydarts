@@ -5,7 +5,7 @@ import {
   TouchScoreboard,
   type ScoringCompletePayload
 } from "@/components/scorer/TouchScoreboard";
-import type { FirstThrowMode, MatchFinishMode, MatchLegRule } from "@/types/domain";
+import type { FirstThrowMode, MatchFinishMode, MatchLegLineup, MatchLegRule } from "@/types/domain";
 
 type ParticipantInfo = {
   id: string;
@@ -24,7 +24,9 @@ export function Scoreboard({
   matchFinishMode,
   firstThrowMode,
   suggestedFirstParticipantId,
-  firstThrowHandicapNotice
+  firstThrowHandicapNotice,
+  initialLineups,
+  autoStartFirstParticipantId
 }: {
   matchId: string;
   participantA: ParticipantInfo;
@@ -36,6 +38,8 @@ export function Scoreboard({
   firstThrowMode?: FirstThrowMode | null;
   suggestedFirstParticipantId?: string | null;
   firstThrowHandicapNotice?: string | null;
+  initialLineups?: MatchLegLineup[];
+  autoStartFirstParticipantId?: string | null;
 }) {
   async function saveOfficialResult(payload: ScoringCompletePayload) {
     await completeScoredMatchAction({
@@ -61,6 +65,8 @@ export function Scoreboard({
       initialFirstThrowMode={firstThrowMode}
       suggestedFirstParticipantId={suggestedFirstParticipantId}
       firstThrowHandicapNotice={firstThrowHandicapNotice}
+      initialLineups={initialLineups}
+      autoStartFirstParticipantId={autoStartFirstParticipantId}
       saveLabel="上传结果"
       successMessage="比赛结果已上传，并写入赛事数据和普通数据。"
       onComplete={saveOfficialResult}

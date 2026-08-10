@@ -76,7 +76,7 @@ function ParticipantLine({
   return (
     <div
       className={cn(
-        "grid min-h-11 grid-cols-[1fr_auto] items-center gap-3 rounded-md border px-3 py-2 text-sm",
+        "grid min-h-11 min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-md border px-3 py-2 text-sm",
         isWinner ? "border-board bg-board text-white" : "border-wire bg-field text-ink"
       )}
     >
@@ -121,26 +121,26 @@ export function TournamentBracket({
   }
 
   return (
-    <div className="grid gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
+    <div className="grid min-w-0 gap-4">
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
           <span className="grid h-10 w-10 place-items-center rounded-lg bg-board text-white">
             <GitBranch className="h-5 w-5" aria-hidden />
           </span>
-          <h2 className="text-lg font-black">{title}</h2>
+          <h2 className="min-w-0 break-words text-lg font-black">{title}</h2>
         </div>
         <div className="text-xs font-bold text-muted">
           {matches.length} 场 / {rounds.length} 轮
         </div>
       </div>
 
-      <div className="overflow-x-auto pb-2">
+      <div className="max-w-full min-w-0 overflow-x-auto pb-2">
         <div
           className="grid min-w-[900px] auto-cols-[minmax(16rem,1fr)] grid-flow-col gap-4"
           style={{ gridTemplateColumns: `repeat(${rounds.length}, minmax(16rem, 1fr))` }}
         >
           {rounds.map((round, roundIndex) => (
-            <section key={round.roundNumber} className="grid content-start gap-3">
+            <section key={round.roundNumber} className="grid min-w-0 content-start gap-3">
               <div className="rounded-lg bg-slate-950 px-3 py-2 text-sm font-black text-white">
                 {roundLabel(round.roundNumber, maxRound, round.matches)}
               </div>
@@ -153,7 +153,7 @@ export function TournamentBracket({
                     {roundIndex < rounds.length - 1 ? (
                       <span className="absolute -right-4 top-1/2 h-px w-4 bg-board/40" aria-hidden />
                     ) : null}
-                    <div className="grid gap-2 rounded-lg border border-wire bg-surface p-3 shadow-[0_12px_28px_rgb(17_24_39/0.06)]">
+                    <div className="grid min-w-0 gap-2 rounded-lg border border-wire bg-surface p-3 shadow-[0_12px_28px_rgb(17_24_39/0.06)]">
                       <div className="flex items-center justify-between gap-2 text-xs font-black text-muted">
                         <span>R{match.round_number} M{match.match_number}</span>
                         <span className="rounded-full bg-field px-2 py-1">

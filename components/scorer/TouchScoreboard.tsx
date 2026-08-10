@@ -174,6 +174,8 @@ export function TouchScoreboard({
   initialFirstThrowMode = null,
   suggestedFirstParticipantId = null,
   firstThrowHandicapNotice = null,
+  initialLineups,
+  autoStartFirstParticipantId = null,
   saveLabel,
   successMessage,
   onComplete
@@ -189,6 +191,8 @@ export function TouchScoreboard({
   initialFirstThrowMode?: FirstThrowMode | null;
   suggestedFirstParticipantId?: string | null;
   firstThrowHandicapNotice?: string | null;
+  initialLineups?: MatchLegLineup[];
+  autoStartFirstParticipantId?: string | null;
   saveLabel: string;
   successMessage: string;
   onComplete: (payload: ScoringCompletePayload) => Promise<void>;
@@ -197,9 +201,14 @@ export function TouchScoreboard({
     () => (legRules && legRules.length > 0 ? legRules : defaultRules(startingScore, bestOf, defaultParticipantMode)),
     [bestOf, defaultParticipantMode, legRules, startingScore]
   );
-  const initialLineups = useMemo(() => defaultLineups(rules, participantA, participantB), [rules, participantA, participantB]);
+  const resolvedInitialLineups = useMemo(
+    () => (initialLineups && initialLineups.length > 0 ? initialLineups : defaultLineups(rules, participantA, participantB)),
+    [initialLineups, participantA, participantB, rules]
+  );
+  const hasPresetLineups = Boolean(initialLineups && initialLineups.length > 0);
   const needsLineupSelection = rules.some(
     (rule) =>
+      !hasPresetLineups &&
       rule.participantMode === "singles" &&
       ((participantA.members?.length || 0) > 1 || (participantB.members?.length || 0) > 1)
   );
@@ -230,15 +239,21 @@ export function TouchScoreboard({
     });
   }
 
-  const [lineups, setLineups] = useState<MatchLegLineup[]>(initialLineups);
+  const safeAutoStartFirstParticipantId =
+    autoStartFirstParticipantId === participantA.id || autoStartFirstParticipantId === participantB.id
+      ? autoStartFirstParticipantId
+      : null;
+  const [lineups, setLineups] = useState<MatchLegLineup[]>(resolvedInitialLineups);
   const [lineupConfirmed, setLineupConfirmed] = useState(!needsLineupSelection);
-  const [firstParticipantId, setFirstParticipantId] = useState<string | null>(null);
+  const [firstParticipantId, setFirstParticipantId] = useState<string | null>(safeAutoStartFirstParticipantId);
   const [firstThrowMode, setFirstThrowMode] = useState<FirstThrowMode>(defaultFirstThrowMode);
   const [roundLimit, setRoundLimit] = useState<RoundLimit>(initialRoundLimit);
   const [activeThrowerByParticipant, setActiveThrowerByParticipant] = useState<ThrowerByParticipant>(() =>
-    defaultThrowers(initialLineups, participantA, participantB)
+    defaultThrowers(resolvedInitialLineups, participantA, participantB)
   );
-  const [state, setState] = useState(() => createFreshState(initialLineups, null, defaultFirstThrowMode));
+  const [state, setState] = useState(() =>
+    createFreshState(resolvedInitialLineups, safeAutoStartFirstParticipantId, defaultFirstThrowMode)
+  );
   const [history, setHistory] = useState<ScoringHistoryEntry[]>([]);
   const [scoreInput, setScoreInput] = useState("");
   const [checkoutScore, setCheckoutScore] = useState<number | null>(null);

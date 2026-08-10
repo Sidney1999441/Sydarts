@@ -29,7 +29,7 @@ export function CodlPageHeader({
   return (
     <section
       className={cn(
-        "codl-page-header relative overflow-hidden rounded-lg border border-wire p-5 shadow-[0_22px_58px_rgb(17_24_39/0.08)] sm:p-6",
+        "codl-page-header relative min-w-0 overflow-hidden rounded-lg border border-wire p-5 shadow-[0_22px_58px_rgb(17_24_39/0.08)] sm:p-6",
         dark ? "bg-primary text-white" : "bg-surface text-ink",
         className
       )}
@@ -39,8 +39,8 @@ export function CodlPageHeader({
         className={cn("codl-page-header-art", headerArtMap[art])}
       />
       <div className={cn("absolute inset-0", dark ? "bg-primary/90" : "bg-white/80")} />
-      <div className="relative flex flex-wrap items-end justify-between gap-5">
-        <div className="max-w-3xl">
+      <div className="relative flex min-w-0 flex-wrap items-end justify-between gap-5">
+        <div className="min-w-0 max-w-3xl">
           <img
             src={dark ? "/codl/codl-logo-dark.png" : "/codl/codl-logo-light.png"}
             alt="CODL logo"
@@ -62,12 +62,12 @@ export function CodlPageHeader({
                 {icon}
               </span>
             ) : null}
-            <h1 className={cn("text-3xl font-black sm:text-4xl", dark ? "text-white" : "text-primary")}>
+            <h1 className={cn("min-w-0 break-words text-3xl font-black sm:text-4xl", dark ? "text-white" : "text-primary")}>
               {title}
             </h1>
           </div>
           {description ? (
-            <p className={cn("mt-3 max-w-2xl text-sm font-bold leading-6", dark ? "text-white/70" : "text-muted")}>
+            <p className={cn("mt-3 max-w-2xl break-words text-sm font-bold leading-6", dark ? "text-white/70" : "text-muted")}>
               {description}
             </p>
           ) : null}

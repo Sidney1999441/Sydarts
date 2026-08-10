@@ -2,12 +2,20 @@ import { notFound } from "next/navigation";
 import { Gauge } from "lucide-react";
 import { requireUser } from "@/lib/auth/guards";
 import { resolveFirstThrowHandicap } from "@/lib/algorithms/first-throw-handicap";
-import { getLegStartingScore, getMatchRulesSummary, resolveMatchLegRules } from "@/lib/darts/variants";
+import { getCompactMatchRulesSummary, getLegRuleLabel, getLegStartingScore, resolveMatchLegRules } from "@/lib/darts/variants";
 import { hasSupabaseEnv } from "@/lib/env";
+import {
+  areBothMatchLineupsSubmitted,
+  buildLineupsFromSubmissions,
+  getMatchLineupSubmissions
+} from "@/lib/matches/lineups";
+import { getMatchStatusLabel } from "@/lib/matches/status";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { SetupNotice } from "@/components/SetupNotice";
 import { CodlPageHeader } from "@/components/CodlPageHeader";
 import { Card } from "@/components/ui/Card";
+import { MatchLineupSubmissionForm } from "@/components/scorer/MatchLineupSubmissionForm";
+import { OfficialLineupGate } from "@/components/scorer/OfficialLineupGate";
 import { Scoreboard } from "@/components/scorer/Scoreboard";
 import { SoftScoreboard } from "@/components/scorer/SoftScoreboard";
 import type { FirstThrowMode, MatchFinishMode, MatchLegRule, Tournament } from "@/types/domain";
@@ -22,7 +30,7 @@ export default async function MatchScorerPage({
   const { matchId } = await params;
   if (!hasSupabaseEnv()) return <SetupNotice />;
 
-  await requireUser();
+  const { user } = await requireUser();
   const supabase = await createSupabaseServerClient();
   const { data: match } = await supabase
     .from("matches")
@@ -47,10 +55,14 @@ export default async function MatchScorerPage({
   const participantRows = participants || [];
   const teamIds = [...new Set(participantRows.map((participant) => participant.team_id).filter(Boolean))] as string[];
   const userIds = [...new Set(participantRows.map((participant) => participant.user_id).filter(Boolean))] as string[];
-  const { data: teamMembers } =
+  const [{ data: teamMembers }, { data: teams }] = await Promise.all([
     teamIds.length > 0
-      ? await supabase.from("team_members").select("team_id, user_id, rating_snapshot").in("team_id", teamIds)
-      : { data: [] };
+      ? supabase.from("team_members").select("team_id, user_id, rating_snapshot, role").in("team_id", teamIds)
+      : Promise.resolve({ data: [] }),
+    teamIds.length > 0
+      ? supabase.from("teams").select("id, captain_user_id").in("id", teamIds)
+      : Promise.resolve({ data: [] })
+  ]);
   const memberUserIds = [...new Set([...(teamMembers || []).map((member) => member.user_id), ...userIds])] as string[];
   const { data: profiles } =
     memberUserIds.length > 0
@@ -95,6 +107,7 @@ export default async function MatchScorerPage({
 
   const participantA = toParticipantInfo(match.participant_a_id, "A");
   const participantB = toParticipantInfo(match.participant_b_id, "B");
+  const teamById = new Map((teams || []).map((team) => [team.id, team]));
   function participantAverageRating(participantId: string) {
     const participant = participantById.get(participantId);
     if (!participant) return 1000;
@@ -108,6 +121,17 @@ export default async function MatchScorerPage({
       }
     }
     return Number(participant.rating_snapshot || 1000);
+  }
+  function canManageLineup(participantId: string) {
+    const participant = participantById.get(participantId);
+    if (!participant) return false;
+    if (participant.participant_type === "user") return participant.user_id === user.id;
+    if (!participant.team_id) return false;
+    const teamCaptainId = teamById.get(participant.team_id)?.captain_user_id || null;
+    if (teamCaptainId === user.id) return true;
+    return (teamMembers || []).some(
+      (member) => member.team_id === participant.team_id && member.user_id === user.id && member.role === "captain"
+    );
   }
   const tournamentData = tournament as Tournament | null;
   const legRules = (Array.isArray(match.leg_rules) && match.leg_rules.length > 0
@@ -141,6 +165,32 @@ export default async function MatchScorerPage({
   const firstThrowHandicapNotice = firstThrowHandicap.firstParticipantId
     ? `检测到双方平均等级差 ${firstThrowHandicap.levelGap} 级，可一键让 ${firstThrowHandicap.firstParticipantId === participantA.id ? participantA.name : participantB.name} 先手。`
     : null;
+  const lineupSubmissions = getMatchLineupSubmissions(match.details);
+  const participantASubmission = lineupSubmissions[participantA.id];
+  const participantBSubmission = lineupSubmissions[participantB.id];
+  const needsPrivateLineup =
+    match.status !== "completed" &&
+    match.status !== "bye" &&
+    ((participantA.members?.length || 0) > 1 || (participantB.members?.length || 0) > 1);
+  const bothLineupsSubmitted = areBothMatchLineupsSubmitted(match.details, participantA.id, participantB.id);
+  const submittedLineups = bothLineupsSubmitted
+    ? buildLineupsFromSubmissions({
+        details: match.details,
+        legRules,
+        participantAId: participantA.id,
+        participantBId: participantB.id,
+        participantAUserIds: participantA.members.map((member) => member.userId),
+        participantBUserIds: participantB.members.map((member) => member.userId)
+      })
+    : undefined;
+  const lineupPairings = bothLineupsSubmitted
+    ? buildLineupPairings({
+        participantA,
+        participantB,
+        legRules,
+        lineups: submittedLineups || []
+      })
+    : [];
 
   return (
     <div className="grid gap-6">
@@ -148,11 +198,11 @@ export default async function MatchScorerPage({
         dark
         kicker={tournamentData?.name || "比赛计分"}
         title={`第 ${match.round_number} 轮，${participantA.name} 对 ${participantB.name}`}
-        description={getMatchRulesSummary({
+        description={`${getMatchStatusLabel(match.status)} · ${getCompactMatchRulesSummary({
             dartMode: matchDartMode,
             gameVariant: match.game_variant,
             legRules
-          })}
+          })}`}
         icon={<Gauge className="h-6 w-6" aria-hidden />}
         art="white"
       />
@@ -162,6 +212,47 @@ export default async function MatchScorerPage({
             这场比赛已完成，比分 {match.score_a}:{match.score_b}。
           </p>
         </Card>
+      ) : needsPrivateLineup && !bothLineupsSubmitted ? (
+        <PreMatchLineupPanel
+          matchId={match.id}
+          participantA={participantA}
+          participantB={participantB}
+          legRules={legRules}
+          participantASubmission={participantASubmission?.legLineups || []}
+          participantBSubmission={participantBSubmission?.legLineups || []}
+          participantAHasSubmission={Boolean(participantASubmission)}
+          participantBHasSubmission={Boolean(participantBSubmission)}
+          canSubmitA={canManageLineup(participantA.id)}
+          canSubmitB={canManageLineup(participantB.id)}
+        />
+      ) : bothLineupsSubmitted ? (
+        <OfficialLineupGate pairings={lineupPairings}>
+          {matchDartMode === "soft" ? (
+            <SoftScoreboard
+              matchId={match.id}
+              participantA={participantA}
+              participantB={participantB}
+              legRules={legRules}
+              matchFinishMode={matchFinishMode}
+              initialLineups={submittedLineups}
+            />
+          ) : (
+            <Scoreboard
+              matchId={match.id}
+              participantA={participantA}
+              participantB={participantB}
+              startingScore={getLegStartingScore(firstRule)}
+              bestOf={(tournamentData?.best_of || 3) as 3 | 5 | 7}
+              legRules={legRules}
+              matchFinishMode={matchFinishMode}
+              firstThrowMode={firstThrowMode}
+              suggestedFirstParticipantId={firstThrowHandicap.firstParticipantId}
+              firstThrowHandicapNotice={firstThrowHandicapNotice}
+              initialLineups={submittedLineups}
+              autoStartFirstParticipantId={firstThrowHandicap.firstParticipantId || participantA.id}
+            />
+          )}
+        </OfficialLineupGate>
       ) : matchDartMode === "soft" ? (
         <SoftScoreboard
           matchId={match.id}
@@ -186,4 +277,151 @@ export default async function MatchScorerPage({
       )}
     </div>
   );
+}
+
+type ScorerParticipantInfo = {
+  id: string;
+  name: string;
+  avatarUrl?: string | null;
+  members: Array<{ userId: string; name: string; avatarUrl?: string | null }>;
+};
+
+function PreMatchLineupPanel({
+  matchId,
+  participantA,
+  participantB,
+  legRules,
+  participantASubmission,
+  participantBSubmission,
+  participantAHasSubmission,
+  participantBHasSubmission,
+  canSubmitA,
+  canSubmitB
+}: {
+  matchId: string;
+  participantA: ScorerParticipantInfo;
+  participantB: ScorerParticipantInfo;
+  legRules: MatchLegRule[];
+  participantASubmission: Array<{ legNumber: number; playerIds: string[] }>;
+  participantBSubmission: Array<{ legNumber: number; playerIds: string[] }>;
+  participantAHasSubmission: boolean;
+  participantBHasSubmission: boolean;
+  canSubmitA: boolean;
+  canSubmitB: boolean;
+}) {
+  return (
+    <Card className="grid gap-4">
+      <div>
+        <h2 className="text-xl font-black">赛前隐藏布阵</h2>
+        <p className="mt-1 text-sm font-semibold text-muted">
+          两队队长分别提交本队每一局的出场名单。双方都提交后，系统才会公开对阵并进入计分。
+        </p>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2">
+        <LineupSubmissionCard
+          matchId={matchId}
+          participant={participantA}
+          legRules={legRules}
+          submittedLegLineups={participantASubmission}
+          hasSubmitted={participantAHasSubmission}
+          canSubmit={canSubmitA}
+        />
+        <LineupSubmissionCard
+          matchId={matchId}
+          participant={participantB}
+          legRules={legRules}
+          submittedLegLineups={participantBSubmission}
+          hasSubmitted={participantBHasSubmission}
+          canSubmit={canSubmitB}
+        />
+      </div>
+    </Card>
+  );
+}
+
+function LineupSubmissionCard({
+  matchId,
+  participant,
+  legRules,
+  submittedLegLineups,
+  hasSubmitted,
+  canSubmit
+}: {
+  matchId: string;
+  participant: ScorerParticipantInfo;
+  legRules: MatchLegRule[];
+  submittedLegLineups: Array<{ legNumber: number; playerIds: string[] }>;
+  hasSubmitted: boolean;
+  canSubmit: boolean;
+}) {
+  const submitted = hasSubmitted || submittedLegLineups.length > 0;
+
+  return (
+    <div className="grid gap-3 rounded-lg border border-wire bg-field p-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="truncate font-black">{participant.name}</div>
+          <div className="mt-1 text-xs font-bold text-muted">
+            {submitted ? "已提交，等待双方完成后公开" : "待队长提交"}
+          </div>
+        </div>
+        <span className={`rounded-full px-2 py-1 text-xs font-black ${submitted ? "bg-board text-white" : "bg-surface text-muted"}`}>
+          {submitted ? "已提交" : "待提交"}
+        </span>
+      </div>
+
+      {canSubmit ? (
+        <details open={!submitted} className="rounded-lg bg-surface p-3">
+          <summary className="cursor-pointer text-sm font-black text-board">
+            {submitted ? "调整我方布阵" : "提交我方布阵"}
+          </summary>
+          <div className="mt-3">
+            <MatchLineupSubmissionForm
+              matchId={matchId}
+              participantId={participant.id}
+              legRules={legRules}
+              members={participant.members}
+              submittedLegLineups={submittedLegLineups}
+              hasExistingSubmission={submitted}
+            />
+          </div>
+        </details>
+      ) : (
+        <p className="rounded-lg bg-surface p-3 text-sm font-semibold text-muted">
+          只能查看提交状态，提交前不会公开名单。
+        </p>
+      )}
+    </div>
+  );
+}
+
+function buildLineupPairings({
+  participantA,
+  participantB,
+  legRules,
+  lineups
+}: {
+  participantA: ScorerParticipantInfo;
+  participantB: ScorerParticipantInfo;
+  legRules: MatchLegRule[];
+  lineups: Array<{ legNumber: number; participantAUserIds: string[]; participantBUserIds: string[] }>;
+}) {
+  const memberById = new Map(
+    [...participantA.members, ...participantB.members].map((member) => [member.userId, member])
+  );
+
+  return lineups.map((lineup, index) => {
+    const rule = legRules.find((item) => item.legNumber === lineup.legNumber) || legRules[index];
+    const participantAMembers = lineup.participantAUserIds.map((userId) => memberById.get(userId)).filter(Boolean);
+    const participantBMembers = lineup.participantBUserIds.map((userId) => memberById.get(userId)).filter(Boolean);
+
+    return {
+      index: lineup.legNumber,
+      ruleLabel: rule ? getLegRuleLabel(rule) : undefined,
+      participantAName: participantAMembers.map((member) => member?.name).join(" / ") || participantA.name,
+      participantBName: participantBMembers.map((member) => member?.name).join(" / ") || participantB.name,
+      participantAAvatarUrl: participantAMembers[0]?.avatarUrl || participantA.avatarUrl || null,
+      participantBAvatarUrl: participantBMembers[0]?.avatarUrl || participantB.avatarUrl || null
+    };
+  });
 }

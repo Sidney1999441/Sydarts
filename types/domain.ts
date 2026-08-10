@@ -167,6 +167,47 @@ export type Tournament = {
   status: TournamentStatus;
 };
 
+export type TournamentBoardStatus = "active" | "disabled";
+
+export type TournamentBoard = {
+  id: string;
+  tournament_id: string;
+  name: string;
+  available_start_at: string;
+  available_end_at: string;
+  status: TournamentBoardStatus;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TournamentBoardTimeSlot = {
+  id: string;
+  tournament_id: string;
+  board_id: string;
+  available_start_at: string;
+  available_end_at: string;
+  daily_start_time: string;
+  daily_end_time: string;
+  status: TournamentBoardStatus;
+  created_at: string;
+  updated_at: string;
+};
+
+export type MatchBoardReservationStatus = "active" | "cancelled";
+
+export type MatchBoardReservation = {
+  id: string;
+  tournament_id: string;
+  match_id: string;
+  board_id: string;
+  reserved_start_at: string;
+  reserved_end_at: string;
+  created_by: string | null;
+  status: MatchBoardReservationStatus;
+  created_at: string;
+  updated_at: string;
+};
+
 export type ParticipantSeed = {
   id: string;
   name: string;

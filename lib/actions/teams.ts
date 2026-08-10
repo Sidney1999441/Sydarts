@@ -64,6 +64,35 @@ export async function updateSavedTeamProfileAction(formData: FormData) {
   if (updateError) throw new Error(updateError.message);
 
   revalidatePath("/profile");
+  revalidatePath("/teams");
+  revalidatePath(`/teams/${savedTeamId}`);
+}
+
+export async function createSavedTeamForCurrentUserAction(formData: FormData) {
+  const { user } = await requireUser();
+  const name = fromFormString(formData.get("name"));
+  const avatarUrl = fromFormString(formData.get("avatar_url")) || null;
+
+  if (!name) throw new Error("请输入队伍名称。");
+
+  const admin = createSupabaseAdminClient();
+  const { data: savedTeam, error } = await admin
+    .from("saved_teams")
+    .insert({
+      name,
+      avatar_url: avatarUrl,
+      captain_user_id: user.id,
+      created_by: user.id,
+      status: "active"
+    })
+    .select("id")
+    .single();
+
+  if (error) throw new Error(error.message);
+
+  revalidatePath("/profile");
+  revalidatePath("/teams");
+  if (savedTeam?.id) revalidatePath(`/teams/${savedTeam.id}`);
 }
 
 export async function createSavedTeamAdminAction(formData: FormData) {

@@ -8,6 +8,7 @@ import {
   LogOut,
   Monitor,
   Shield,
+  UsersRound,
   UserPlus,
   UserRound
 } from "lucide-react";
@@ -16,6 +17,7 @@ import { BackButton } from "@/components/BackButton";
 import { Button } from "@/components/ui/Button";
 import { PlayerAvatar } from "@/components/ui/PlayerIdentity";
 import type { SiteThemeSettings } from "@/lib/theme";
+import { APP_VERSION } from "@/lib/version";
 import type { Profile } from "@/types/domain";
 
 const primaryNav = [
@@ -27,6 +29,8 @@ const primaryNav = [
   { href: "/help", label: "说明", icon: HelpCircle }
 ];
 
+const teamNavItem = { href: "/teams", label: "我的队伍", icon: UsersRound };
+
 export function Header({
   userEmail,
   profile,
@@ -37,12 +41,17 @@ export function Header({
   theme: SiteThemeSettings;
 }) {
   const displayName = profile?.display_name || userEmail;
-  const nav = profile?.role === "admin"
-    ? [...primaryNav, { href: "/admin", label: "后台", icon: Shield }]
+  const authedNav = userEmail
+    ? [primaryNav[0], primaryNav[1], primaryNav[2], primaryNav[3], teamNavItem, primaryNav[4], primaryNav[5]]
     : primaryNav;
+  const nav = profile?.role === "admin"
+    ? [...authedNav, { href: "/admin", label: "后台", icon: Shield }]
+    : authedNav;
   const dockNav = profile?.role === "admin"
     ? [primaryNav[1], primaryNav[2], primaryNav[4], { href: "/admin", label: "后台", icon: Shield }, primaryNav[5]]
-    : [primaryNav[1], primaryNav[2], primaryNav[4], primaryNav[5]];
+    : userEmail
+      ? [primaryNav[1], primaryNav[2], teamNavItem, primaryNav[4], primaryNav[5]]
+      : [primaryNav[1], primaryNav[2], primaryNav[4], primaryNav[5]];
 
   return (
     <>
@@ -57,6 +66,9 @@ export function Header({
               style={{ height: "clamp(2.5rem, 3vw, 2.75rem)", width: "auto", maxWidth: "min(152px, 34vw)" }}
             />
           </Link>
+          <span className="hidden rounded-full border border-white/15 bg-white/10 px-2.5 py-1 text-[11px] font-black text-white/70 sm:inline-flex">
+            {APP_VERSION}
+          </span>
 
           <nav className="hidden flex-1 items-center justify-center gap-1 lg:flex">
             {nav.map((item) => (

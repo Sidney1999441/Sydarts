@@ -1,11 +1,14 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { unstable_rethrow } from "next/navigation";
 import { z } from "zod";
 import { calculateDartStats, type ScoreTurn } from "@/lib/algorithms/scoring";
 import { updateUserRating } from "@/lib/algorithms/rating";
 import { requireAdmin, requireUser } from "@/lib/auth/guards";
-import { getLegStartingScore } from "@/lib/darts/variants";
+import { ppdToPpr } from "@/lib/darts/soft-stats";
+import { getLegStartingScore, resolveMatchLegRules } from "@/lib/darts/variants";
+import { mergeMatchLineupSubmission } from "@/lib/matches/lineups";
 import { hasSameResultSubmission } from "@/lib/results/submission";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -14,6 +17,12 @@ import type { MatchDartMode, MatchLegLineup, MatchLegResult, MatchLegRule } from
 
 const SOFT_RATING_WEIGHT = 0.45;
 const resultSubmissionIdSchema = z.string().uuid();
+
+export type MatchLineupActionState = {
+  ok: boolean;
+  message?: string | null;
+  error?: string | null;
+};
 
 const manualStatsSchema = z.object({
   averageScore: z.number().min(0).optional(),
@@ -473,6 +482,89 @@ async function getTeamUserIds(admin: ReturnType<typeof createSupabaseAdminClient
   return (members || []).map((member) => member.user_id);
 }
 
+async function getParticipantLineupAccess(
+  admin: ReturnType<typeof createSupabaseAdminClient>,
+  participantId: string
+) {
+  const { data: participant, error } = await admin
+    .from("tournament_participants")
+    .select("id, user_id, team_id, participant_type")
+    .eq("id", participantId)
+    .single();
+
+  if (error) throw new Error(error.message);
+
+  if (participant.participant_type === "user") {
+    return {
+      userIds: participant.user_id ? [participant.user_id] : [],
+      captainUserId: participant.user_id || null
+    };
+  }
+
+  const [{ data: team }, { data: members, error: memberError }] = await Promise.all([
+    participant.team_id
+      ? admin.from("teams").select("captain_user_id").eq("id", participant.team_id).maybeSingle()
+      : Promise.resolve({ data: null }),
+    participant.team_id
+      ? admin.from("team_members").select("user_id, role").eq("team_id", participant.team_id)
+      : Promise.resolve({ data: [], error: null })
+  ]);
+
+  if (memberError) throw new Error(memberError.message);
+  const captainMember = (members || []).find((member) => member.role === "captain");
+
+  return {
+    userIds: (members || []).map((member) => member.user_id),
+    captainUserId: team?.captain_user_id || captainMember?.user_id || null
+  };
+}
+
+function lineupSlotCount(rule: MatchLegRule, userIds: string[]) {
+  if (userIds.length === 0) return 0;
+  if (rule.participantMode === "singles") return 1;
+  if (rule.participantMode === "doubles") return Math.min(2, userIds.length);
+  return userIds.length;
+}
+
+function parseSubmittedMatchLineups(input: {
+  formData: FormData;
+  legRules: MatchLegRule[];
+  allowedUserIds: string[];
+}) {
+  const allowedUserIds = new Set(input.allowedUserIds);
+  let previousSinglesUserId: string | null = null;
+
+  return input.legRules.map((rule) => {
+    const playerIds = input.formData
+      .getAll(`leg_${rule.legNumber}_player_ids`)
+      .map((value) => fromFormString(value))
+      .filter(Boolean);
+    const expectedCount = lineupSlotCount(rule, input.allowedUserIds);
+
+    if (expectedCount > 0 && playerIds.length !== expectedCount) {
+      throw new Error(`第 ${rule.legNumber} 局需要选择 ${expectedCount} 名出场队员。`);
+    }
+    if (new Set(playerIds).size !== playerIds.length) {
+      throw new Error(`第 ${rule.legNumber} 局不能重复选择同一名队员。`);
+    }
+    const invalidUserId = playerIds.find((playerId) => !allowedUserIds.has(playerId));
+    if (invalidUserId) {
+      throw new Error(`第 ${rule.legNumber} 局包含不属于本队的队员。`);
+    }
+    if (rule.participantMode === "singles" && playerIds[0]) {
+      if (previousSinglesUserId === playerIds[0]) {
+        throw new Error(`第 ${rule.legNumber} 局不能让同一名选手连续出战单人局。`);
+      }
+      previousSinglesUserId = playerIds[0];
+    }
+
+    return {
+      legNumber: rule.legNumber,
+      playerIds
+    };
+  });
+}
+
 function userIdsFromLineups(input: {
   participantId: string;
   participantAId: string;
@@ -558,32 +650,38 @@ function compactManualStats(stats: ManualSoftStats) {
 
 function parseManualStatsForUsers(formData: FormData, userIds: string[]): ManualStatsById {
   return Object.fromEntries(
-    userIds.map((userId) => [
-      userId,
-      compactManualStats({
-        averageScore: optionalNumberFromForm(formData, `stats_${userId}_average_score`),
-        averagePer3Darts: optionalNumberFromForm(formData, `stats_${userId}_average_score`),
-        averageMpr: optionalNumberFromForm(formData, `stats_${userId}_average_mpr`),
-        countTon80: optionalIntegerFromForm(formData, `stats_${userId}_count_ton80`),
-        countHatTrick: optionalIntegerFromForm(formData, `stats_${userId}_count_hat_trick`),
-        highestCheckout: optionalIntegerFromForm(formData, `stats_${userId}_highest_checkout`),
-        countHighCheckout: optionalIntegerFromForm(formData, `stats_${userId}_count_high_checkout`),
-        countWhiteHorse: optionalIntegerFromForm(formData, `stats_${userId}_count_white_horse`),
-        totalMarks: optionalIntegerFromForm(formData, `stats_${userId}_total_marks`),
-        count5Marks: optionalIntegerFromForm(formData, `stats_${userId}_count_5_marks`),
-        count6Marks: optionalIntegerFromForm(formData, `stats_${userId}_count_6_marks`),
-        count7Marks: optionalIntegerFromForm(formData, `stats_${userId}_count_7_marks`),
-        count9Marks: optionalIntegerFromForm(formData, `stats_${userId}_count_9_marks`),
-        count60Plus: optionalIntegerFromForm(formData, `stats_${userId}_count_60_plus`),
-        count80Plus: optionalIntegerFromForm(formData, `stats_${userId}_count_80_plus`),
-        count180:
-          optionalIntegerFromForm(formData, `stats_${userId}_count_180`) ??
-          optionalIntegerFromForm(formData, `stats_${userId}_count_ton80`),
-        count100Plus: optionalIntegerFromForm(formData, `stats_${userId}_count_100_plus`),
-        count140Plus: optionalIntegerFromForm(formData, `stats_${userId}_count_140_plus`),
-        count170Plus: optionalIntegerFromForm(formData, `stats_${userId}_count_170_plus`)
-      })
-    ]).filter(([, stats]) => Object.keys(stats).length > 0)
+    userIds.map((userId) => {
+      const averageScore = optionalNumberFromForm(formData, `stats_${userId}_average_score`);
+      const averagePpd = optionalNumberFromForm(formData, `stats_${userId}_average_ppd`);
+      const convertedAverageScore = averageScore ?? (averagePpd === undefined ? undefined : ppdToPpr(averagePpd));
+
+      return [
+        userId,
+        compactManualStats({
+          averageScore: convertedAverageScore,
+          averagePer3Darts: convertedAverageScore,
+          averageMpr: optionalNumberFromForm(formData, `stats_${userId}_average_mpr`),
+          countTon80: optionalIntegerFromForm(formData, `stats_${userId}_count_ton80`),
+          countHatTrick: optionalIntegerFromForm(formData, `stats_${userId}_count_hat_trick`),
+          highestCheckout: optionalIntegerFromForm(formData, `stats_${userId}_highest_checkout`),
+          countHighCheckout: optionalIntegerFromForm(formData, `stats_${userId}_count_high_checkout`),
+          countWhiteHorse: optionalIntegerFromForm(formData, `stats_${userId}_count_white_horse`),
+          totalMarks: optionalIntegerFromForm(formData, `stats_${userId}_total_marks`),
+          count5Marks: optionalIntegerFromForm(formData, `stats_${userId}_count_5_marks`),
+          count6Marks: optionalIntegerFromForm(formData, `stats_${userId}_count_6_marks`),
+          count7Marks: optionalIntegerFromForm(formData, `stats_${userId}_count_7_marks`),
+          count9Marks: optionalIntegerFromForm(formData, `stats_${userId}_count_9_marks`),
+          count60Plus: optionalIntegerFromForm(formData, `stats_${userId}_count_60_plus`),
+          count80Plus: optionalIntegerFromForm(formData, `stats_${userId}_count_80_plus`),
+          count180:
+            optionalIntegerFromForm(formData, `stats_${userId}_count_180`) ??
+            optionalIntegerFromForm(formData, `stats_${userId}_count_ton80`),
+          count100Plus: optionalIntegerFromForm(formData, `stats_${userId}_count_100_plus`),
+          count140Plus: optionalIntegerFromForm(formData, `stats_${userId}_count_140_plus`),
+          count170Plus: optionalIntegerFromForm(formData, `stats_${userId}_count_170_plus`)
+        })
+      ];
+    }).filter(([, stats]) => Object.keys(stats).length > 0)
   );
 }
 
@@ -1177,6 +1275,105 @@ async function settleTournamentMatch(input: {
         .eq("id", match.next_match_id);
       if (advanceError) throw new Error(advanceError.message);
     }
+  }
+}
+
+export async function submitMatchLineupAction(formData: FormData) {
+  const { user, profile } = await requireUser();
+  const matchId = fromFormString(formData.get("match_id"));
+  const participantId = fromFormString(formData.get("participant_id"));
+
+  if (!matchId || !participantId) throw new Error("缺少比赛或队伍信息。");
+
+  const admin = createSupabaseAdminClient();
+  const { data: match, error: matchError } = await admin
+    .from("matches")
+    .select("id, tournament_id, participant_a_id, participant_b_id, status, details, dart_mode, game_variant, leg_rules, round_number")
+    .eq("id", matchId)
+    .single();
+
+  if (matchError) throw new Error(matchError.message);
+  if (match.status === "completed" || match.status === "bye") {
+    throw new Error("比赛已结束，不能再提交布阵。");
+  }
+  if (participantId !== match.participant_a_id && participantId !== match.participant_b_id) {
+    throw new Error("只能提交本场比赛双方队伍的布阵。");
+  }
+
+  const access = await getParticipantLineupAccess(admin, participantId);
+  const isAdmin = profile?.role === "admin";
+  if (!isAdmin && access.captainUserId !== user.id) {
+    throw new Error("只有队长可以提交本队赛前布阵。");
+  }
+  if (access.userIds.length === 0) throw new Error("本队暂无可布阵队员。");
+
+  const { data: tournament, error: tournamentError } = await admin
+    .from("tournaments")
+    .select("match_rule_mode, match_leg_rules, dart_mode, dart_game, soft_game, best_of, tournament_type, team_size, mixed_first_dart_mode")
+    .eq("id", match.tournament_id)
+    .maybeSingle();
+  if (tournamentError) throw new Error(tournamentError.message);
+  const legRules = (Array.isArray(match.leg_rules) && match.leg_rules.length > 0
+    ? match.leg_rules
+    : resolveMatchLegRules({
+        matchRuleMode: tournament?.match_rule_mode,
+        customRules: tournament?.match_leg_rules,
+        dartMode: tournament?.dart_mode || match.dart_mode || "steel",
+        dartGame: tournament?.dart_game || match.game_variant || 501,
+        softGame: tournament?.soft_game,
+        bestOf: tournament?.best_of || 3,
+        tournamentType: tournament?.tournament_type,
+        teamSize: tournament?.team_size,
+        roundNumber: match.round_number,
+        mixedFirstDartMode: tournament?.mixed_first_dart_mode
+      })) as MatchLegRule[];
+  if (legRules.length === 0) throw new Error("当前比赛没有可提交的局次规则。");
+  const legLineups = parseSubmittedMatchLineups({
+    formData,
+    legRules,
+    allowedUserIds: access.userIds
+  });
+
+  const nextDetails = mergeMatchLineupSubmission(match.details, participantId, {
+    legLineups,
+    submittedBy: user.id
+  });
+  const { error: updateError } = await admin
+    .from("matches")
+    .update({ details: nextDetails })
+    .eq("id", matchId);
+
+  if (updateError) throw new Error(updateError.message);
+
+  revalidatePath("/scorer");
+  revalidatePath(`/scorer/${matchId}`);
+  revalidatePath(`/tournaments/${match.tournament_id}`);
+}
+
+function actionErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "string" && error.trim()) return error;
+  return "提交失败，请检查布阵后再试。";
+}
+
+export async function submitMatchLineupFormAction(
+  _previousState: MatchLineupActionState,
+  formData: FormData
+): Promise<MatchLineupActionState> {
+  try {
+    await submitMatchLineupAction(formData);
+    return {
+      ok: true,
+      message: "我方布阵已提交。",
+      error: null
+    };
+  } catch (error) {
+    unstable_rethrow(error);
+    return {
+      ok: false,
+      message: null,
+      error: actionErrorMessage(error)
+    };
   }
 }
 

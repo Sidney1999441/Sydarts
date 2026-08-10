@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { Card } from "@/components/ui/Card";
 
 export function SetupNotice() {
@@ -9,9 +8,6 @@ export function SetupNotice() {
         复制 <code>.env.example</code> 为 <code>.env.local</code>，填写 Supabase URL、anon key
         和 service role key，然后执行数据库迁移。
       </p>
-      <Link className="mt-3 inline-flex text-sm font-semibold text-amber-950 underline" href="/admin">
-        查看后台
-      </Link>
     </Card>
   );
 }

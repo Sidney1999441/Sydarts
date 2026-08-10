@@ -80,13 +80,25 @@ export async function POST(request: NextRequest) {
   }
 
   if (entityType === "tournament_team") {
-    if (!isAdmin) return jsonError("只有管理员可以修改赛事内队伍头像。", 403);
     const { data: team, error } = await admin
       .from("teams")
-      .select("id, tournament_id")
+      .select("id, tournament_id, captain_user_id")
       .eq("id", entityId)
       .single();
     if (error || !team) return jsonError("找不到赛事队伍。", 404);
+    let captainUserId = team.captain_user_id as string | null;
+    if (!captainUserId) {
+      const { data: captain } = await admin
+        .from("team_members")
+        .select("user_id")
+        .eq("team_id", entityId)
+        .eq("role", "captain")
+        .maybeSingle();
+      captainUserId = (captain?.user_id as string | undefined) || null;
+    }
+    if (!isAdmin && captainUserId !== user.id) {
+      return jsonError("只有队长或管理员可以修改这个赛事队伍头像。", 403);
+    }
     updateTarget = { table: "teams", tournamentId: team.tournament_id };
   }
 
@@ -113,6 +125,7 @@ export async function POST(request: NextRequest) {
   if (updateError) return jsonError(`头像保存失败：${updateError.message}`, 500);
 
   revalidatePath("/profile");
+  revalidatePath("/teams");
   revalidatePath("/admin/users");
   revalidatePath("/admin/teams");
   if (entityType === "saved_team") revalidatePath(`/teams/${entityId}`);

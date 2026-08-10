@@ -3,7 +3,7 @@
 import { completeScoredMatchAction } from "@/lib/actions/matches";
 import { SoftMatchScoreboard } from "@/components/scorer/SoftMatchScoreboard";
 import type { ScoringCompletePayload } from "@/components/scorer/TouchScoreboard";
-import type { MatchFinishMode, MatchLegRule } from "@/types/domain";
+import type { MatchFinishMode, MatchLegLineup, MatchLegRule } from "@/types/domain";
 
 type ParticipantInfo = {
   id: string;
@@ -17,13 +17,15 @@ export function SoftScoreboard({
   participantA,
   participantB,
   legRules,
-  matchFinishMode
+  matchFinishMode,
+  initialLineups
 }: {
   matchId: string;
   participantA: ParticipantInfo;
   participantB: ParticipantInfo;
   legRules: MatchLegRule[];
   matchFinishMode: MatchFinishMode;
+  initialLineups?: MatchLegLineup[];
 }) {
   async function saveOfficialResult(payload: ScoringCompletePayload) {
     await completeScoredMatchAction({
@@ -45,6 +47,7 @@ export function SoftScoreboard({
       participantB={participantB}
       legRules={legRules}
       matchFinishMode={matchFinishMode}
+      initialLineups={initialLineups}
       saveLabel="上传结果"
       successMessage="软镖比赛结果已保存，并写入赛事与个人软镖数据。"
       onComplete={saveOfficialResult}

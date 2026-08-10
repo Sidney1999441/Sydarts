@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { FileImage, Monitor, Trophy } from "lucide-react";
 import {
   cancelRegistrationAction,
@@ -8,16 +9,40 @@ import {
 import { getCurrentUserAndProfile } from "@/lib/auth/guards";
 import { hasSupabaseEnv } from "@/lib/env";
 import { updateTournamentStandings } from "@/lib/algorithms/standings";
-import { getDartModeLabel, getGameVariantLabel, getMatchRulesSummary } from "@/lib/darts/variants";
+import { getCompactMatchRulesSummary, getDartModeLabel, getGameVariantLabel, resolveMatchLegRules } from "@/lib/darts/variants";
+import {
+  areBothMatchLineupsSubmitted,
+  buildLineupsFromSubmissions,
+  getMatchLineupSubmissions
+} from "@/lib/matches/lineups";
+import { getMatchStatusLabel, isUnplayedMatch } from "@/lib/matches/status";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { formatDateTime } from "@/lib/utils";
+import { cn, formatDateTime } from "@/lib/utils";
 import { SetupNotice } from "@/components/SetupNotice";
 import { CodlPageHeader } from "@/components/CodlPageHeader";
 import { TournamentBracket } from "@/components/TournamentBracket";
+import { MatchLineupSubmissionForm } from "@/components/scorer/MatchLineupSubmissionForm";
+import {
+  BoardReservationPanel,
+  MatchBoardReservationBadge,
+  type BoardReservationBoard,
+  type BoardReservationRow,
+  type BoardReservationSlot
+} from "@/components/tournament/BoardReservationPanel";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { PlayerIdentity } from "@/components/ui/PlayerIdentity";
-import type { MatchDartMode, MatchSummary, ParticipantSeed, Tournament } from "@/types/domain";
+import type {
+  MatchBoardReservation,
+  MatchDartMode,
+  MatchLegLineup,
+  MatchLegRule,
+  MatchSummary,
+  ParticipantSeed,
+  Tournament,
+  TournamentBoard,
+  TournamentBoardTimeSlot
+} from "@/types/domain";
 
 export const dynamic = "force-dynamic";
 
@@ -28,11 +53,14 @@ type MatchRow = MatchSummary & {
 };
 
 export default async function TournamentDetailPage({
-  params
+  params,
+  searchParams
 }: {
   params: Promise<{ id: string }>;
+  searchParams?: Promise<{ schedule?: string }>;
 }) {
   const { id } = await params;
+  const { schedule = "all" } = (await searchParams) || {};
   const { user, profile } = await getCurrentUserAndProfile();
 
   if (!hasSupabaseEnv()) return <SetupNotice />;
@@ -58,7 +86,10 @@ export default async function TournamentDetailPage({
     { data: groupMembers },
     { data: matches },
     { data: registration },
-    { data: savedTeams }
+    { data: savedTeams },
+    { data: boards },
+    { data: boardSlots },
+    { data: reservations }
   ] = await Promise.all([
     supabase
       .from("tournament_participants")
@@ -89,7 +120,15 @@ export default async function TournamentDetailPage({
           .eq("captain_user_id", user.id)
           .eq("status", "active")
           .order("updated_at", { ascending: false })
-      : Promise.resolve({ data: [] })
+      : Promise.resolve({ data: [] }),
+    supabase.from("tournament_boards").select("*").eq("tournament_id", id).order("available_start_at"),
+    supabase.from("tournament_board_time_slots").select("*").eq("tournament_id", id).order("daily_start_time"),
+    supabase
+      .from("match_board_reservations")
+      .select("*")
+      .eq("tournament_id", id)
+      .eq("status", "active")
+      .order("reserved_start_at")
   ]);
 
   const participantSeeds: ParticipantSeed[] = (participants || []).map((participant) => ({
@@ -98,8 +137,15 @@ export default async function TournamentDetailPage({
     rating: participant.rating_snapshot || 1000
   }));
   const participantById = new Map(participantSeeds.map((participant) => [participant.id, participant]));
+  const participantRowById = new Map((participants || []).map((participant) => [participant.id, participant]));
   const tournamentData = tournament as Tournament;
   const matchRows = (matches || []) as MatchRow[];
+  const boardSlotRows = (boardSlots || []) as TournamentBoardTimeSlot[];
+  const slotsByBoardId = groupBoardSlots(boardSlotRows);
+  const boardRows = ((boards || []) as TournamentBoard[]).map((board) => toBoardView(board, slotsByBoardId.get(board.id)));
+  const reservationRows = ((reservations || []) as MatchBoardReservation[]).map(toReservationView);
+  const boardById = new Map(boardRows.map((board) => [board.id, board]));
+  const reservationByMatchId = new Map(reservationRows.map((reservation) => [reservation.matchId, reservation]));
   const groupMatches = matchRows.filter((match) => match.stage === "group");
   const knockoutMatches = matchRows.filter((match) => match.stage === "knockout");
   const standings = updateTournamentStandings(
@@ -115,10 +161,10 @@ export default async function TournamentDetailPage({
   ] as string[];
   const [{ data: teamMembers }, { data: participantTeams }] = await Promise.all([
     teamIds.length > 0
-      ? supabase.from("team_members").select("team_id, user_id").in("team_id", teamIds)
+      ? supabase.from("team_members").select("team_id, user_id, role").in("team_id", teamIds)
       : Promise.resolve({ data: [] }),
     teamIds.length > 0
-      ? supabase.from("teams").select("id, avatar_url").in("id", teamIds)
+      ? supabase.from("teams").select("id, avatar_url, captain_user_id").in("id", teamIds)
       : Promise.resolve({ data: [] })
   ]);
   const statUserIds = [
@@ -133,6 +179,7 @@ export default async function TournamentDetailPage({
       : { data: [] };
   const statProfileById = new Map((statProfiles || []).map((item) => [item.id, item]));
   const teamAvatarById = new Map((participantTeams || []).map((team) => [team.id, team.avatar_url]));
+  const teamById = new Map((participantTeams || []).map((team) => [team.id, team]));
   const teamMembersByTeamId = new Map<string, Array<{ userId: string; name: string }>>();
   for (const member of teamMembers || []) {
     const members = teamMembersByTeamId.get(member.team_id) || [];
@@ -174,9 +221,28 @@ export default async function TournamentDetailPage({
         participantId &&
         (participantMembersById.get(participantId) || []).some((member) => member.userId === currentUserId)
     );
+  const canManageLineup = (participantId?: string | null) => {
+    if (!participantId) return false;
+    const participant = participantRowById.get(participantId);
+    if (!participant || !currentUserId) return false;
+    if (participant.participant_type === "user") return participant.user_id === currentUserId;
+    if (!participant.team_id) return false;
+    const teamCaptainId = teamById.get(participant.team_id)?.captain_user_id || null;
+    if (teamCaptainId === currentUserId) return true;
+    return (teamMembers || []).some(
+      (member) => member.team_id === participant.team_id && member.user_id === currentUserId && member.role === "captain"
+    );
+  };
+  const baseScheduleRows = groupMatches.length > 0 ? groupMatches : matchRows;
+  const filteredScheduleRows = baseScheduleRows.filter((match) => {
+    if (schedule === "mine") return isUserInParticipant(match.participant_a_id) || isUserInParticipant(match.participant_b_id);
+    if (schedule === "pending") return isUnplayedMatch(match.status);
+    if (schedule === "completed") return match.status === "completed" || match.status === "bye";
+    return true;
+  });
 
   return (
-    <div className="grid gap-6">
+    <div className="grid min-w-0 gap-6">
       <CodlPageHeader
         kicker={tournamentData.status}
         title={tournamentData.name}
@@ -217,13 +283,13 @@ export default async function TournamentDetailPage({
       </Card>
 
       {tournamentData.format !== "single_elimination" || (groups || []).length > 0 ? (
-        <section className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
+        <section className="grid min-w-0 gap-4 lg:grid-cols-[0.9fr_1.1fr]">
           {tournamentData.format !== "single_elimination" ? (
             <Card>
               <h2 className="text-lg font-bold">
                 {tournamentData.format === "league_playoff" ? "联赛排名" : "排名"}
               </h2>
-              <div className="mt-4 overflow-x-auto">
+              <div className="mt-4 min-w-0 overflow-x-auto">
                 <table className="w-full min-w-[560px] text-left text-sm">
                   <thead className="text-muted">
                     <tr>
@@ -269,15 +335,15 @@ export default async function TournamentDetailPage({
 
           <Card>
           <h2 className="text-lg font-bold">分组</h2>
-          <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <div className="mt-4 grid min-w-0 gap-4 md:grid-cols-2">
             {(groups || []).map((group) => {
               const members = (groupMembers || [])
                 .filter((member) => member.group_id === group.id)
                 .map((member) => participantById.get(member.participant_id))
                 .filter(Boolean) as ParticipantSeed[];
               return (
-                <div key={group.id} className="rounded-lg border border-wire p-4">
-                  <h3 className="font-bold">{group.name}</h3>
+                <div key={group.id} className="min-w-0 rounded-lg border border-wire p-4">
+                  <h3 className="break-words font-bold">{group.name}</h3>
                   <ul className="mt-3 grid gap-2 text-sm text-muted">
                     {members.map((member) => (
                       <li key={member.id} className="rounded-lg bg-field px-3 py-2">
@@ -316,35 +382,99 @@ export default async function TournamentDetailPage({
 
       {(groupMatches.length > 0 || knockoutMatches.length === 0) ? (
         <Card>
-          <h2 className="text-lg font-bold">
-            {tournamentData.format === "league_playoff" ? "联赛赛程" : "赛程"}
-          </h2>
-          <div className="mt-4 grid gap-3">
-            {(groupMatches.length > 0 ? groupMatches : matchRows).map((match) => {
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <h2 className="text-lg font-bold">
+              {tournamentData.format === "league_playoff" ? "联赛赛程" : "赛程"}
+            </h2>
+            <div className="flex flex-wrap gap-2">
+              <ScheduleFilterLink href={`/tournaments/${id}?schedule=all`} active={schedule === "all"}>
+                全部赛程
+              </ScheduleFilterLink>
+              <ScheduleFilterLink href={`/tournaments/${id}?schedule=mine`} active={schedule === "mine"}>
+                我的比赛
+              </ScheduleFilterLink>
+              <ScheduleFilterLink href={`/tournaments/${id}?schedule=pending`} active={schedule === "pending"}>
+                未开始
+              </ScheduleFilterLink>
+              <ScheduleFilterLink href={`/tournaments/${id}?schedule=completed`} active={schedule === "completed"}>
+                已结束
+              </ScheduleFilterLink>
+            </div>
+          </div>
+          <div className="mt-4 grid min-w-0 gap-3">
+            {filteredScheduleRows.map((match) => {
             const dartMode = ((match.dart_mode || "steel") === "soft" ? "soft" : "steel") as MatchDartMode;
             const participantAName = participantById.get(match.participant_a_id || "")?.name || "TBD";
             const participantBName = participantById.get(match.participant_b_id || "")?.name || "TBD";
+            const participantAIsMine = isUserInParticipant(match.participant_a_id);
+            const participantBIsMine = isUserInParticipant(match.participant_b_id);
+            const participantAMembers = match.participant_a_id ? participantMembersById.get(match.participant_a_id) || [] : [];
+            const participantBMembers = match.participant_b_id ? participantMembersById.get(match.participant_b_id) || [] : [];
+            const matchLegRules = (Array.isArray(match.leg_rules) && match.leg_rules.length > 0
+              ? match.leg_rules
+              : resolveMatchLegRules({
+                  matchRuleMode: tournamentData.match_rule_mode,
+                  customRules: tournamentData.match_leg_rules,
+                  dartMode: tournamentData.dart_mode || match.dart_mode || "steel",
+                  dartGame: tournamentData.dart_game || match.game_variant || 501,
+                  softGame: tournamentData.soft_game,
+                  bestOf: tournamentData.best_of || 3,
+                  tournamentType: tournamentData.tournament_type,
+                  teamSize: tournamentData.team_size,
+                  roundNumber: match.round_number,
+                  mixedFirstDartMode: tournamentData.mixed_first_dart_mode
+                }));
+            const needsLineup =
+              match.status !== "completed" &&
+              match.status !== "bye" &&
+              ((participantAMembers.length || 0) > 1 || (participantBMembers.length || 0) > 1);
+            const lineupSubmissions = getMatchLineupSubmissions(match.details);
+            const participantASubmission = match.participant_a_id ? lineupSubmissions[match.participant_a_id] : undefined;
+            const participantBSubmission = match.participant_b_id ? lineupSubmissions[match.participant_b_id] : undefined;
+            const bothLineupsSubmitted = areBothMatchLineupsSubmitted(match.details, match.participant_a_id, match.participant_b_id);
+            const submittedLineups =
+              bothLineupsSubmitted && match.participant_a_id && match.participant_b_id && matchLegRules.length > 0
+                ? buildLineupsFromSubmissions({
+                    details: match.details,
+                    legRules: matchLegRules,
+                    participantAId: match.participant_a_id,
+                    participantBId: match.participant_b_id,
+                    participantAUserIds: participantAMembers.map((member) => member.userId),
+                    participantBUserIds: participantBMembers.map((member) => member.userId)
+                  })
+                : [];
             const canScore =
               match.status !== "completed" &&
               match.status !== "bye" &&
               Boolean(match.participant_a_id && match.participant_b_id) &&
               (isAdmin || isUserInParticipant(match.participant_a_id) || isUserInParticipant(match.participant_b_id));
+            const currentReservation = reservationByMatchId.get(match.id) || null;
+            const currentBoard = currentReservation ? boardById.get(currentReservation.boardId) || null : null;
+            const canReserve =
+              match.status !== "completed" &&
+              match.status !== "bye" &&
+              Boolean(match.participant_a_id && match.participant_b_id) &&
+              (isAdmin || participantAIsMine || participantBIsMine);
 
             return (
-              <div key={match.id} className="grid gap-3 rounded-lg border border-wire bg-surface/90 p-4 md:grid-cols-[1fr_auto] md:items-center">
-                <div>
-                  <div className="text-xs font-black uppercase text-muted">
-                    第 {match.round_number} 轮 / 第 {match.match_number} 场 / {match.status}
+              <div key={match.id} className="grid min-w-0 gap-3 rounded-lg border border-wire bg-surface/90 p-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="text-xs font-black uppercase text-muted">
+                      第 {match.round_number} 轮 / 第 {match.match_number} 场 / {getMatchStatusLabel(match.status)}
+                    </div>
+                    <MatchBoardReservationBadge reservation={currentReservation} board={currentBoard} />
                   </div>
                   <div className="mt-1 text-xs font-semibold text-board">
-                    {getMatchRulesSummary({
+                    {getCompactMatchRulesSummary({
                       dartMode,
                       gameVariant: match.game_variant,
-                      legRules: match.leg_rules
+                      legRules: matchLegRules
                     })}
                   </div>
-                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  <div className="mt-3 grid min-w-0 gap-2 sm:grid-cols-2">
                     <PlayerIdentity
+                      className={cn("rounded-lg p-2", participantAIsMine && "bg-board/10 ring-1 ring-board/25")}
                       name={participantAName}
                       avatarUrl={match.participant_a_id ? participantAvatarById.get(match.participant_a_id) : null}
                       subtitle={`比分 ${match.score_a}`}
@@ -352,6 +482,7 @@ export default async function TournamentDetailPage({
                       compact
                     />
                     <PlayerIdentity
+                      className={cn("rounded-lg p-2", participantBIsMine && "bg-board/10 ring-1 ring-board/25")}
                       name={participantBName}
                       avatarUrl={match.participant_b_id ? participantAvatarById.get(match.participant_b_id) : null}
                       subtitle={`比分 ${match.score_b}`}
@@ -362,8 +493,41 @@ export default async function TournamentDetailPage({
                   <div className="mt-1 text-sm text-muted">
                     比分 {match.score_a}:{match.score_b}
                   </div>
+                  {needsLineup && match.participant_a_id && match.participant_b_id ? (
+                    <TournamentLineupBrief
+                      matchId={match.id}
+                      participantA={{
+                        id: match.participant_a_id,
+                        name: participantAName,
+                        members: participantAMembers
+                      }}
+                      participantB={{
+                        id: match.participant_b_id,
+                        name: participantBName,
+                        members: participantBMembers
+                      }}
+                      legRules={matchLegRules}
+                      participantASubmission={participantASubmission?.legLineups || []}
+                      participantBSubmission={participantBSubmission?.legLineups || []}
+                      participantAHasSubmission={Boolean(participantASubmission)}
+                      participantBHasSubmission={Boolean(participantBSubmission)}
+                      canSubmitA={canManageLineup(match.participant_a_id)}
+                      canSubmitB={canManageLineup(match.participant_b_id)}
+                      bothSubmitted={bothLineupsSubmitted}
+                      submittedLineups={submittedLineups}
+                    />
+                  ) : null}
+                  {canReserve || currentReservation ? (
+                    <BoardReservationPanel
+                      matchId={match.id}
+                      boards={boardRows}
+                      reservations={reservationRows}
+                      currentReservation={currentReservation}
+                      canReserve={canReserve}
+                    />
+                  ) : null}
                 </div>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex min-w-0 flex-wrap gap-2">
                   {canScore ? (
                     <Link className="rounded-lg bg-board px-3 py-2 text-sm font-black text-white" href={`/scorer/${match.id}`}>
                       计分
@@ -379,12 +543,217 @@ export default async function TournamentDetailPage({
               </div>
             );
           })}
-            {matchRows.length === 0 ? <p className="text-sm text-muted">暂无赛程。</p> : null}
+            {baseScheduleRows.length === 0 ? <p className="text-sm text-muted">暂无赛程。</p> : null}
+            {baseScheduleRows.length > 0 && filteredScheduleRows.length === 0 ? (
+              <p className="text-sm text-muted">当前筛选下暂无赛程。</p>
+            ) : null}
           </div>
         </Card>
       ) : null}
     </div>
   );
+}
+
+function ScheduleFilterLink({
+  href,
+  active,
+  children
+}: {
+  href: string;
+  active: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <Link
+      href={href}
+      className={cn(
+        "inline-flex min-h-9 touch-manipulation items-center rounded-lg border px-3 text-sm font-black transition-colors duration-75",
+        active
+          ? "border-board bg-board text-white"
+          : "border-wire bg-surface text-ink hover:border-board/40 active:bg-field"
+      )}
+    >
+      {children}
+    </Link>
+  );
+}
+
+type ScheduleParticipantInfo = {
+  id: string;
+  name: string;
+  members: Array<{ userId: string; name: string; avatarUrl?: string | null }>;
+};
+
+function TournamentLineupBrief({
+  matchId,
+  participantA,
+  participantB,
+  legRules,
+  participantASubmission,
+  participantBSubmission,
+  participantAHasSubmission,
+  participantBHasSubmission,
+  canSubmitA,
+  canSubmitB,
+  bothSubmitted,
+  submittedLineups
+}: {
+  matchId: string;
+  participantA: ScheduleParticipantInfo;
+  participantB: ScheduleParticipantInfo;
+  legRules: MatchLegRule[];
+  participantASubmission: Array<{ legNumber: number; playerIds: string[] }>;
+  participantBSubmission: Array<{ legNumber: number; playerIds: string[] }>;
+  participantAHasSubmission: boolean;
+  participantBHasSubmission: boolean;
+  canSubmitA: boolean;
+  canSubmitB: boolean;
+  bothSubmitted: boolean;
+  submittedLineups: MatchLegLineup[];
+}) {
+  const memberById = new Map(
+    [...participantA.members, ...participantB.members].map((member) => [member.userId, member])
+  );
+
+  return (
+    <details className="mt-3 rounded-lg border border-wire bg-field p-3">
+      <summary className="cursor-pointer text-sm font-black text-board">
+        赛前布阵 · {participantA.name} {participantAHasSubmission ? "已提交" : "待提交"} · {participantB.name}{" "}
+        {participantBHasSubmission ? "已提交" : "待提交"}
+      </summary>
+
+      {bothSubmitted ? (
+        <div className="mt-3 grid gap-2">
+          {submittedLineups.length > 0 ? (
+            submittedLineups.slice(0, 4).map((lineup) => {
+              const aNames = lineup.participantAUserIds
+                .map((userId) => memberById.get(userId)?.name)
+                .filter(Boolean)
+                .join(" / ");
+              const bNames = lineup.participantBUserIds
+                .map((userId) => memberById.get(userId)?.name)
+                .filter(Boolean)
+                .join(" / ");
+              return (
+                <div key={lineup.legNumber} className="rounded-lg bg-surface px-3 py-2 text-sm font-bold">
+                  第 {lineup.legNumber} 局：{aNames || participantA.name} 对 {bNames || participantB.name}
+                </div>
+              );
+            })
+          ) : (
+            <p className="rounded-lg bg-surface p-3 text-sm font-semibold text-muted">
+              双方已提交布阵，进入计分页后公示完整对阵。
+            </p>
+          )}
+        </div>
+      ) : (
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
+          <ScheduleLineupSide
+            matchId={matchId}
+            participant={participantA}
+            legRules={legRules}
+            submittedLegLineups={participantASubmission}
+            hasSubmitted={participantAHasSubmission}
+            canSubmit={canSubmitA}
+          />
+          <ScheduleLineupSide
+            matchId={matchId}
+            participant={participantB}
+            legRules={legRules}
+            submittedLegLineups={participantBSubmission}
+            hasSubmitted={participantBHasSubmission}
+            canSubmit={canSubmitB}
+          />
+        </div>
+      )}
+    </details>
+  );
+}
+
+function ScheduleLineupSide({
+  matchId,
+  participant,
+  legRules,
+  submittedLegLineups,
+  hasSubmitted,
+  canSubmit
+}: {
+  matchId: string;
+  participant: ScheduleParticipantInfo;
+  legRules: MatchLegRule[];
+  submittedLegLineups: Array<{ legNumber: number; playerIds: string[] }>;
+  hasSubmitted: boolean;
+  canSubmit: boolean;
+}) {
+  const submitted = hasSubmitted || submittedLegLineups.length > 0;
+
+  return (
+    <div className="grid gap-2 rounded-lg bg-surface p-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="truncate text-sm font-black">{participant.name}</div>
+        <span className={`rounded-full px-2 py-1 text-xs font-black ${submitted ? "bg-board text-white" : "bg-field text-muted"}`}>
+          {submitted ? "已提交" : "待提交"}
+        </span>
+      </div>
+      {canSubmit ? (
+        <MatchLineupSubmissionForm
+          matchId={matchId}
+          participantId={participant.id}
+          legRules={legRules}
+          members={participant.members}
+          submittedLegLineups={submittedLegLineups}
+          hasExistingSubmission={submitted}
+          compact
+        />
+      ) : (
+        <p className="text-xs font-semibold text-muted">只能查看提交状态，提交前不会公开名单。</p>
+      )}
+    </div>
+  );
+}
+
+function groupBoardSlots(slots: TournamentBoardTimeSlot[]) {
+  const slotsByBoardId = new Map<string, TournamentBoardTimeSlot[]>();
+  for (const slot of slots) {
+    const list = slotsByBoardId.get(slot.board_id) || [];
+    list.push(slot);
+    slotsByBoardId.set(slot.board_id, list);
+  }
+  return slotsByBoardId;
+}
+
+function toBoardView(board: TournamentBoard, slots: TournamentBoardTimeSlot[] = []): BoardReservationBoard {
+  return {
+    id: board.id,
+    name: board.name,
+    availableStartAt: board.available_start_at,
+    availableEndAt: board.available_end_at,
+    status: board.status,
+    slots: slots.map(toBoardSlotView)
+  };
+}
+
+function toBoardSlotView(slot: TournamentBoardTimeSlot): BoardReservationSlot {
+  return {
+    id: slot.id,
+    boardId: slot.board_id,
+    availableStartAt: slot.available_start_at,
+    availableEndAt: slot.available_end_at,
+    dailyStartTime: slot.daily_start_time,
+    dailyEndTime: slot.daily_end_time,
+    status: slot.status
+  };
+}
+
+function toReservationView(reservation: MatchBoardReservation): BoardReservationRow {
+  return {
+    id: reservation.id,
+    matchId: reservation.match_id,
+    boardId: reservation.board_id,
+    reservedStartAt: reservation.reserved_start_at,
+    reservedEndAt: reservation.reserved_end_at,
+    status: reservation.status
+  };
 }
 
 function getTournamentFormatLabel(format: Tournament["format"]) {
@@ -396,9 +765,9 @@ function getTournamentFormatLabel(format: Tournament["format"]) {
 
 function Info({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-wire bg-field/80 p-3">
+    <div className="min-w-0 rounded-lg border border-wire bg-field/80 p-3">
       <dt className="text-xs font-black text-muted">{label}</dt>
-      <dd className="mt-1 font-black">{value}</dd>
+      <dd className="mt-1 break-words font-black">{value}</dd>
     </div>
   );
 }

@@ -146,6 +146,38 @@ export function getMatchRulesSummary(input: {
   return `${modeLabel} / ${rules.length} 局 / ${variantLabels.join(" / ")}`;
 }
 
+export function getCompactMatchRulesSummary(input: {
+  dartMode?: string | null;
+  gameVariant?: string | number | null;
+  legRules?: unknown;
+}) {
+  const rules = normalizeMatchLegRules(input.legRules);
+  if (rules.length <= 1) return getMatchRulesSummary(input);
+
+  const dartModes = [...new Set(rules.map((rule) => rule.dartMode))];
+  const participantModes = [...new Set(rules.map((rule) => rule.participantMode))];
+  const variantLabels = [
+    ...new Set(
+      rules.map((rule) =>
+        getGameVariantLabel({
+          dartMode: rule.dartMode,
+          gameVariant: rule.gameVariant
+        })
+      )
+    )
+  ];
+
+  if (dartModes.length === 1 && participantModes.length === 1 && variantLabels.length === 1) {
+    return `${getDartModeLabel(dartModes[0])} / ${variantLabels[0]} / ${rules.length} 局`;
+  }
+
+  const modeLabel = dartModes.length > 1 ? "软硬混合" : "自定义混合";
+  const peopleLabel = participantModes.length > 1
+    ? "多出场模式"
+    : getLegParticipantModeLabel(participantModes[0]);
+  return `${modeLabel}赛制 / ${rules.length} 局 / ${peopleLabel}`;
+}
+
 export function hasCustomLegRules(value?: unknown): value is MatchLegRule[] {
   if (Array.isArray(value)) return value.length > 0;
   if (isTemplateSet(value)) return Boolean(value.steel?.length || value.soft?.length);

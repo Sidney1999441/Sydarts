@@ -38,6 +38,14 @@ export type SoftStatField = {
 
 const soft01Variants = new Set(["soft_301", "soft_501", "soft_701", "snow_501", "snow_701"]);
 
+export function ppdToPpr(ppd: number) {
+  return Number((ppd * 3).toFixed(2));
+}
+
+export function pprToPpd(ppr: number) {
+  return Number((ppr / 3).toFixed(2));
+}
+
 export function isSoft01Variant(gameVariant?: string | number | null) {
   return soft01Variants.has(String(gameVariant || "soft_501"));
 }
@@ -82,7 +90,7 @@ export function getSoftStatFields(gameVariant?: string | number | null): SoftSta
   }
 
   return [
-    { key: "averageScore", label: "均分", step: "0.01" },
+    { key: "averageScore", label: "PPR / 均分", step: "0.01" },
     { key: "countHatTrick", label: "帽子数量", integer: true },
     { key: "countTon80", label: "TON80", integer: true },
     { key: "highestCheckout", label: "最高拆", integer: true },

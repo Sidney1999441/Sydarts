@@ -1,12 +1,21 @@
 import Link from "next/link";
 import { Crosshair, Gauge, Swords } from "lucide-react";
 import { requireUser } from "@/lib/auth/guards";
-import { getMatchRulesSummary } from "@/lib/darts/variants";
+import { getCompactMatchRulesSummary } from "@/lib/darts/variants";
 import { hasSupabaseEnv } from "@/lib/env";
+import { getMatchStatusLabel } from "@/lib/matches/status";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { cn } from "@/lib/utils";
 import { SetupNotice } from "@/components/SetupNotice";
 import { CodlPageHeader } from "@/components/CodlPageHeader";
+import {
+  MatchBoardReservationBadge,
+  type BoardReservationBoard,
+  type BoardReservationRow,
+  type BoardReservationSlot
+} from "@/components/tournament/BoardReservationPanel";
 import { Card } from "@/components/ui/Card";
+import type { MatchBoardReservation, TournamentBoard, TournamentBoardTimeSlot } from "@/types/domain";
 
 export const dynamic = "force-dynamic";
 
@@ -57,6 +66,25 @@ export default async function ScorerPage() {
           .in("id", allMatchParticipantIds)
       : { data: [] };
   const participantById = new Map((matchParticipants || []).map((participant) => [participant.id, participant]));
+  const tournamentIds = [...new Set((matches || []).map((match) => match.tournament_id).filter(Boolean))] as string[];
+  const [{ data: boards }, { data: boardSlots }, { data: reservations }] =
+    tournamentIds.length > 0
+      ? await Promise.all([
+          supabase.from("tournament_boards").select("*").in("tournament_id", tournamentIds),
+          supabase.from("tournament_board_time_slots").select("*").in("tournament_id", tournamentIds).order("daily_start_time"),
+          supabase
+            .from("match_board_reservations")
+            .select("*")
+            .in("tournament_id", tournamentIds)
+            .eq("status", "active")
+        ])
+      : [{ data: [] }, { data: [] }, { data: [] }];
+  const boardSlotRows = (boardSlots || []) as TournamentBoardTimeSlot[];
+  const slotsByBoardId = groupBoardSlots(boardSlotRows);
+  const boardRows = ((boards || []) as TournamentBoard[]).map((board) => toBoardView(board, slotsByBoardId.get(board.id)));
+  const reservationRows = ((reservations || []) as MatchBoardReservation[]).map(toReservationView);
+  const boardById = new Map(boardRows.map((board) => [board.id, board]));
+  const reservationByMatchId = new Map(reservationRows.map((reservation) => [reservation.matchId, reservation]));
 
   return (
     <div className="grid gap-5">
@@ -94,6 +122,10 @@ export default async function ScorerPage() {
           {(matches || []).map((match) => {
             const participantAName = participantById.get(match.participant_a_id || "")?.display_name || "TBD";
             const participantBName = participantById.get(match.participant_b_id || "")?.display_name || "TBD";
+            const participantAIsMine = participantIds.includes(match.participant_a_id || "");
+            const participantBIsMine = participantIds.includes(match.participant_b_id || "");
+            const currentReservation = reservationByMatchId.get(match.id) || null;
+            const currentBoard = currentReservation ? boardById.get(currentReservation.boardId) || null : null;
 
             return (
               <Link
@@ -102,17 +134,27 @@ export default async function ScorerPage() {
                 className="block min-h-20 touch-manipulation rounded-lg border border-wire bg-surface/90 p-4 transition-colors duration-75 hover:border-board/40 hover:bg-field active:bg-field"
               >
                 <div className="text-xs font-black uppercase text-muted">
-                  第 {match.round_number} 轮 / 第 {match.match_number} 场 / {match.status}
+                  第 {match.round_number} 轮 / 第 {match.match_number} 场 / {getMatchStatusLabel(match.status)}
                 </div>
                 <div className="mt-1 font-black">
-                  第 {match.round_number} 轮，{participantAName} 对 {participantBName}
+                  第 {match.round_number} 轮，
+                  <span className={cn(participantAIsMine && "rounded bg-board/10 px-1 text-board")}>
+                    {participantAName}
+                  </span>
+                  {" 对 "}
+                  <span className={cn(participantBIsMine && "rounded bg-board/10 px-1 text-board")}>
+                    {participantBName}
+                  </span>
                 </div>
                 <div className="mt-1 text-xs font-bold text-board">
-                  {getMatchRulesSummary({
+                  {getCompactMatchRulesSummary({
                     dartMode: match.dart_mode,
                     gameVariant: match.game_variant,
                     legRules: match.leg_rules
                   })}
+                </div>
+                <div className="mt-2">
+                  <MatchBoardReservationBadge reservation={currentReservation} board={currentBoard} />
                 </div>
               </Link>
             );
@@ -124,4 +166,48 @@ export default async function ScorerPage() {
       </Card>
     </div>
   );
+}
+
+function groupBoardSlots(slots: TournamentBoardTimeSlot[]) {
+  const slotsByBoardId = new Map<string, TournamentBoardTimeSlot[]>();
+  for (const slot of slots) {
+    const list = slotsByBoardId.get(slot.board_id) || [];
+    list.push(slot);
+    slotsByBoardId.set(slot.board_id, list);
+  }
+  return slotsByBoardId;
+}
+
+function toBoardView(board: TournamentBoard, slots: TournamentBoardTimeSlot[] = []): BoardReservationBoard {
+  return {
+    id: board.id,
+    name: board.name,
+    availableStartAt: board.available_start_at,
+    availableEndAt: board.available_end_at,
+    status: board.status,
+    slots: slots.map(toBoardSlotView)
+  };
+}
+
+function toBoardSlotView(slot: TournamentBoardTimeSlot): BoardReservationSlot {
+  return {
+    id: slot.id,
+    boardId: slot.board_id,
+    availableStartAt: slot.available_start_at,
+    availableEndAt: slot.available_end_at,
+    dailyStartTime: slot.daily_start_time,
+    dailyEndTime: slot.daily_end_time,
+    status: slot.status
+  };
+}
+
+function toReservationView(reservation: MatchBoardReservation): BoardReservationRow {
+  return {
+    id: reservation.id,
+    matchId: reservation.match_id,
+    boardId: reservation.board_id,
+    reservedStartAt: reservation.reserved_start_at,
+    reservedEndAt: reservation.reserved_end_at,
+    status: reservation.status
+  };
 }

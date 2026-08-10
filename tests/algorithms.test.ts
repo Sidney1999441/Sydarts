@@ -18,7 +18,7 @@ import {
   getMatchGameVariant,
   getMatchRulesSummary
 } from "@/lib/darts/variants";
-import { getSoftStatFields, mergeManualStats } from "@/lib/darts/soft-stats";
+import { getSoftStatFields, mergeManualStats, ppdToPpr, pprToPpd } from "@/lib/darts/soft-stats";
 
 const players = [
   { id: "u1", name: "A", rating: 1600 },
@@ -564,6 +564,11 @@ describe("team-first tournament algorithms", () => {
       count9Marks: 3,
       countWhiteHorse: 1
     });
+  });
+
+  it("converts soft dart PPD to PPR for manual entry helpers", () => {
+    expect(ppdToPpr(25.47)).toBe(76.41);
+    expect(pprToPpd(76.41)).toBe(25.47);
   });
 
   it("keeps new players in the entry rank until enough data exists", () => {

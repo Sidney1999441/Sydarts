@@ -23,6 +23,8 @@ coverage/
 
 # logs and generated files
 tmp/
+exports/
+output/
 *.log
 *.tsbuildinfo
 npm-debug.log*

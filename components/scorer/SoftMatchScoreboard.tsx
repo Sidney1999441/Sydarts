@@ -9,6 +9,8 @@ import {
   getSoftStatFields,
   isSoftHighScoreVariant,
   mergeManualStats,
+  ppdToPpr,
+  pprToPpd,
   type ManualMatchStats
 } from "@/lib/darts/soft-stats";
 import { createResultSubmissionId } from "@/lib/results/submission";
@@ -80,6 +82,7 @@ export function SoftMatchScoreboard({
   participantB,
   legRules,
   matchFinishMode = "majority",
+  initialLineups,
   saveLabel,
   successMessage,
   onComplete
@@ -88,14 +91,18 @@ export function SoftMatchScoreboard({
   participantB: ParticipantInfo;
   legRules: MatchLegRule[];
   matchFinishMode?: MatchFinishMode;
+  initialLineups?: MatchLegLineup[];
   saveLabel: string;
   successMessage: string;
   onComplete: (payload: ScoringCompletePayload) => Promise<void>;
 }) {
   const rules = useMemo(() => legRules.filter((rule) => rule.dartMode === "soft"), [legRules]);
-  const initialLineups = useMemo(() => defaultLineups(rules, participantA, participantB), [rules, participantA, participantB]);
-  const [lineups, setLineups] = useState<MatchLegLineup[]>(initialLineups);
-  const [lineupConfirmed, setLineupConfirmed] = useState(false);
+  const resolvedInitialLineups = useMemo(
+    () => (initialLineups && initialLineups.length > 0 ? initialLineups : defaultLineups(rules, participantA, participantB)),
+    [initialLineups, participantA, participantB, rules]
+  );
+  const [lineups, setLineups] = useState<MatchLegLineup[]>(resolvedInitialLineups);
+  const [lineupConfirmed, setLineupConfirmed] = useState(Boolean(initialLineups && initialLineups.length > 0));
   const [currentLegIndex, setCurrentLegIndex] = useState(0);
   const [scoreA, setScoreA] = useState(0);
   const [scoreB, setScoreB] = useState(0);
@@ -105,6 +112,7 @@ export function SoftMatchScoreboard({
   const [participantScoreA, setParticipantScoreA] = useState("");
   const [participantScoreB, setParticipantScoreB] = useState("");
   const [legStats, setLegStats] = useState<Record<string, ManualMatchStats>>({});
+  const [ppdInputs, setPpdInputs] = useState<Record<string, string>>({});
   const [message, setMessage] = useState("");
   const [isSaved, setIsSaved] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -174,10 +182,18 @@ export function SoftMatchScoreboard({
     setMessage("");
   }
 
-  function updateStat(userId: string, key: keyof ManualMatchStats, rawValue: string) {
+  function clearPpdInput(userId: string) {
+    setPpdInputs((current) => {
+      if (!(userId in current)) return current;
+      const next = { ...current };
+      delete next[userId];
+      return next;
+    });
+  }
+
+  function updateStatValue(userId: string, key: keyof ManualMatchStats, value: number | undefined) {
     setLegStats((current) => {
       const nextUserStats = { ...(current[userId] || {}) };
-      const value = optionalNumber(rawValue);
       if (value === undefined) {
         delete nextUserStats[key];
       } else {
@@ -194,11 +210,31 @@ export function SoftMatchScoreboard({
     });
   }
 
+  function updateStat(userId: string, key: keyof ManualMatchStats, rawValue: string) {
+    if (key === "averageScore") clearPpdInput(userId);
+    updateStatValue(userId, key, optionalNumber(rawValue));
+  }
+
+  function updatePpdAverage(userId: string, rawValue: string) {
+    setPpdInputs((current) => {
+      if (rawValue.trim() === "") {
+        const next = { ...current };
+        delete next[userId];
+        return next;
+      }
+      return { ...current, [userId]: rawValue };
+    });
+
+    const ppd = optionalNumber(rawValue);
+    updateStatValue(userId, "averageScore", ppd === undefined ? undefined : ppdToPpr(ppd));
+  }
+
   function resetCurrentLegForm() {
     setCurrentWinner("");
     setParticipantScoreA("");
     setParticipantScoreB("");
     setLegStats({});
+    setPpdInputs({});
   }
 
   function resetMatch() {
@@ -548,20 +584,61 @@ export function SoftMatchScoreboard({
                 />
               </summary>
               <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-4">
-                {currentFields.map((field) => (
-                  <label key={`${player.userId}-${field.key}`} className="label">
-                    {field.label}
-                    <input
-                      className="form-input"
-                      inputMode={field.integer ? "numeric" : "decimal"}
-                      min={0}
-                      step={field.step || "1"}
-                      type="number"
-                      value={legStats[player.userId]?.[field.key] ?? ""}
-                      onChange={(event) => updateStat(player.userId, field.key, event.target.value)}
-                    />
-                  </label>
-                ))}
+                {currentFields.map((field) =>
+                  field.key === "averageScore" ? (
+                    <div
+                      key={`${player.userId}-${field.key}`}
+                      className="grid gap-2 rounded-lg border border-board/20 bg-surface p-2 sm:col-span-2"
+                    >
+                      <div className="text-xs font-black text-board">01 均分</div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <label className="label">
+                          PPR
+                          <input
+                            className="form-input"
+                            inputMode="decimal"
+                            min={0}
+                            step={field.step || "0.01"}
+                            type="number"
+                            value={legStats[player.userId]?.averageScore ?? ""}
+                            onChange={(event) => updateStat(player.userId, "averageScore", event.target.value)}
+                          />
+                        </label>
+                        <label className="label">
+                          PPD
+                          <input
+                            className="form-input"
+                            inputMode="decimal"
+                            min={0}
+                            step="0.01"
+                            type="number"
+                            value={ppdInputs[player.userId] ?? ""}
+                            placeholder={
+                              legStats[player.userId]?.averageScore !== undefined
+                                ? String(pprToPpd(legStats[player.userId]?.averageScore || 0))
+                                : "自动换算"
+                            }
+                            onChange={(event) => updatePpdAverage(player.userId, event.target.value)}
+                          />
+                        </label>
+                      </div>
+                      <p className="text-[11px] font-semibold text-muted">输入 PPD 会自动换算为 PPR 后提交。</p>
+                    </div>
+                  ) : (
+                    <label key={`${player.userId}-${field.key}`} className="label">
+                      {field.label}
+                      <input
+                        className="form-input"
+                        inputMode={field.integer ? "numeric" : "decimal"}
+                        min={0}
+                        step={field.step || "1"}
+                        type="number"
+                        value={legStats[player.userId]?.[field.key] ?? ""}
+                        onChange={(event) => updateStat(player.userId, field.key, event.target.value)}
+                      />
+                    </label>
+                  )
+                )}
               </div>
             </details>
           ))}

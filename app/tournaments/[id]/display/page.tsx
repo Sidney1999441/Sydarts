@@ -6,8 +6,9 @@ import { DisplayModeChrome } from "@/components/DisplayModeChrome";
 import { TournamentBracket } from "@/components/TournamentBracket";
 import { SetupNotice } from "@/components/SetupNotice";
 import { updateTournamentStandings } from "@/lib/algorithms/standings";
-import { getMatchRulesSummary } from "@/lib/darts/variants";
+import { getCompactMatchRulesSummary } from "@/lib/darts/variants";
 import { hasSupabaseEnv } from "@/lib/env";
+import { getMatchStatusLabel } from "@/lib/matches/status";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { cn, formatDateTime } from "@/lib/utils";
 import type { MatchSummary, ParticipantSeed, Tournament } from "@/types/domain";
@@ -165,7 +166,7 @@ export default async function TournamentDisplayPage({
                         {participantById.get(match.participant_a_id || "") || "A"} vs {participantById.get(match.participant_b_id || "") || "B"}
                       </span>
                       <span className="mt-1 block truncate text-xs font-bold text-white/45">
-                        第 {match.round_number} 轮 · {getMatchRulesSummary({
+                        第 {match.round_number} 轮 · {getCompactMatchRulesSummary({
                           dartMode: match.dart_mode,
                           gameVariant: match.game_variant,
                           legRules: match.leg_rules
@@ -230,7 +231,7 @@ function MatchBillboard({
           第 {match.round_number} 轮 / M{match.match_number}
         </div>
         <div className="mt-1 text-6xl font-black leading-none">{match.score_a}:{match.score_b}</div>
-        <div className="mt-2 text-xs font-black text-white/70">{match.status}</div>
+        <div className="mt-2 text-xs font-black text-white/70">{getMatchStatusLabel(match.status)}</div>
       </div>
       <div className="rounded-lg bg-white/10 p-4 lg:text-right">
         <div className="text-xs font-black text-white/45">B</div>
