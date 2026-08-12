@@ -1,7 +1,7 @@
 "use client";
 
-import { completeScoredMatchAction } from "@/lib/actions/matches";
-import { SoftMatchScoreboard } from "@/components/scorer/SoftMatchScoreboard";
+import { clearSoftScoringDraftAction, completeScoredMatchAction, saveSoftScoringDraftAction } from "@/lib/actions/matches";
+import { SoftMatchScoreboard, type SoftScoringDraftPayload } from "@/components/scorer/SoftMatchScoreboard";
 import type { ScoringCompletePayload } from "@/components/scorer/TouchScoreboard";
 import type { MatchFinishMode, MatchLegLineup, MatchLegRule } from "@/types/domain";
 
@@ -18,7 +18,8 @@ export function SoftScoreboard({
   participantB,
   legRules,
   matchFinishMode,
-  initialLineups
+  initialLineups,
+  initialDraft
 }: {
   matchId: string;
   participantA: ParticipantInfo;
@@ -26,6 +27,7 @@ export function SoftScoreboard({
   legRules: MatchLegRule[];
   matchFinishMode: MatchFinishMode;
   initialLineups?: MatchLegLineup[];
+  initialDraft?: SoftScoringDraftPayload | null;
 }) {
   async function saveOfficialResult(payload: ScoringCompletePayload) {
     await completeScoredMatchAction({
@@ -48,6 +50,9 @@ export function SoftScoreboard({
       legRules={legRules}
       matchFinishMode={matchFinishMode}
       initialLineups={initialLineups}
+      initialDraft={initialDraft}
+      onSaveDraft={(draft) => saveSoftScoringDraftAction({ matchId, draft })}
+      onClearDraft={() => clearSoftScoringDraftAction({ matchId })}
       saveLabel="上传结果"
       successMessage="软镖比赛结果已保存，并写入赛事与个人软镖数据。"
       onComplete={saveOfficialResult}

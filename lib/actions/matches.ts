@@ -178,6 +178,94 @@ const completeMatchSchema = z.object({
   userStats: z.record(z.string().uuid(), manualStatsSchema).default({})
 });
 
+const scoringParticipantDraftSchema = z.object({
+  participantId: z.string().uuid(),
+  remaining: z.number().int().min(0),
+  legsWon: z.number().int().min(0),
+  turns: completeMatchSchema.shape.turns
+});
+
+const scoringStateDraftSchema = z.object({
+  startingScore: z.union([z.literal(301), z.literal(501), z.literal(701)]),
+  bestOf: z.union([z.literal(3), z.literal(5), z.literal(7)]),
+  matchFinishMode: z.enum(["majority", "play_all"]),
+  firstParticipantId: z.string().uuid(),
+  firstThrowMode: z.enum(["alternate", "winner", "loser", "fixed"]),
+  legRules: z.array(
+    z.object({
+      legNumber: z.number().int().min(1),
+      participantMode: z.enum(["singles", "doubles", "team"]),
+      dartMode: z.enum(["steel", "soft"]),
+      gameVariant: z.string()
+    })
+  ),
+  legLineups: completeMatchSchema.shape.legLineups,
+  legResults: completeMatchSchema.shape.legResults,
+  currentLeg: z.number().int().min(1),
+  activeParticipantId: z.string().uuid(),
+  winnerParticipantId: z.string().uuid().nullable(),
+  turns: completeMatchSchema.shape.turns,
+  participants: z.tuple([scoringParticipantDraftSchema, scoringParticipantDraftSchema])
+});
+
+const scoringDraftSchema = z.object({
+  version: z.literal(1),
+  savedAt: z.string().optional(),
+  savedBy: z.string().uuid().optional(),
+  submissionId: z.string().uuid(),
+  state: scoringStateDraftSchema,
+  lineups: completeMatchSchema.shape.legLineups,
+  firstParticipantId: z.string().uuid().nullable(),
+  firstThrowMode: z.enum(["alternate", "winner", "loser", "fixed"]),
+  roundLimit: z.union([z.literal(10), z.literal(15), z.literal(20), z.literal("unlimited")]),
+  activeThrowerByParticipant: z.record(z.string(), z.string()).default({})
+});
+
+const saveScoringDraftSchema = z.object({
+  matchId: z.string().uuid(),
+  draft: scoringDraftSchema
+});
+
+const clearScoringDraftSchema = z.object({
+  matchId: z.string().uuid()
+});
+
+const softLegEntryDraftSchema = z.object({
+  legNumber: z.number().int().min(1),
+  winnerParticipantId: z.string().uuid(),
+  scoreA: z.number().optional(),
+  scoreB: z.number().optional(),
+  userStats: z.record(z.string().uuid(), manualStatsSchema).default({})
+});
+
+const softScoringDraftSchema = z.object({
+  version: z.literal(1),
+  savedAt: z.string().optional(),
+  savedBy: z.string().uuid().optional(),
+  submissionId: z.string().uuid(),
+  lineups: completeMatchSchema.shape.legLineups,
+  lineupConfirmed: z.boolean(),
+  currentLegIndex: z.number().int().min(0),
+  scoreA: z.number().int().min(0),
+  scoreB: z.number().int().min(0),
+  winnerParticipantId: z.string().uuid().nullable(),
+  legEntries: z.array(softLegEntryDraftSchema),
+  currentWinner: z.union([z.string().uuid(), z.literal("")]).default(""),
+  participantScoreA: z.string().default(""),
+  participantScoreB: z.string().default(""),
+  legStats: z.record(z.string().uuid(), manualStatsSchema).default({}),
+  ppdInputs: z.record(z.string().uuid(), z.string()).default({})
+});
+
+const saveSoftScoringDraftSchema = z.object({
+  matchId: z.string().uuid(),
+  draft: softScoringDraftSchema
+});
+
+const clearSoftScoringDraftSchema = z.object({
+  matchId: z.string().uuid()
+});
+
 const completeCasualMatchSchema = z.object({
   submissionId: z.string().uuid().optional(),
   opponentName: z.string().trim().min(1).max(80),
@@ -1375,6 +1463,227 @@ export async function submitMatchLineupFormAction(
       error: actionErrorMessage(error)
     };
   }
+}
+
+function matchDetailsRecord(details: unknown) {
+  return details && typeof details === "object" && !Array.isArray(details)
+    ? { ...(details as Record<string, unknown>) }
+    : {};
+}
+
+function assertScoringDraftBelongsToMatch(input: {
+  draft: z.infer<typeof scoringDraftSchema>;
+  participantAId: string;
+  participantBId: string;
+}) {
+  const participantIds = input.draft.state.participants.map((participant) => participant.participantId);
+  if (!participantIds.includes(input.participantAId) || !participantIds.includes(input.participantBId)) {
+    throw new Error("中断记录与当前比赛双方不一致。");
+  }
+  if (
+    input.draft.firstParticipantId &&
+    input.draft.firstParticipantId !== input.participantAId &&
+    input.draft.firstParticipantId !== input.participantBId
+  ) {
+    throw new Error("中断记录的先手方不属于当前比赛。");
+  }
+  if (input.draft.state.winnerParticipantId) {
+    throw new Error("比赛已产生胜方，请直接提交结果。");
+  }
+  if (input.draft.state.turns.length > 0) {
+    assertTurnUsersInLineups({
+      turns: input.draft.state.turns,
+      participantAId: input.participantAId,
+      participantBId: input.participantBId,
+      lineups: input.draft.lineups as MatchLegLineup[]
+    });
+  }
+}
+
+export async function saveScoringDraftAction(payload: unknown) {
+  const { user } = await requireUser();
+  const values = saveScoringDraftSchema.parse(payload);
+  await assertMatchMember(values.matchId, user.id);
+
+  const admin = createSupabaseAdminClient();
+  const { data: match, error: matchError } = await admin
+    .from("matches")
+    .select("id, tournament_id, participant_a_id, participant_b_id, status, details")
+    .eq("id", values.matchId)
+    .single();
+
+  if (matchError) throw new Error(matchError.message);
+  if (match.status === "completed" || match.status === "bye") return;
+  if (!match.participant_a_id || !match.participant_b_id) {
+    throw new Error("Match does not have two participants.");
+  }
+
+  assertScoringDraftBelongsToMatch({
+    draft: values.draft,
+    participantAId: match.participant_a_id,
+    participantBId: match.participant_b_id
+  });
+
+  const nextDetails = matchDetailsRecord(match.details);
+  nextDetails.scoringDraft = {
+    ...values.draft,
+    savedAt: new Date().toISOString(),
+    savedBy: user.id
+  };
+
+  const { error: updateError } = await admin
+    .from("matches")
+    .update({ details: nextDetails })
+    .eq("id", values.matchId)
+    .neq("status", "completed")
+    .neq("status", "bye");
+  if (updateError) throw new Error(updateError.message);
+}
+
+export async function clearScoringDraftAction(payload: unknown) {
+  const { user } = await requireUser();
+  const values = clearScoringDraftSchema.parse(payload);
+  await assertMatchMember(values.matchId, user.id);
+
+  const admin = createSupabaseAdminClient();
+  const { data: match, error: matchError } = await admin
+    .from("matches")
+    .select("id, tournament_id, status, details")
+    .eq("id", values.matchId)
+    .single();
+
+  if (matchError) throw new Error(matchError.message);
+  if (match.status === "completed" || match.status === "bye") return;
+
+  const nextDetails = matchDetailsRecord(match.details);
+  delete nextDetails.scoringDraft;
+
+  const { error: updateError } = await admin
+    .from("matches")
+    .update({ details: nextDetails })
+    .eq("id", values.matchId)
+    .neq("status", "completed")
+    .neq("status", "bye");
+  if (updateError) throw new Error(updateError.message);
+
+  revalidatePath(`/scorer/${values.matchId}`);
+  revalidatePath(`/tournaments/${match.tournament_id}`);
+}
+
+function assertSoftScoringDraftBelongsToMatch(input: {
+  draft: z.infer<typeof softScoringDraftSchema>;
+  participantAId: string;
+  participantBId: string;
+  participantAUserIds: string[];
+  participantBUserIds: string[];
+}) {
+  const participantIds = new Set([input.participantAId, input.participantBId]);
+  if (input.draft.winnerParticipantId && !participantIds.has(input.draft.winnerParticipantId)) {
+    throw new Error("中断记录的胜方不属于当前比赛。");
+  }
+  if (input.draft.currentWinner && !participantIds.has(input.draft.currentWinner)) {
+    throw new Error("中断记录的当前局胜方不属于当前比赛。");
+  }
+
+  const participantAUserIds = new Set(input.participantAUserIds);
+  const participantBUserIds = new Set(input.participantBUserIds);
+  const allUserIds = new Set([...input.participantAUserIds, ...input.participantBUserIds]);
+
+  for (const lineup of input.draft.lineups) {
+    for (const userId of lineup.participantAUserIds || []) {
+      if (!participantAUserIds.has(userId)) throw new Error("中断记录的 A 队出场名单不属于当前比赛。");
+    }
+    for (const userId of lineup.participantBUserIds || []) {
+      if (!participantBUserIds.has(userId)) throw new Error("中断记录的 B 队出场名单不属于当前比赛。");
+    }
+  }
+
+  for (const entry of input.draft.legEntries) {
+    if (!participantIds.has(entry.winnerParticipantId)) {
+      throw new Error("中断记录的单局胜方不属于当前比赛。");
+    }
+    for (const userId of Object.keys(entry.userStats || {})) {
+      if (!allUserIds.has(userId)) throw new Error("中断记录包含当前比赛外的个人数据。");
+    }
+  }
+
+  for (const userId of [...Object.keys(input.draft.legStats || {}), ...Object.keys(input.draft.ppdInputs || {})]) {
+    if (!allUserIds.has(userId)) throw new Error("中断记录包含当前比赛外的个人数据。");
+  }
+}
+
+export async function saveSoftScoringDraftAction(payload: unknown) {
+  const { user } = await requireUser();
+  const values = saveSoftScoringDraftSchema.parse(payload);
+  await assertMatchMember(values.matchId, user.id);
+
+  const admin = createSupabaseAdminClient();
+  const { data: match, error: matchError } = await admin
+    .from("matches")
+    .select("id, tournament_id, participant_a_id, participant_b_id, status, details")
+    .eq("id", values.matchId)
+    .single();
+
+  if (matchError) throw new Error(matchError.message);
+  if (match.status === "completed" || match.status === "bye") return;
+  if (!match.participant_a_id || !match.participant_b_id) {
+    throw new Error("Match does not have two participants.");
+  }
+
+  const participantAUserIds = await getTeamUserIds(admin, match.participant_a_id);
+  const participantBUserIds = await getTeamUserIds(admin, match.participant_b_id);
+  assertSoftScoringDraftBelongsToMatch({
+    draft: values.draft,
+    participantAId: match.participant_a_id,
+    participantBId: match.participant_b_id,
+    participantAUserIds,
+    participantBUserIds
+  });
+
+  const nextDetails = matchDetailsRecord(match.details);
+  nextDetails.softScoringDraft = {
+    ...values.draft,
+    savedAt: new Date().toISOString(),
+    savedBy: user.id
+  };
+
+  const { error: updateError } = await admin
+    .from("matches")
+    .update({ details: nextDetails })
+    .eq("id", values.matchId)
+    .neq("status", "completed")
+    .neq("status", "bye");
+  if (updateError) throw new Error(updateError.message);
+}
+
+export async function clearSoftScoringDraftAction(payload: unknown) {
+  const { user } = await requireUser();
+  const values = clearSoftScoringDraftSchema.parse(payload);
+  await assertMatchMember(values.matchId, user.id);
+
+  const admin = createSupabaseAdminClient();
+  const { data: match, error: matchError } = await admin
+    .from("matches")
+    .select("id, tournament_id, status, details")
+    .eq("id", values.matchId)
+    .single();
+
+  if (matchError) throw new Error(matchError.message);
+  if (match.status === "completed" || match.status === "bye") return;
+
+  const nextDetails = matchDetailsRecord(match.details);
+  delete nextDetails.softScoringDraft;
+
+  const { error: updateError } = await admin
+    .from("matches")
+    .update({ details: nextDetails })
+    .eq("id", values.matchId)
+    .neq("status", "completed")
+    .neq("status", "bye");
+  if (updateError) throw new Error(updateError.message);
+
+  revalidatePath(`/scorer/${values.matchId}`);
+  revalidatePath(`/tournaments/${match.tournament_id}`);
 }
 
 export async function completeScoredMatchAction(payload: unknown) {

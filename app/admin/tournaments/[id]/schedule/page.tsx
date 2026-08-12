@@ -7,7 +7,7 @@ import {
 } from "@/lib/actions/board-reservations";
 import { generateGroupsAndScheduleAction, generateLeaguePlayoffsAction } from "@/lib/actions/tournaments";
 import { requireAdmin } from "@/lib/auth/guards";
-import { getMatchRulesSummary } from "@/lib/darts/variants";
+import { getDartModeLabel, getMatchRulesSummary } from "@/lib/darts/variants";
 import { hasSupabaseEnv } from "@/lib/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { formatDateTime } from "@/lib/utils";
@@ -153,8 +153,11 @@ export default async function ScheduleAdminPage({
               return (
                 <div key={match.id} className="rounded-lg border border-wire p-4 text-sm">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="font-semibold text-muted">
-                      {match.stage} / R{match.round_number} M{match.match_number} / {match.status}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <DartModeBadge dartMode={match.dart_mode} />
+                      <div className="font-semibold text-muted">
+                        {match.stage} / R{match.round_number} M{match.match_number} / {match.status}
+                      </div>
                     </div>
                     <MatchBoardReservationBadge
                       reservation={toReservationView(reservation)}
@@ -198,6 +201,15 @@ export default async function ScheduleAdminPage({
         </Card>
       ) : null}
     </div>
+  );
+}
+
+function DartModeBadge({ dartMode }: { dartMode?: string | null }) {
+  const isSoft = dartMode === "soft";
+  return (
+    <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-black ${isSoft ? "bg-sky-100 text-board ring-1 ring-sky-200" : "bg-zinc-900 text-white"}`}>
+      {getDartModeLabel(dartMode)}
+    </span>
   );
 }
 

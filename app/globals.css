@@ -464,6 +464,15 @@ body.codl-display-active main {
     padding: 0.4rem 0.5rem;
   }
 
+  .codl-official-score-header {
+    min-height: 2.85rem;
+    padding: 0.45rem 0.55rem;
+  }
+
+  .codl-official-score-title {
+    font-size: clamp(0.86rem, 3.6vw, 1rem);
+  }
+
   .codl-touch-scoreboard {
     height: 100%;
     min-height: 0;
@@ -480,12 +489,17 @@ body.codl-display-active main {
 
   .codl-score-players {
     min-height: 0;
-    grid-template-rows: auto auto;
+    grid-template-rows: auto auto auto;
     gap: 0.25rem;
   }
 
+  .codl-score-status-strip {
+    min-height: 2.15rem;
+    padding: 0.25rem 0.45rem;
+  }
+
   .codl-player-panel {
-    min-height: clamp(4.8rem, 12dvh, 5.7rem);
+    min-height: clamp(4.2rem, 10dvh, 4.9rem);
     align-content: space-between;
     padding: 0.45rem 0.5rem;
   }
@@ -495,7 +509,7 @@ body.codl-display-active main {
   }
 
   .codl-player-score {
-    font-size: clamp(2.35rem, 10vw, 3.35rem);
+    font-size: clamp(2.1rem, 9.2vw, 3rem);
   }
 
   .codl-player-ppr {
@@ -514,7 +528,7 @@ body.codl-display-active main {
   .codl-score-input {
     min-height: 0;
     overflow: hidden;
-    grid-template-rows: auto minmax(0, 1fr) clamp(3.25rem, 7dvh, 3.95rem) minmax(3.25rem, 0.18fr);
+    grid-template-rows: auto minmax(0, 1fr) clamp(3rem, 6.5dvh, 3.55rem) minmax(3rem, 0.16fr);
     gap: 0.375rem;
     padding: 0.375rem;
   }
@@ -615,16 +629,16 @@ body.codl-display-active main {
   }
 
   .codl-score-players {
-    grid-template-rows: auto auto;
+    grid-template-rows: auto auto auto;
   }
 
   .codl-player-panel {
-    min-height: clamp(4.25rem, 12dvh, 5rem);
+    min-height: clamp(3.95rem, 10.5dvh, 4.55rem);
     padding: 0.35rem 0.45rem;
   }
 
   .codl-player-score {
-    font-size: clamp(2.1rem, 9.4vw, 2.9rem);
+    font-size: clamp(1.95rem, 8.8vw, 2.65rem);
   }
 
   .codl-player-ppr {
@@ -636,7 +650,7 @@ body.codl-display-active main {
   }
 
   .codl-score-input {
-    grid-template-rows: auto minmax(0, 1fr) clamp(2.85rem, 6.5dvh, 3.35rem) minmax(2.65rem, 0.14fr);
+    grid-template-rows: auto minmax(0, 1fr) clamp(2.7rem, 6dvh, 3.1rem) minmax(2.45rem, 0.12fr);
     gap: 0.25rem;
     padding: 0.25rem;
   }
@@ -671,8 +685,12 @@ body.codl-display-active main {
     display: none;
   }
 
+  .codl-official-score-header {
+    display: none;
+  }
+
   .codl-score-players {
-    grid-template-rows: auto auto;
+    grid-template-rows: auto auto auto;
   }
 
   .codl-scoreboard-grid {
@@ -684,11 +702,11 @@ body.codl-display-active main {
   }
 
   .codl-player-panel {
-    min-height: 3.95rem;
+    min-height: 3.55rem;
   }
 
   .codl-player-score {
-    font-size: clamp(1.9rem, 8.8vw, 2.6rem);
+    font-size: clamp(1.75rem, 8.2vw, 2.35rem);
   }
 
   .codl-player-ppr {

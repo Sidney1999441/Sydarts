@@ -67,12 +67,18 @@ export type ScoringCompletePayload = {
   userStats?: Record<string, ManualMatchStats>;
 };
 
-const roundLimitOptions: Array<{ value: RoundLimit; label: string }> = [
-  { value: 10, label: "10 轮" },
-  { value: 15, label: "15 轮" },
-  { value: 20, label: "20 轮" },
-  { value: "unlimited", label: "无限" }
-];
+export type ScoringDraftPayload = {
+  version: 1;
+  savedAt?: string;
+  savedBy?: string;
+  submissionId: string;
+  state: ScoringState;
+  lineups: MatchLegLineup[];
+  firstParticipantId: string | null;
+  firstThrowMode: FirstThrowMode;
+  roundLimit: RoundLimit;
+  activeThrowerByParticipant: ThrowerByParticipant;
+};
 
 const firstThrowModeOptions: Array<{ value: FirstThrowMode; label: string; description: string }> = [
   { value: "alternate", label: "轮先", description: "每局双方轮流先手" },
@@ -112,6 +118,14 @@ function getNumericRoundLimit(limit: RoundLimit) {
 
 function getRoundLimitLabel(limit: RoundLimit) {
   return limit === "unlimited" ? "无限" : `${limit} 轮`;
+}
+
+function getDraftStatusLabel(status: "idle" | "restored" | "saving" | "saved" | "error") {
+  if (status === "restored") return "已恢复";
+  if (status === "saving") return "保存中";
+  if (status === "saved") return "已保存";
+  if (status === "error") return "保存失败";
+  return "";
 }
 
 function getFirstThrowModeLabel(mode: FirstThrowMode) {
@@ -162,6 +176,28 @@ function defaultThrowers(
   };
 }
 
+function normalizeScoringDraft(
+  draft: ScoringDraftPayload | null | undefined,
+  participantAId: string,
+  participantBId: string
+) {
+  if (!draft || draft.version !== 1) return null;
+  if (!draft.state || draft.state.winnerParticipantId) return null;
+  const participantIds = draft.state.participants?.map((participant) => participant.participantId) || [];
+  if (!participantIds.includes(participantAId) || !participantIds.includes(participantBId)) return null;
+  if (
+    draft.firstParticipantId &&
+    draft.firstParticipantId !== participantAId &&
+    draft.firstParticipantId !== participantBId
+  ) {
+    return null;
+  }
+  if (draft.roundLimit !== 10 && draft.roundLimit !== 15 && draft.roundLimit !== 20 && draft.roundLimit !== "unlimited") {
+    return null;
+  }
+  return draft;
+}
+
 export function TouchScoreboard({
   participantA,
   participantB,
@@ -170,12 +206,15 @@ export function TouchScoreboard({
   legRules,
   defaultParticipantMode = "doubles",
   matchFinishMode = "majority",
-  initialRoundLimit = "unlimited",
+  initialRoundLimit = 15,
   initialFirstThrowMode = null,
   suggestedFirstParticipantId = null,
   firstThrowHandicapNotice = null,
   initialLineups,
   autoStartFirstParticipantId = null,
+  initialDraft = null,
+  onSaveDraft,
+  onClearDraft,
   saveLabel,
   successMessage,
   onComplete
@@ -193,6 +232,9 @@ export function TouchScoreboard({
   firstThrowHandicapNotice?: string | null;
   initialLineups?: MatchLegLineup[];
   autoStartFirstParticipantId?: string | null;
+  initialDraft?: ScoringDraftPayload | null;
+  onSaveDraft?: (draft: ScoringDraftPayload) => Promise<void>;
+  onClearDraft?: () => Promise<void>;
   saveLabel: string;
   successMessage: string;
   onComplete: (payload: ScoringCompletePayload) => Promise<void>;
@@ -243,26 +285,35 @@ export function TouchScoreboard({
     autoStartFirstParticipantId === participantA.id || autoStartFirstParticipantId === participantB.id
       ? autoStartFirstParticipantId
       : null;
-  const [lineups, setLineups] = useState<MatchLegLineup[]>(resolvedInitialLineups);
-  const [lineupConfirmed, setLineupConfirmed] = useState(!needsLineupSelection);
-  const [firstParticipantId, setFirstParticipantId] = useState<string | null>(safeAutoStartFirstParticipantId);
-  const [firstThrowMode, setFirstThrowMode] = useState<FirstThrowMode>(defaultFirstThrowMode);
-  const [roundLimit, setRoundLimit] = useState<RoundLimit>(initialRoundLimit);
+  const safeInitialDraft = normalizeScoringDraft(initialDraft, participantA.id, participantB.id);
+  const draftLineups = safeInitialDraft?.lineups?.length ? safeInitialDraft.lineups : resolvedInitialLineups;
+  const draftFirstThrowMode = safeInitialDraft?.firstThrowMode || defaultFirstThrowMode;
+  const draftFirstParticipantId = safeInitialDraft?.firstParticipantId || safeAutoStartFirstParticipantId;
+  const [lineups, setLineups] = useState<MatchLegLineup[]>(draftLineups);
+  const [lineupConfirmed, setLineupConfirmed] = useState(Boolean(safeInitialDraft) || !needsLineupSelection);
+  const [firstParticipantId, setFirstParticipantId] = useState<string | null>(draftFirstParticipantId);
+  const [firstThrowMode, setFirstThrowMode] = useState<FirstThrowMode>(draftFirstThrowMode);
+  const [roundLimit, setRoundLimit] = useState<RoundLimit>(safeInitialDraft?.roundLimit || initialRoundLimit);
   const [activeThrowerByParticipant, setActiveThrowerByParticipant] = useState<ThrowerByParticipant>(() =>
-    defaultThrowers(resolvedInitialLineups, participantA, participantB)
+    safeInitialDraft?.activeThrowerByParticipant || defaultThrowers(draftLineups, participantA, participantB)
   );
   const [state, setState] = useState(() =>
-    createFreshState(resolvedInitialLineups, safeAutoStartFirstParticipantId, defaultFirstThrowMode)
+    safeInitialDraft?.state || createFreshState(draftLineups, draftFirstParticipantId, draftFirstThrowMode)
   );
   const [history, setHistory] = useState<ScoringHistoryEntry[]>([]);
   const [scoreInput, setScoreInput] = useState("");
   const [checkoutScore, setCheckoutScore] = useState<number | null>(null);
   const [showDetails, setShowDetails] = useState(false);
   const [showFirstThrowAdjuster, setShowFirstThrowAdjuster] = useState(false);
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState(safeInitialDraft ? "已恢复上次中断进度，可以继续计分。" : "");
+  const [draftStatus, setDraftStatus] = useState<"idle" | "restored" | "saving" | "saved" | "error">(
+    safeInitialDraft ? "restored" : "idle"
+  );
   const [isSaved, setIsSaved] = useState(false);
   const [isPending, startTransition] = useTransition();
-  const submissionIdRef = useRef(createResultSubmissionId());
+  const submissionIdRef = useRef(safeInitialDraft?.submissionId || createResultSubmissionId());
+  const draftSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastDraftSignatureRef = useRef("");
 
   useEffect(() => {
     if (!lineupConfirmed) {
@@ -275,6 +326,53 @@ export function TouchScoreboard({
       document.body.classList.remove("codl-scoreboard-active");
     };
   }, [lineupConfirmed]);
+
+  useEffect(() => {
+    if (!onSaveDraft || !lineupConfirmed || !firstParticipantId || state.winnerParticipantId || isSaved) return;
+
+    const draftCore = {
+      version: 1 as const,
+      submissionId: submissionIdRef.current,
+      state,
+      lineups,
+      firstParticipantId,
+      firstThrowMode,
+      roundLimit,
+      activeThrowerByParticipant
+    };
+    const signature = JSON.stringify(draftCore);
+    if (signature === lastDraftSignatureRef.current) return;
+    if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current);
+
+    draftSaveTimerRef.current = setTimeout(() => {
+      lastDraftSignatureRef.current = signature;
+      setDraftStatus("saving");
+      onSaveDraft({
+        ...draftCore,
+        savedAt: new Date().toISOString()
+      })
+        .then(() => {
+          setDraftStatus("saved");
+        })
+        .catch(() => {
+          setDraftStatus("error");
+        });
+    }, 650);
+
+    return () => {
+      if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current);
+    };
+  }, [
+    activeThrowerByParticipant,
+    firstParticipantId,
+    firstThrowMode,
+    isSaved,
+    lineups,
+    lineupConfirmed,
+    onSaveDraft,
+    roundLimit,
+    state
+  ]);
 
   const names = useMemo(
     () => ({
@@ -446,6 +544,7 @@ export function TouchScoreboard({
     setScoreInput("");
     setCheckoutScore(null);
     setMessage("");
+    setDraftStatus(onSaveDraft ? "saving" : "idle");
     setIsSaved(false);
     submissionIdRef.current = createResultSubmissionId();
   }
@@ -469,6 +568,7 @@ export function TouchScoreboard({
     setCheckoutScore(null);
     setShowFirstThrowAdjuster(false);
     setMessage("已调整先后手。");
+    setDraftStatus(onSaveDraft ? "saving" : "idle");
     setIsSaved(false);
     submissionIdRef.current = createResultSubmissionId();
   }
@@ -488,6 +588,7 @@ export function TouchScoreboard({
       setScoreInput("");
       setCheckoutScore(null);
       setMessage(next.winnerParticipantId ? "" : `已裁定本局胜方，进入第 ${next.currentLeg} 局。`);
+      setDraftStatus(onSaveDraft ? "saving" : "idle");
       setIsSaved(false);
       submissionIdRef.current = createResultSubmissionId();
     } catch (error) {
@@ -510,6 +611,8 @@ export function TouchScoreboard({
       setScoreInput("");
       setCheckoutScore(null);
       setMessage(isRoundLimitReached(next) ? `已达到本局 ${roundLimit} 轮上限，请选择本局胜方。` : "");
+      setDraftStatus(onSaveDraft ? "saving" : "idle");
+      setIsSaved(false);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "请输入 0-180 的整数。");
     }
@@ -546,12 +649,14 @@ export function TouchScoreboard({
     setScoreInput("");
     setCheckoutScore(null);
     setMessage("");
+    setDraftStatus(onSaveDraft ? "saving" : "idle");
     setIsSaved(false);
     submissionIdRef.current = createResultSubmissionId();
   }
 
   function resetMatch() {
     setFirstThrowMode(defaultFirstThrowMode);
+    setRoundLimit(initialRoundLimit);
     setState(createFreshState(lineups, null, defaultFirstThrowMode));
     setFirstParticipantId(null);
     setActiveThrowerByParticipant(defaultThrowers(lineups, participantA, participantB));
@@ -559,8 +664,12 @@ export function TouchScoreboard({
     setScoreInput("");
     setCheckoutScore(null);
     setMessage("");
+    setDraftStatus("idle");
     setIsSaved(false);
     submissionIdRef.current = createResultSubmissionId();
+    if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current);
+    lastDraftSignatureRef.current = "";
+    if (onClearDraft) void onClearDraft().catch(() => setDraftStatus("error"));
   }
 
   function saveResult() {
@@ -577,6 +686,7 @@ export function TouchScoreboard({
           legLineups: lineups
         });
         setIsSaved(true);
+        setDraftStatus("idle");
         setMessage(successMessage);
       } catch (error) {
         setMessage(error instanceof Error ? error.message : "保存失败，请稍后重试。");
@@ -678,7 +788,7 @@ export function TouchScoreboard({
     ? lineupUserIds(activeParticipant.participantId)
         .map((userId) => ({
           userId,
-          name: compactPlayerName(memberNames.get(userId)) || userId,
+          name: compactPlayerName(memberNames.get(userId)) || `选手 ${userId.slice(0, 6)}`,
           avatarUrl: memberById.get(userId)?.avatarUrl || null
         }))
     : [];
@@ -693,11 +803,20 @@ export function TouchScoreboard({
       : null;
   const roundLimitReached = isRoundLimitReached();
   const lastTurn = state.turns.at(-1) || null;
+  const matchScoreLabel = `${state.participants[0]?.legsWon || 0}:${state.participants[1]?.legsWon || 0}`;
+  const draftStatusLabel = onSaveDraft ? getDraftStatusLabel(draftStatus) : "";
 
   return (
     <div className="codl-touch-scoreboard relative grid gap-1.5 rounded-lg pb-20 lg:h-[calc(100dvh-7rem)] lg:min-h-[560px] lg:gap-2 lg:overflow-hidden lg:pb-0">
       <div className="codl-scoreboard-grid grid min-h-0 gap-2 lg:h-full lg:grid-cols-[0.86fr_1.14fr]">
-        <section className="codl-score-players grid min-h-0 grid-cols-2 grid-rows-[auto_auto] gap-1 lg:grid-cols-1 lg:grid-rows-[1fr_1fr_auto] lg:gap-2">
+        <section className="codl-score-players grid min-h-0 grid-cols-2 grid-rows-[auto_auto_auto] gap-1 lg:grid-cols-1 lg:grid-rows-[auto_1fr_1fr_auto] lg:gap-2">
+          <div className="codl-score-status-strip col-span-2 grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-lg border border-board/20 bg-surface px-2 py-1 text-xs font-black text-ink shadow-soft lg:col-span-1">
+            <span className="rounded-md bg-board px-2 py-1 text-white">比分 {matchScoreLabel}</span>
+            <span className="min-w-0 truncate text-board">第 {state.currentLeg} 局 · {getFirstThrowModeLabel(firstThrowMode)}</span>
+            <span className="shrink-0 text-muted">
+              轮 {currentRoundLabel()}{draftStatusLabel ? ` · ${draftStatusLabel}` : ""}
+            </span>
+          </div>
           {state.participants.map((participant) => {
             const stats = calculateDartStats(participant.turns);
             const isActive = state.activeParticipantId === participant.participantId;

@@ -212,6 +212,14 @@ export default async function TournamentDetailPage({
       participantMembersById.set(participant.id, members);
     }
   }
+  const personalLeaderboards = buildPersonalLeaderboards({
+    matches: matchRows,
+    profilesByUserId: statProfileById,
+    participantMembersById,
+    participantById
+  });
+  const showStandings = tournamentData.format !== "single_elimination";
+  const showGroups = (groups || []).length > 1;
 
   const currentUserId = user?.id || null;
   const isAdmin = profile?.role === "admin";
@@ -282,88 +290,103 @@ export default async function TournamentDetailPage({
         </dl>
       </Card>
 
-      {tournamentData.format !== "single_elimination" || (groups || []).length > 0 ? (
-        <section className="grid min-w-0 gap-4 lg:grid-cols-[0.9fr_1.1fr]">
-          {tournamentData.format !== "single_elimination" ? (
+      {showStandings || showGroups ? (
+        <section className={cn("grid min-w-0 gap-4", showStandings && showGroups && "lg:grid-cols-[1.1fr_0.9fr]")}>
+          {showStandings ? (
             <Card>
               <h2 className="text-lg font-bold">
                 {tournamentData.format === "league_playoff" ? "联赛排名" : "排名"}
               </h2>
-              <div className="mt-4 min-w-0 overflow-x-auto">
-                <table className="w-full min-w-[560px] text-left text-sm">
-                  <thead className="text-muted">
-                    <tr>
-                      <th className="py-2">#</th>
-                      <th>队伍/选手</th>
-                      <th>场</th>
-                      <th>胜</th>
-                      <th>负</th>
-                      <th>Leg +/-</th>
-                      <th>积分</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {standings.map((row, index) => (
-                      <tr key={row.participantId} className="border-t border-wire">
-                        <td className="py-2">{index + 1}</td>
-                        <td className="font-semibold">
-                          <PlayerIdentity
-                            name={row.name}
-                            avatarUrl={participantAvatarById.get(row.participantId)}
-                            subtitle={`Rating ${participantById.get(row.participantId)?.rating || 1000}`}
-                            size="sm"
-                            compact
-                          />
-                        </td>
-                        <td>{row.played}</td>
-                        <td>{row.wins}</td>
-                        <td>{row.losses}</td>
-                        <td>{row.legDiff}</td>
-                        <td>{row.points}</td>
-                      </tr>
-                    ))}
-                    {standings.length === 0 ? (
-                      <tr>
-                        <td className="py-4 text-muted" colSpan={7}>暂无排名数据。</td>
-                      </tr>
-                    ) : null}
-                  </tbody>
-                </table>
+              <div className="mt-4 grid gap-2">
+                {standings.map((row, index) => (
+                  <div key={row.participantId} className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-3 rounded-lg border border-wire bg-field/75 p-3 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center">
+                    <div className={cn(
+                      "grid h-10 w-10 place-items-center rounded-lg text-sm font-black",
+                      index < 3 ? "bg-board text-white" : "bg-surface text-board"
+                    )}>
+                      {index + 1}
+                    </div>
+                    <PlayerIdentity
+                      name={row.name}
+                      avatarUrl={participantAvatarById.get(row.participantId)}
+                      subtitle={`Rating ${participantById.get(row.participantId)?.rating || 1000}`}
+                      size="sm"
+                      compact
+                    />
+                    <div className="col-span-2 grid grid-cols-5 gap-1 text-center text-xs font-black sm:col-span-1 sm:min-w-72">
+                      <RankMetric label="积分" value={row.points} strong />
+                      <RankMetric label="场" value={row.played} />
+                      <RankMetric label="胜" value={row.wins} />
+                      <RankMetric label="负" value={row.losses} />
+                      <RankMetric label="Leg" value={row.legDiff > 0 ? `+${row.legDiff}` : row.legDiff} />
+                    </div>
+                  </div>
+                ))}
+                {standings.length === 0 ? <p className="text-sm text-muted">暂无排名数据。</p> : null}
               </div>
             </Card>
           ) : null}
 
-          <Card>
-          <h2 className="text-lg font-bold">分组</h2>
-          <div className="mt-4 grid min-w-0 gap-4 md:grid-cols-2">
-            {(groups || []).map((group) => {
-              const members = (groupMembers || [])
-                .filter((member) => member.group_id === group.id)
-                .map((member) => participantById.get(member.participant_id))
-                .filter(Boolean) as ParticipantSeed[];
-              return (
-                <div key={group.id} className="min-w-0 rounded-lg border border-wire p-4">
-                  <h3 className="break-words font-bold">{group.name}</h3>
-                  <ul className="mt-3 grid gap-2 text-sm text-muted">
-                    {members.map((member) => (
-                      <li key={member.id} className="rounded-lg bg-field px-3 py-2">
-                        <PlayerIdentity
-                          name={member.name}
-                          avatarUrl={participantAvatarById.get(member.id)}
-                          subtitle={`Rating ${member.rating}`}
-                          size="sm"
-                          compact
-                        />
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              );
-            })}
-            {(groups || []).length === 0 ? <p className="text-sm text-muted">暂未生成分组。</p> : null}
-          </div>
-          </Card>
+          {showGroups ? (
+            <Card>
+              <h2 className="text-lg font-bold">分组</h2>
+              <div className="mt-4 grid min-w-0 gap-4">
+                {(groups || []).map((group) => {
+                  const members = (groupMembers || [])
+                    .filter((member) => member.group_id === group.id)
+                    .map((member) => participantById.get(member.participant_id))
+                    .filter(Boolean) as ParticipantSeed[];
+                  return (
+                    <div key={group.id} className="min-w-0 rounded-lg border border-wire p-4">
+                      <h3 className="break-words font-bold">{group.name}</h3>
+                      <ul className="mt-3 grid gap-2 text-sm text-muted">
+                        {members.map((member) => (
+                          <li key={member.id} className="rounded-lg bg-field px-3 py-2">
+                            <PlayerIdentity
+                              name={member.name}
+                              avatarUrl={participantAvatarById.get(member.id)}
+                              subtitle={`Rating ${member.rating}`}
+                              size="sm"
+                              compact
+                            />
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
+          ) : null}
         </section>
+      ) : null}
+
+      {personalLeaderboards.hats.length > 0 ||
+      personalLeaderboards.average.length > 0 ||
+      personalLeaderboards.checkout.length > 0 ? (
+        <Card>
+          <h2 className="text-lg font-bold">个人排行榜</h2>
+          <div className="mt-4 grid gap-3 lg:grid-cols-3">
+            <PersonalLeaderboardList
+              title="帽子数"
+              rows={personalLeaderboards.hats}
+              metric={(row) => `${row.hats}`}
+              emptyText="暂无帽子数据"
+            />
+            <PersonalLeaderboardList
+              title="最高均分"
+              rows={personalLeaderboards.average}
+              metric={(row) => row.bestAverage.toFixed(1)}
+              emptyText="暂无均分数据"
+            />
+            <PersonalLeaderboardList
+              title="最高拆分"
+              rows={personalLeaderboards.checkout}
+              metric={(row) => `${row.bestCheckout}`}
+              emptyText="暂无拆分数据"
+            />
+          </div>
+        </Card>
       ) : null}
 
       {knockoutMatches.length > 0 ? (
@@ -460,6 +483,7 @@ export default async function TournamentDetailPage({
               <div key={match.id} className="grid min-w-0 gap-3 rounded-lg border border-wire bg-surface/90 p-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
+                    <DartModeBadge dartMode={dartMode} />
                     <div className="text-xs font-black uppercase text-muted">
                       第 {match.round_number} 轮 / 第 {match.match_number} 场 / {getMatchStatusLabel(match.status)}
                     </div>
@@ -551,6 +575,161 @@ export default async function TournamentDetailPage({
         </Card>
       ) : null}
     </div>
+  );
+}
+
+type PersonalLeaderboardRow = {
+  userId: string;
+  name: string;
+  avatarUrl: string | null;
+  teamName: string;
+  hats: number;
+  bestAverage: number;
+  bestCheckout: number;
+};
+
+function buildPersonalLeaderboards({
+  matches,
+  profilesByUserId,
+  participantMembersById,
+  participantById
+}: {
+  matches: MatchRow[];
+  profilesByUserId: Map<string, { display_name?: string | null; avatar_url?: string | null }>;
+  participantMembersById: Map<string, Array<{ userId: string; name: string }>>;
+  participantById: Map<string, ParticipantSeed>;
+}) {
+  const teamNameByUserId = new Map<string, string>();
+  const fallbackNameByUserId = new Map<string, string>();
+
+  for (const [participantId, members] of participantMembersById) {
+    const teamName = participantById.get(participantId)?.name || "";
+    for (const member of members) {
+      teamNameByUserId.set(member.userId, teamName);
+      fallbackNameByUserId.set(member.userId, member.name);
+    }
+  }
+
+  const rowsByUserId = new Map<string, PersonalLeaderboardRow>();
+  for (const match of matches) {
+    if (match.status !== "completed") continue;
+    const userStats = readMatchUserStats(match.details);
+    for (const [userId, stats] of Object.entries(userStats)) {
+      const hats = statNumber(stats, ["countHatTrick"]) || 0;
+      const average = statNumber(stats, ["averageScore", "averagePer3Darts"]) || 0;
+      const checkout = statNumber(stats, ["highestCheckout"]) || 0;
+      if (hats <= 0 && average <= 0 && checkout <= 0) continue;
+
+      const profile = profilesByUserId.get(userId);
+      const current = rowsByUserId.get(userId) || {
+        userId,
+        name: profile?.display_name || fallbackNameByUserId.get(userId) || `选手 ${userId.slice(0, 6)}`,
+        avatarUrl: profile?.avatar_url || null,
+        teamName: teamNameByUserId.get(userId) || "",
+        hats: 0,
+        bestAverage: 0,
+        bestCheckout: 0
+      };
+      current.hats += hats;
+      current.bestAverage = Math.max(current.bestAverage, average);
+      current.bestCheckout = Math.max(current.bestCheckout, checkout);
+      rowsByUserId.set(userId, current);
+    }
+  }
+
+  const rows = [...rowsByUserId.values()];
+  return {
+    hats: rows.filter((row) => row.hats > 0).sort((a, b) => b.hats - a.hats || b.bestAverage - a.bestAverage).slice(0, 5),
+    average: rows.filter((row) => row.bestAverage > 0).sort((a, b) => b.bestAverage - a.bestAverage).slice(0, 5),
+    checkout: rows.filter((row) => row.bestCheckout > 0).sort((a, b) => b.bestCheckout - a.bestCheckout).slice(0, 5)
+  };
+}
+
+function readMatchUserStats(details: unknown) {
+  if (!details || typeof details !== "object" || Array.isArray(details)) return {};
+  const userStats = (details as { userStats?: unknown }).userStats;
+  if (!userStats || typeof userStats !== "object" || Array.isArray(userStats)) return {};
+  return userStats as Record<string, Record<string, unknown>>;
+}
+
+function statNumber(stats: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = stats[key];
+    const number = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+    if (Number.isFinite(number) && number > 0) return number;
+  }
+  return 0;
+}
+
+function RankMetric({
+  label,
+  value,
+  strong = false
+}: {
+  label: string;
+  value: ReactNode;
+  strong?: boolean;
+}) {
+  return (
+    <div className={cn("rounded-lg bg-surface px-1.5 py-2", strong && "bg-board text-white")}>
+      <div className={cn("text-[10px] font-black", strong ? "text-white/75" : "text-muted")}>{label}</div>
+      <div className="mt-0.5 truncate text-sm font-black">{value}</div>
+    </div>
+  );
+}
+
+function PersonalLeaderboardList({
+  title,
+  rows,
+  metric,
+  emptyText
+}: {
+  title: string;
+  rows: PersonalLeaderboardRow[];
+  metric: (row: PersonalLeaderboardRow) => string;
+  emptyText: string;
+}) {
+  return (
+    <section className="rounded-lg border border-wire bg-field p-3">
+      <h3 className="text-sm font-black text-board">{title}</h3>
+      <div className="mt-3 grid gap-2">
+        {rows.map((row, index) => (
+          <div key={row.userId} className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-lg bg-surface p-2">
+            <div className={cn(
+              "grid h-8 w-8 place-items-center rounded-lg text-xs font-black",
+              index === 0 ? "bg-board text-white" : "bg-field text-board"
+            )}>
+              {index + 1}
+            </div>
+            <PlayerIdentity
+              name={row.name}
+              avatarUrl={row.avatarUrl}
+              subtitle={row.teamName || undefined}
+              size="sm"
+              compact
+            />
+            <div className="rounded-lg bg-board/10 px-2 py-1 text-right text-lg font-black text-board">
+              {metric(row)}
+            </div>
+          </div>
+        ))}
+        {rows.length === 0 ? <p className="text-sm font-semibold text-muted">{emptyText}</p> : null}
+      </div>
+    </section>
+  );
+}
+
+function DartModeBadge({ dartMode }: { dartMode?: string | null }) {
+  const isSoft = dartMode === "soft";
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-black",
+        isSoft ? "bg-sky-100 text-board ring-1 ring-sky-200" : "bg-zinc-900 text-white"
+      )}
+    >
+      {getDartModeLabel(dartMode)}
+    </span>
   );
 }
 

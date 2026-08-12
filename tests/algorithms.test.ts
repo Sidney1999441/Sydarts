@@ -539,7 +539,6 @@ describe("team-first tournament algorithms", () => {
     ]);
     expect(getSoftStatFields("soft_cricket").map((field) => field.key)).toEqual([
       "averageMpr",
-      "totalMarks",
       "count5Marks",
       "count6Marks",
       "count7Marks",

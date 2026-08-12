@@ -64,7 +64,6 @@ export function getSoftStatFields(gameVariant?: string | number | null): SoftSta
   if (isSoftCricketVariant(value)) {
     return [
       { key: "averageMpr", label: "MPR", step: "0.01" },
-      { key: "totalMarks", label: "总 Mark", integer: true },
       { key: "count5Marks", label: "5 Mark", integer: true },
       { key: "count6Marks", label: "6 Mark", integer: true },
       { key: "count7Marks", label: "7 Mark", integer: true },

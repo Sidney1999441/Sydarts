@@ -1,8 +1,9 @@
 "use client";
 
-import { completeScoredMatchAction } from "@/lib/actions/matches";
+import { clearScoringDraftAction, completeScoredMatchAction, saveScoringDraftAction } from "@/lib/actions/matches";
 import {
   TouchScoreboard,
+  type ScoringDraftPayload,
   type ScoringCompletePayload
 } from "@/components/scorer/TouchScoreboard";
 import type { FirstThrowMode, MatchFinishMode, MatchLegLineup, MatchLegRule } from "@/types/domain";
@@ -26,6 +27,7 @@ export function Scoreboard({
   suggestedFirstParticipantId,
   firstThrowHandicapNotice,
   initialLineups,
+  initialDraft,
   autoStartFirstParticipantId
 }: {
   matchId: string;
@@ -39,6 +41,7 @@ export function Scoreboard({
   suggestedFirstParticipantId?: string | null;
   firstThrowHandicapNotice?: string | null;
   initialLineups?: MatchLegLineup[];
+  initialDraft?: ScoringDraftPayload | null;
   autoStartFirstParticipantId?: string | null;
 }) {
   async function saveOfficialResult(payload: ScoringCompletePayload) {
@@ -62,11 +65,15 @@ export function Scoreboard({
       bestOf={bestOf}
       legRules={legRules}
       matchFinishMode={matchFinishMode}
+      initialRoundLimit={15}
       initialFirstThrowMode={firstThrowMode}
       suggestedFirstParticipantId={suggestedFirstParticipantId}
       firstThrowHandicapNotice={firstThrowHandicapNotice}
       initialLineups={initialLineups}
+      initialDraft={initialDraft}
       autoStartFirstParticipantId={autoStartFirstParticipantId}
+      onSaveDraft={(draft) => saveScoringDraftAction({ matchId, draft })}
+      onClearDraft={() => clearScoringDraftAction({ matchId })}
       saveLabel="上传结果"
       successMessage="比赛结果已上传，并写入赛事数据和普通数据。"
       onComplete={saveOfficialResult}

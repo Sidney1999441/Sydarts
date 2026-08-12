@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { Check, ChevronRight, RotateCcw, Save, Trophy, UsersRound } from "lucide-react";
 import { legsNeeded } from "@/lib/algorithms/scoring";
 import { getLegRuleLabel } from "@/lib/darts/variants";
@@ -29,6 +29,25 @@ type SoftLegEntry = {
   scoreA?: number;
   scoreB?: number;
   userStats: Record<string, ManualMatchStats>;
+};
+
+export type SoftScoringDraftPayload = {
+  version: 1;
+  savedAt?: string;
+  savedBy?: string;
+  submissionId: string;
+  lineups: MatchLegLineup[];
+  lineupConfirmed: boolean;
+  currentLegIndex: number;
+  scoreA: number;
+  scoreB: number;
+  winnerParticipantId: string | null;
+  legEntries: SoftLegEntry[];
+  currentWinner: string;
+  participantScoreA: string;
+  participantScoreB: string;
+  legStats: Record<string, ManualMatchStats>;
+  ppdInputs: Record<string, string>;
 };
 
 function lineupCount(rule: MatchLegRule, members: PlayerOption[]) {
@@ -77,12 +96,41 @@ function highestCheckout(stats: Record<string, ManualMatchStats>) {
   return Math.max(0, ...Object.values(stats).map((item) => item.highestCheckout || 0));
 }
 
+function getDraftStatusLabel(status: "idle" | "restored" | "saving" | "saved" | "error") {
+  if (status === "restored") return "已恢复";
+  if (status === "saving") return "保存中";
+  if (status === "saved") return "已保存";
+  if (status === "error") return "保存失败";
+  return "";
+}
+
+function normalizeSoftDraft(
+  draft: SoftScoringDraftPayload | null | undefined,
+  participantAId: string,
+  participantBId: string
+) {
+  if (!draft || draft.version !== 1) return null;
+  if (draft.winnerParticipantId && draft.winnerParticipantId !== participantAId && draft.winnerParticipantId !== participantBId) {
+    return null;
+  }
+  if (draft.currentWinner && draft.currentWinner !== participantAId && draft.currentWinner !== participantBId) {
+    return null;
+  }
+  if (draft.legEntries.some((entry) => entry.winnerParticipantId !== participantAId && entry.winnerParticipantId !== participantBId)) {
+    return null;
+  }
+  return draft;
+}
+
 export function SoftMatchScoreboard({
   participantA,
   participantB,
   legRules,
   matchFinishMode = "majority",
   initialLineups,
+  initialDraft = null,
+  onSaveDraft,
+  onClearDraft,
   saveLabel,
   successMessage,
   onComplete
@@ -92,6 +140,9 @@ export function SoftMatchScoreboard({
   legRules: MatchLegRule[];
   matchFinishMode?: MatchFinishMode;
   initialLineups?: MatchLegLineup[];
+  initialDraft?: SoftScoringDraftPayload | null;
+  onSaveDraft?: (draft: SoftScoringDraftPayload) => Promise<void>;
+  onClearDraft?: () => Promise<void>;
   saveLabel: string;
   successMessage: string;
   onComplete: (payload: ScoringCompletePayload) => Promise<void>;
@@ -101,22 +152,30 @@ export function SoftMatchScoreboard({
     () => (initialLineups && initialLineups.length > 0 ? initialLineups : defaultLineups(rules, participantA, participantB)),
     [initialLineups, participantA, participantB, rules]
   );
-  const [lineups, setLineups] = useState<MatchLegLineup[]>(resolvedInitialLineups);
-  const [lineupConfirmed, setLineupConfirmed] = useState(Boolean(initialLineups && initialLineups.length > 0));
-  const [currentLegIndex, setCurrentLegIndex] = useState(0);
-  const [scoreA, setScoreA] = useState(0);
-  const [scoreB, setScoreB] = useState(0);
-  const [winnerParticipantId, setWinnerParticipantId] = useState<string | null>(null);
-  const [legEntries, setLegEntries] = useState<SoftLegEntry[]>([]);
-  const [currentWinner, setCurrentWinner] = useState("");
-  const [participantScoreA, setParticipantScoreA] = useState("");
-  const [participantScoreB, setParticipantScoreB] = useState("");
-  const [legStats, setLegStats] = useState<Record<string, ManualMatchStats>>({});
-  const [ppdInputs, setPpdInputs] = useState<Record<string, string>>({});
-  const [message, setMessage] = useState("");
+  const safeInitialDraft = normalizeSoftDraft(initialDraft, participantA.id, participantB.id);
+  const [lineups, setLineups] = useState<MatchLegLineup[]>(safeInitialDraft?.lineups || resolvedInitialLineups);
+  const [lineupConfirmed, setLineupConfirmed] = useState(
+    safeInitialDraft?.lineupConfirmed ?? Boolean(initialLineups && initialLineups.length > 0)
+  );
+  const [currentLegIndex, setCurrentLegIndex] = useState(safeInitialDraft?.currentLegIndex || 0);
+  const [scoreA, setScoreA] = useState(safeInitialDraft?.scoreA || 0);
+  const [scoreB, setScoreB] = useState(safeInitialDraft?.scoreB || 0);
+  const [winnerParticipantId, setWinnerParticipantId] = useState<string | null>(safeInitialDraft?.winnerParticipantId || null);
+  const [legEntries, setLegEntries] = useState<SoftLegEntry[]>(safeInitialDraft?.legEntries || []);
+  const [currentWinner, setCurrentWinner] = useState(safeInitialDraft?.currentWinner || "");
+  const [participantScoreA, setParticipantScoreA] = useState(safeInitialDraft?.participantScoreA || "");
+  const [participantScoreB, setParticipantScoreB] = useState(safeInitialDraft?.participantScoreB || "");
+  const [legStats, setLegStats] = useState<Record<string, ManualMatchStats>>(safeInitialDraft?.legStats || {});
+  const [ppdInputs, setPpdInputs] = useState<Record<string, string>>(safeInitialDraft?.ppdInputs || {});
+  const [message, setMessage] = useState(safeInitialDraft ? "已恢复上次中断进度，可以继续录入。" : "");
+  const [draftStatus, setDraftStatus] = useState<"idle" | "restored" | "saving" | "saved" | "error">(
+    safeInitialDraft ? "restored" : "idle"
+  );
   const [isSaved, setIsSaved] = useState(false);
   const [isPending, startTransition] = useTransition();
-  const submissionIdRef = useRef(createResultSubmissionId());
+  const submissionIdRef = useRef(safeInitialDraft?.submissionId || createResultSubmissionId());
+  const draftSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastDraftSignatureRef = useRef("");
 
   const currentRule = rules[currentLegIndex] || rules[0];
   const currentLineup = lineups.find((lineup) => lineup.legNumber === currentRule?.legNumber) || lineups[0];
@@ -137,6 +196,7 @@ export function SoftMatchScoreboard({
   const currentFields = getSoftStatFields(currentRule?.gameVariant);
   const needsSideScores =
     currentRule?.gameVariant === "soft_half_it" || isSoftHighScoreVariant(currentRule?.gameVariant);
+  const draftStatusLabel = onSaveDraft ? getDraftStatusLabel(draftStatus) : "";
   const currentUsers = [
     ...(currentLineup?.participantAUserIds || []).map((userId) => ({
       userId,
@@ -151,6 +211,60 @@ export function SoftMatchScoreboard({
       avatarUrl: memberById.get(userId)?.avatarUrl || null
     }))
   ];
+
+  useEffect(() => {
+    if (!onSaveDraft || !lineupConfirmed || isSaved) return;
+
+    const draftCore = {
+      version: 1 as const,
+      submissionId: submissionIdRef.current,
+      lineups,
+      lineupConfirmed,
+      currentLegIndex,
+      scoreA,
+      scoreB,
+      winnerParticipantId,
+      legEntries,
+      currentWinner,
+      participantScoreA,
+      participantScoreB,
+      legStats,
+      ppdInputs
+    };
+    const signature = JSON.stringify(draftCore);
+    if (signature === lastDraftSignatureRef.current) return;
+    if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current);
+
+    draftSaveTimerRef.current = setTimeout(() => {
+      lastDraftSignatureRef.current = signature;
+      setDraftStatus("saving");
+      onSaveDraft({
+        ...draftCore,
+        savedAt: new Date().toISOString()
+      })
+        .then(() => setDraftStatus("saved"))
+        .catch(() => setDraftStatus("error"));
+    }, 650);
+
+    return () => {
+      if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current);
+    };
+  }, [
+    currentLegIndex,
+    currentWinner,
+    isSaved,
+    legEntries,
+    legStats,
+    lineups,
+    lineupConfirmed,
+    onSaveDraft,
+    participantScoreA,
+    participantScoreB,
+    ppdInputs,
+    scoreA,
+    scoreB,
+    winnerParticipantId
+  ]);
 
   function updateLineup(legNumber: number, side: LineupSide, index: number, userId: string) {
     setLineups((current) =>
@@ -180,6 +294,7 @@ export function SoftMatchScoreboard({
 
     setLineupConfirmed(true);
     setMessage("");
+    setDraftStatus(onSaveDraft ? "saving" : "idle");
   }
 
   function clearPpdInput(userId: string) {
@@ -244,9 +359,13 @@ export function SoftMatchScoreboard({
     setWinnerParticipantId(null);
     setLegEntries([]);
     setMessage("");
+    setDraftStatus("idle");
     setIsSaved(false);
     resetCurrentLegForm();
     submissionIdRef.current = createResultSubmissionId();
+    if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current);
+    lastDraftSignatureRef.current = "";
+    if (onClearDraft) void onClearDraft().catch(() => setDraftStatus("error"));
   }
 
   function completeCurrentLeg() {
@@ -303,6 +422,7 @@ export function SoftMatchScoreboard({
     setScoreA(nextScoreA);
     setScoreB(nextScoreB);
     setMessage("");
+    setDraftStatus(onSaveDraft ? "saving" : "idle");
     setIsSaved(false);
 
     if (shouldFinish) {
@@ -358,6 +478,7 @@ export function SoftMatchScoreboard({
           userStats
         });
         setIsSaved(true);
+        setDraftStatus("idle");
         setMessage(successMessage);
       } catch (error) {
         setMessage(error instanceof Error ? error.message : "保存失败，请稍后重试。");
@@ -518,6 +639,9 @@ export function SoftMatchScoreboard({
           <div>
             <div className="text-xs font-bold text-muted">第 {currentRule.legNumber} 局 / 共 {rules.length} 局</div>
             <h2 className="mt-1 text-xl font-black">{getLegRuleLabel(currentRule)}</h2>
+            {draftStatusLabel ? (
+              <div className="mt-1 text-xs font-black text-board">中断续赛：{draftStatusLabel}</div>
+            ) : null}
           </div>
           <div className="text-right">
             <div className="text-xs font-bold text-muted">总比分</div>

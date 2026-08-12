@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Crosshair, Gauge, Swords } from "lucide-react";
 import { requireUser } from "@/lib/auth/guards";
-import { getCompactMatchRulesSummary } from "@/lib/darts/variants";
+import { getCompactMatchRulesSummary, getDartModeLabel } from "@/lib/darts/variants";
 import { hasSupabaseEnv } from "@/lib/env";
 import { getMatchStatusLabel } from "@/lib/matches/status";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -120,6 +120,7 @@ export default async function ScorerPage() {
         </h2>
         <div className="mt-4 grid gap-3">
           {(matches || []).map((match) => {
+            const dartMode = ((match.dart_mode || "steel") === "soft" ? "soft" : "steel");
             const participantAName = participantById.get(match.participant_a_id || "")?.display_name || "TBD";
             const participantBName = participantById.get(match.participant_b_id || "")?.display_name || "TBD";
             const participantAIsMine = participantIds.includes(match.participant_a_id || "");
@@ -133,8 +134,11 @@ export default async function ScorerPage() {
                 href={`/scorer/${match.id}`}
                 className="block min-h-20 touch-manipulation rounded-lg border border-wire bg-surface/90 p-4 transition-colors duration-75 hover:border-board/40 hover:bg-field active:bg-field"
               >
-                <div className="text-xs font-black uppercase text-muted">
-                  第 {match.round_number} 轮 / 第 {match.match_number} 场 / {getMatchStatusLabel(match.status)}
+                <div className="flex flex-wrap items-center gap-2">
+                  <DartModeBadge dartMode={dartMode} />
+                  <div className="text-xs font-black uppercase text-muted">
+                    第 {match.round_number} 轮 / 第 {match.match_number} 场 / {getMatchStatusLabel(match.status)}
+                  </div>
                 </div>
                 <div className="mt-1 font-black">
                   第 {match.round_number} 轮，
@@ -148,7 +152,7 @@ export default async function ScorerPage() {
                 </div>
                 <div className="mt-1 text-xs font-bold text-board">
                   {getCompactMatchRulesSummary({
-                    dartMode: match.dart_mode,
+                    dartMode,
                     gameVariant: match.game_variant,
                     legRules: match.leg_rules
                   })}
@@ -165,6 +169,20 @@ export default async function ScorerPage() {
         </div>
       </Card>
     </div>
+  );
+}
+
+function DartModeBadge({ dartMode }: { dartMode?: string | null }) {
+  const isSoft = dartMode === "soft";
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-black",
+        isSoft ? "bg-sky-100 text-board ring-1 ring-sky-200" : "bg-zinc-900 text-white"
+      )}
+    >
+      {getDartModeLabel(dartMode)}
+    </span>
   );
 }
 

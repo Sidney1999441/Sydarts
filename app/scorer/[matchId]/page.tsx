@@ -1,8 +1,7 @@
 import { notFound } from "next/navigation";
-import { Gauge } from "lucide-react";
 import { requireUser } from "@/lib/auth/guards";
 import { resolveFirstThrowHandicap } from "@/lib/algorithms/first-throw-handicap";
-import { getCompactMatchRulesSummary, getLegRuleLabel, getLegStartingScore, resolveMatchLegRules } from "@/lib/darts/variants";
+import { getCompactMatchRulesSummary, getDartModeLabel, getLegRuleLabel, getLegStartingScore, resolveMatchLegRules } from "@/lib/darts/variants";
 import { hasSupabaseEnv } from "@/lib/env";
 import {
   areBothMatchLineupsSubmitted,
@@ -10,14 +9,16 @@ import {
   getMatchLineupSubmissions
 } from "@/lib/matches/lineups";
 import { getMatchStatusLabel } from "@/lib/matches/status";
+import { compactPlayerName } from "@/lib/scorer/display-names";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { SetupNotice } from "@/components/SetupNotice";
-import { CodlPageHeader } from "@/components/CodlPageHeader";
 import { Card } from "@/components/ui/Card";
 import { MatchLineupSubmissionForm } from "@/components/scorer/MatchLineupSubmissionForm";
 import { OfficialLineupGate } from "@/components/scorer/OfficialLineupGate";
 import { Scoreboard } from "@/components/scorer/Scoreboard";
 import { SoftScoreboard } from "@/components/scorer/SoftScoreboard";
+import type { SoftScoringDraftPayload } from "@/components/scorer/SoftMatchScoreboard";
+import type { ScoringDraftPayload } from "@/components/scorer/TouchScoreboard";
 import type { FirstThrowMode, MatchFinishMode, MatchLegRule, Tournament } from "@/types/domain";
 
 export const dynamic = "force-dynamic";
@@ -71,7 +72,12 @@ export default async function MatchScorerPage({
   const profileById = new Map((profiles || []).map((profile) => [profile.id, profile]));
   function profileDisplayName(userId: string, fallback?: string | null) {
     const profile = profileById.get(userId);
-    return `${profile?.display_name || fallback || userId}${profile?.uid ? ` / UID ${profile.uid}` : ""}`;
+    const displayName = compactPlayerName(profile?.display_name || fallback);
+    if (displayName && !isOpaqueIdentifier(displayName)) {
+      return `${displayName}${profile?.uid ? ` / UID ${profile.uid}` : ""}`;
+    }
+    if (profile?.uid) return `UID ${profile.uid}`;
+    return `选手 ${userId.slice(0, 6)}`;
   }
   const membersByTeamId = new Map<string, Array<{ userId: string; name: string; avatarUrl?: string | null }>>();
   for (const member of teamMembers || []) {
@@ -191,20 +197,32 @@ export default async function MatchScorerPage({
         lineups: submittedLineups || []
       })
     : [];
+  const scoringDraft =
+    matchDartMode === "steel" && match.status !== "completed" && match.status !== "bye"
+      ? readScoringDraft(match.details, participantA.id, participantB.id)
+      : null;
+  const softScoringDraft =
+    matchDartMode === "soft" && match.status !== "completed" && match.status !== "bye"
+      ? readSoftScoringDraft(match.details, participantA.id, participantB.id)
+      : null;
+  const rulesSummary = getCompactMatchRulesSummary({
+    dartMode: matchDartMode,
+    gameVariant: match.game_variant,
+    legRules
+  });
 
   return (
-    <div className="grid gap-6">
-      <CodlPageHeader
-        dark
-        kicker={tournamentData?.name || "比赛计分"}
-        title={`第 ${match.round_number} 轮，${participantA.name} 对 ${participantB.name}`}
-        description={`${getMatchStatusLabel(match.status)} · ${getCompactMatchRulesSummary({
-            dartMode: matchDartMode,
-            gameVariant: match.game_variant,
-            legRules
-          })}`}
-        icon={<Gauge className="h-6 w-6" aria-hidden />}
-        art="white"
+    <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-2 sm:gap-4">
+      <ScorerMatchHeader
+        tournamentName={tournamentData?.name || "比赛计分"}
+        roundNumber={match.round_number}
+        participantAName={participantA.name}
+        participantBName={participantB.name}
+        statusLabel={getMatchStatusLabel(match.status)}
+        dartModeLabel={getDartModeLabel(matchDartMode)}
+        dartMode={matchDartMode}
+        rulesSummary={rulesSummary}
+        matchScore={`${match.score_a || 0}:${match.score_b || 0}`}
       />
       {match.status === "completed" ? (
         <Card>
@@ -235,6 +253,7 @@ export default async function MatchScorerPage({
               legRules={legRules}
               matchFinishMode={matchFinishMode}
               initialLineups={submittedLineups}
+              initialDraft={softScoringDraft}
             />
           ) : (
             <Scoreboard
@@ -249,7 +268,7 @@ export default async function MatchScorerPage({
               suggestedFirstParticipantId={firstThrowHandicap.firstParticipantId}
               firstThrowHandicapNotice={firstThrowHandicapNotice}
               initialLineups={submittedLineups}
-              autoStartFirstParticipantId={firstThrowHandicap.firstParticipantId || participantA.id}
+              initialDraft={scoringDraft}
             />
           )}
         </OfficialLineupGate>
@@ -260,6 +279,7 @@ export default async function MatchScorerPage({
           participantB={participantB}
           legRules={legRules}
           matchFinishMode={matchFinishMode}
+          initialDraft={softScoringDraft}
         />
       ) : (
         <Scoreboard
@@ -273,6 +293,7 @@ export default async function MatchScorerPage({
           firstThrowMode={firstThrowMode}
           suggestedFirstParticipantId={firstThrowHandicap.firstParticipantId}
           firstThrowHandicapNotice={firstThrowHandicapNotice}
+          initialDraft={scoringDraft}
         />
       )}
     </div>
@@ -285,6 +306,101 @@ type ScorerParticipantInfo = {
   avatarUrl?: string | null;
   members: Array<{ userId: string; name: string; avatarUrl?: string | null }>;
 };
+
+function isOpaqueIdentifier(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
+function readScoringDraft(details: unknown, participantAId: string, participantBId: string): ScoringDraftPayload | null {
+  if (!details || typeof details !== "object" || Array.isArray(details)) return null;
+  const raw = (details as { scoringDraft?: unknown }).scoringDraft;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const draft = raw as Partial<ScoringDraftPayload>;
+  if (draft.version !== 1 || !draft.state || draft.state.winnerParticipantId) return null;
+  const participantIds = draft.state.participants?.map((participant) => participant.participantId) || [];
+  if (!participantIds.includes(participantAId) || !participantIds.includes(participantBId)) return null;
+  if (
+    draft.firstParticipantId &&
+    draft.firstParticipantId !== participantAId &&
+    draft.firstParticipantId !== participantBId
+  ) {
+    return null;
+  }
+  if (draft.roundLimit !== 10 && draft.roundLimit !== 15 && draft.roundLimit !== 20 && draft.roundLimit !== "unlimited") {
+    return null;
+  }
+  if (!draft.submissionId || !Array.isArray(draft.lineups)) return null;
+  return draft as ScoringDraftPayload;
+}
+
+function readSoftScoringDraft(details: unknown, participantAId: string, participantBId: string): SoftScoringDraftPayload | null {
+  if (!details || typeof details !== "object" || Array.isArray(details)) return null;
+  const raw = (details as { softScoringDraft?: unknown }).softScoringDraft;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const draft = raw as Partial<SoftScoringDraftPayload>;
+  if (draft.version !== 1 || !draft.submissionId || !Array.isArray(draft.lineups) || !Array.isArray(draft.legEntries)) {
+    return null;
+  }
+  if (draft.winnerParticipantId && draft.winnerParticipantId !== participantAId && draft.winnerParticipantId !== participantBId) {
+    return null;
+  }
+  if (draft.currentWinner && draft.currentWinner !== participantAId && draft.currentWinner !== participantBId) {
+    return null;
+  }
+  if (draft.legEntries.some((entry) => entry.winnerParticipantId !== participantAId && entry.winnerParticipantId !== participantBId)) {
+    return null;
+  }
+  return draft as SoftScoringDraftPayload;
+}
+
+function ScorerMatchHeader({
+  tournamentName,
+  roundNumber,
+  participantAName,
+  participantBName,
+  statusLabel,
+  dartModeLabel,
+  dartMode,
+  rulesSummary,
+  matchScore
+}: {
+  tournamentName: string;
+  roundNumber: number;
+  participantAName: string;
+  participantBName: string;
+  statusLabel: string;
+  dartModeLabel: string;
+  dartMode: "steel" | "soft";
+  rulesSummary: string;
+  matchScore: string;
+}) {
+  return (
+    <section className="codl-official-score-header min-h-0 rounded-lg border border-wire bg-surface px-3 py-2 shadow-soft sm:px-4 sm:py-3">
+      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
+        <div className="min-w-0">
+          <div className="truncate text-[11px] font-black uppercase tracking-normal text-board sm:text-xs">
+            {tournamentName}
+          </div>
+          <h1 className="codl-official-score-title mt-0.5 truncate text-base font-black leading-tight text-ink sm:text-xl">
+            第 {roundNumber} 轮 · {participantAName} vs {participantBName}
+          </h1>
+          <div className="mt-1 flex min-w-0 items-center gap-2">
+            <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-black ${dartMode === "soft" ? "bg-sky-100 text-board" : "bg-zinc-900 text-white"}`}>
+              {dartModeLabel}
+            </span>
+            <span className="truncate text-xs font-semibold text-muted">
+              {statusLabel} · {rulesSummary}
+            </span>
+          </div>
+        </div>
+        <div className="rounded-lg bg-board px-3 py-1.5 text-center text-white">
+          <div className="text-[10px] font-black uppercase opacity-80">比分</div>
+          <div className="text-xl font-black leading-none">{matchScore}</div>
+        </div>
+      </div>
+    </section>
+  );
+}
 
 function PreMatchLineupPanel({
   matchId,
