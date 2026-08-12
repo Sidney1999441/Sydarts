@@ -193,9 +193,13 @@ export function SoftMatchScoreboard({
     }
     return map;
   }, [participantA.members, participantB.members]);
-  const currentFields = getSoftStatFields(currentRule?.gameVariant);
+  const isHighScoreLeg = isSoftHighScoreVariant(currentRule?.gameVariant);
+  const currentFields = getSoftStatFields(currentRule?.gameVariant).filter(
+    (field) => !(isHighScoreLeg && (field.key === "highestTurnScore" || field.key === "totalScoredPoints"))
+  );
   const needsSideScores =
-    currentRule?.gameVariant === "soft_half_it" || isSoftHighScoreVariant(currentRule?.gameVariant);
+    currentRule?.gameVariant === "soft_half_it" || isHighScoreLeg;
+  const sideScoreLabel = isHighScoreLeg ? "高分赛得分" : "机器分";
   const draftStatusLabel = onSaveDraft ? getDraftStatusLabel(draftStatus) : "";
   const currentUsers = [
     ...(currentLineup?.participantAUserIds || []).map((userId) => ({
@@ -368,6 +372,30 @@ export function SoftMatchScoreboard({
     if (onClearDraft) void onClearDraft().catch(() => setDraftStatus("error"));
   }
 
+  function buildEntryUserStats(sideScoreA?: number, sideScoreB?: number) {
+    const nextStats: Record<string, ManualMatchStats> = Object.fromEntries(
+      Object.entries(legStats).map(([userId, stats]) => [userId, { ...stats }])
+    );
+
+    if (isHighScoreLeg) {
+      const applyHighScore = (userIds: string[] | undefined, sideScore?: number) => {
+        if (sideScore === undefined || !userIds || userIds.length !== 1) return;
+        const userId = userIds[0];
+        const current = nextStats[userId] || {};
+        nextStats[userId] = {
+          ...current,
+          highestTurnScore: Math.max(current.highestTurnScore || 0, sideScore),
+          totalScoredPoints: Math.max(current.totalScoredPoints || 0, sideScore)
+        };
+      };
+
+      applyHighScore(currentLineup?.participantAUserIds, sideScoreA);
+      applyHighScore(currentLineup?.participantBUserIds, sideScoreB);
+    }
+
+    return nextStats;
+  }
+
   function completeCurrentLeg() {
     if (!currentRule || !currentLineup) return;
 
@@ -396,6 +424,7 @@ export function SoftMatchScoreboard({
 
     const nextScoreA = scoreA + (legWinner === participantA.id ? 1 : 0);
     const nextScoreB = scoreB + (legWinner === participantB.id ? 1 : 0);
+    const entryUserStats = buildEntryUserStats(sideScoreA, sideScoreB);
     const nextEntries = [
       ...legEntries,
       {
@@ -404,7 +433,7 @@ export function SoftMatchScoreboard({
         scoreA: sideScoreA,
         scoreB: sideScoreB,
         userStats: Object.fromEntries(
-          Object.entries(legStats)
+          Object.entries(entryUserStats)
             .map(([userId, stats]) => [userId, compactManualStats(stats)])
             .filter(([, stats]) => Object.keys(stats as ManualMatchStats).length > 0)
         ) as Record<string, ManualMatchStats>
@@ -669,7 +698,7 @@ export function SoftMatchScoreboard({
         {needsSideScores ? (
           <div className="grid gap-2 rounded-lg bg-field p-3 sm:grid-cols-2">
             <label className="label">
-              {participantA.name} 机器分
+              {participantA.name} {sideScoreLabel}
               <input
                 className="form-input"
                 inputMode="numeric"
@@ -680,7 +709,7 @@ export function SoftMatchScoreboard({
               />
             </label>
             <label className="label">
-              {participantB.name} 机器分
+              {participantB.name} {sideScoreLabel}
               <input
                 className="form-input"
                 inputMode="numeric"

@@ -718,6 +718,121 @@ function parseLineupsFromForm(input: {
   });
 }
 
+function selectedIdsFromForm(formData: FormData, key: string, fallbackIds: string[]) {
+  const selected = formData
+    .getAll(key)
+    .map((value) => fromFormString(value))
+    .filter((value): value is string => Boolean(value));
+  const allowed = new Set(fallbackIds);
+  const valid = selected.filter((value) => allowed.has(value));
+  return valid.length > 0 ? [...new Set(valid)] : fallbackIds;
+}
+
+function parseDetailedLineupsFromForm(input: {
+  formData: FormData;
+  legRules: MatchLegRule[];
+  participantAUserIds: string[];
+  participantBUserIds: string[];
+}) {
+  return input.legRules.map((rule) => ({
+    legNumber: rule.legNumber,
+    participantAUserIds: selectedIdsFromForm(
+      input.formData,
+      `leg_${rule.legNumber}_participant_a_user_id`,
+      input.participantAUserIds
+    ),
+    participantBUserIds: selectedIdsFromForm(
+      input.formData,
+      `leg_${rule.legNumber}_participant_b_user_id`,
+      input.participantBUserIds
+    )
+  }));
+}
+
+function parseAdminLegResultsFromForm(input: {
+  formData: FormData;
+  legRules: MatchLegRule[];
+  participantAId: string;
+  participantBId: string;
+  legLineups: MatchLegLineup[];
+  allUserIds: string[];
+}) {
+  return input.legRules
+    .map((rule) => {
+      const winnerParticipantId = fromFormString(input.formData.get(`leg_${rule.legNumber}_winner_participant_id`));
+      if (winnerParticipantId !== input.participantAId && winnerParticipantId !== input.participantBId) return null;
+      const lineup = input.legLineups.find((item) => item.legNumber === rule.legNumber) || {
+        legNumber: rule.legNumber,
+        participantAUserIds: [],
+        participantBUserIds: []
+      };
+      const userStats = parseManualStatsForUsersWithPrefix(
+        input.formData,
+        input.allUserIds,
+        `leg_${rule.legNumber}`
+      );
+      const checkoutScore = optionalIntegerFromForm(input.formData, `leg_${rule.legNumber}_checkout_score`) ?? null;
+      const scoreA = optionalIntegerFromForm(input.formData, `leg_${rule.legNumber}_score_a`) ?? null;
+      const scoreB = optionalIntegerFromForm(input.formData, `leg_${rule.legNumber}_score_b`) ?? null;
+      if (rule.dartMode === "soft" && rule.gameVariant === "soft_high_score") {
+        applySoftHighScoreToSinglePlayer(userStats, lineup.participantAUserIds, scoreA ?? undefined);
+        applySoftHighScoreToSinglePlayer(userStats, lineup.participantBUserIds, scoreB ?? undefined);
+      }
+
+      return {
+        ...lineup,
+        winnerParticipantId,
+        participantMode: rule.participantMode,
+        dartMode: rule.dartMode,
+        gameVariant: rule.gameVariant,
+        checkoutScore,
+        scoreA,
+        scoreB,
+        userStats
+      } satisfies MatchLegResult;
+    })
+    .filter(Boolean) as MatchLegResult[];
+}
+
+function applySoftHighScoreToSinglePlayer(userStats: ManualStatsById, userIds: string[], sideScore?: number) {
+  if (sideScore === undefined || userIds.length !== 1) return;
+  const userId = userIds[0];
+  const current = userStats[userId] || {};
+  userStats[userId] = compactManualStats({
+    ...current,
+    highestTurnScore: Math.max(current.highestTurnScore || 0, sideScore),
+    totalScoredPoints: Math.max(current.totalScoredPoints || 0, sideScore)
+  });
+}
+
+function inferMatchScoreFromLegResults(input: {
+  legResults: MatchLegResult[];
+  participantAId: string;
+  participantBId: string;
+}) {
+  return input.legResults.reduce(
+    (score, result) => {
+      if (result.winnerParticipantId === input.participantAId) score.scoreA += 1;
+      if (result.winnerParticipantId === input.participantBId) score.scoreB += 1;
+      return score;
+    },
+    { scoreA: 0, scoreB: 0 }
+  );
+}
+
+function inferWinnerFromScore(input: {
+  winnerParticipantId?: string | null;
+  scoreA: number;
+  scoreB: number;
+  participantAId: string;
+  participantBId: string;
+}) {
+  if (input.winnerParticipantId) return input.winnerParticipantId;
+  if (input.scoreA > input.scoreB) return input.participantAId;
+  if (input.scoreB > input.scoreA) return input.participantBId;
+  return null;
+}
+
 function optionalNumberFromForm(formData: FormData, key: string) {
   const raw = fromFormString(formData.get(key));
   if (!raw) return undefined;
@@ -771,6 +886,103 @@ function parseManualStatsForUsers(formData: FormData, userIds: string[]): Manual
       ];
     }).filter(([, stats]) => Object.keys(stats).length > 0)
   );
+}
+
+function parseManualStatsForUsersWithPrefix(formData: FormData, userIds: string[], prefix: string): ManualStatsById {
+  return Object.fromEntries(
+    userIds.map((userId) => {
+      const averageScore = optionalNumberFromForm(formData, `${prefix}_stats_${userId}_average_score`);
+      const averagePpd = optionalNumberFromForm(formData, `${prefix}_stats_${userId}_average_ppd`);
+      const convertedAverageScore = averageScore ?? (averagePpd === undefined ? undefined : ppdToPpr(averagePpd));
+
+      return [
+        userId,
+        compactManualStats({
+          averageScore: convertedAverageScore,
+          averagePer3Darts: convertedAverageScore,
+          averageMpr: optionalNumberFromForm(formData, `${prefix}_stats_${userId}_average_mpr`),
+          countTon80: optionalIntegerFromForm(formData, `${prefix}_stats_${userId}_count_ton80`),
+          countHatTrick: optionalIntegerFromForm(formData, `${prefix}_stats_${userId}_count_hat_trick`),
+          highestCheckout: optionalIntegerFromForm(formData, `${prefix}_stats_${userId}_highest_checkout`),
+          countHighCheckout: optionalIntegerFromForm(formData, `${prefix}_stats_${userId}_count_high_checkout`),
+          countWhiteHorse: optionalIntegerFromForm(formData, `${prefix}_stats_${userId}_count_white_horse`),
+          totalMarks: optionalIntegerFromForm(formData, `${prefix}_stats_${userId}_total_marks`),
+          count5Marks: optionalIntegerFromForm(formData, `${prefix}_stats_${userId}_count_5_marks`),
+          count6Marks: optionalIntegerFromForm(formData, `${prefix}_stats_${userId}_count_6_marks`),
+          count7Marks: optionalIntegerFromForm(formData, `${prefix}_stats_${userId}_count_7_marks`),
+          count9Marks: optionalIntegerFromForm(formData, `${prefix}_stats_${userId}_count_9_marks`),
+          count60Plus: optionalIntegerFromForm(formData, `${prefix}_stats_${userId}_count_60_plus`),
+          count80Plus: optionalIntegerFromForm(formData, `${prefix}_stats_${userId}_count_80_plus`),
+          count180:
+            optionalIntegerFromForm(formData, `${prefix}_stats_${userId}_count_180`) ??
+            optionalIntegerFromForm(formData, `${prefix}_stats_${userId}_count_ton80`),
+          count100Plus: optionalIntegerFromForm(formData, `${prefix}_stats_${userId}_count_100_plus`),
+          count140Plus: optionalIntegerFromForm(formData, `${prefix}_stats_${userId}_count_140_plus`),
+          count170Plus: optionalIntegerFromForm(formData, `${prefix}_stats_${userId}_count_170_plus`),
+          totalScoredPoints: optionalIntegerFromForm(formData, `${prefix}_stats_${userId}_total_scored_points`),
+          totalDarts: optionalIntegerFromForm(formData, `${prefix}_stats_${userId}_total_darts`),
+          highestTurnScore: optionalIntegerFromForm(formData, `${prefix}_stats_${userId}_highest_turn_score`),
+          bustCount: optionalIntegerFromForm(formData, `${prefix}_stats_${userId}_bust_count`),
+          checkoutCount: optionalIntegerFromForm(formData, `${prefix}_stats_${userId}_checkout_count`)
+        })
+      ];
+    }).filter(([, stats]) => Object.keys(stats).length > 0)
+  );
+}
+
+function mergeManualStatsByUser(...buckets: ManualStatsById[]): ManualStatsById {
+  const userIds = [...new Set(buckets.flatMap((bucket) => Object.keys(bucket)))];
+  return Object.fromEntries(
+    userIds.map((userId) => [
+      userId,
+      mergeManualStatsForAction(buckets.map((bucket) => bucket[userId]).filter(Boolean))
+    ]).filter(([, stats]) => Object.keys(stats as ManualSoftStats).length > 0)
+  ) as ManualStatsById;
+}
+
+function sumNumbers(values: Array<number | undefined>) {
+  return values.reduce<number>((total, value) => total + (value || 0), 0);
+}
+
+function maxNumber(values: Array<number | undefined>) {
+  const defined = values.filter((value): value is number => value !== undefined);
+  return defined.length > 0 ? Math.max(...defined) : undefined;
+}
+
+function averageNumbers(values: Array<number | undefined>) {
+  const defined = values.filter((value): value is number => value !== undefined);
+  if (defined.length === 0) return undefined;
+  return Number((defined.reduce((total, value) => total + value, 0) / defined.length).toFixed(2));
+}
+
+function mergeManualStatsForAction(stats: ManualSoftStats[]): ManualSoftStats {
+  if (stats.length === 0) return {};
+  return compactManualStats({
+    averageScore: averageNumbers(stats.map((item) => item.averageScore ?? item.averagePer3Darts)),
+    averagePer3Darts: averageNumbers(stats.map((item) => item.averagePer3Darts ?? item.averageScore)),
+    averageMpr: averageNumbers(stats.map((item) => item.averageMpr)),
+    countTon80: sumNumbers(stats.map((item) => item.countTon80)),
+    countHatTrick: sumNumbers(stats.map((item) => item.countHatTrick)),
+    highestCheckout: maxNumber(stats.map((item) => item.highestCheckout)),
+    countHighCheckout: sumNumbers(stats.map((item) => item.countHighCheckout)),
+    countWhiteHorse: sumNumbers(stats.map((item) => item.countWhiteHorse)),
+    totalMarks: sumNumbers(stats.map((item) => item.totalMarks)),
+    count5Marks: sumNumbers(stats.map((item) => item.count5Marks)),
+    count6Marks: sumNumbers(stats.map((item) => item.count6Marks)),
+    count7Marks: sumNumbers(stats.map((item) => item.count7Marks)),
+    count9Marks: sumNumbers(stats.map((item) => item.count9Marks)),
+    count60Plus: sumNumbers(stats.map((item) => item.count60Plus)),
+    count80Plus: sumNumbers(stats.map((item) => item.count80Plus)),
+    count180: sumNumbers(stats.map((item) => item.count180)),
+    count100Plus: sumNumbers(stats.map((item) => item.count100Plus)),
+    count140Plus: sumNumbers(stats.map((item) => item.count140Plus)),
+    count170Plus: sumNumbers(stats.map((item) => item.count170Plus)),
+    totalScoredPoints: sumNumbers(stats.map((item) => item.totalScoredPoints)),
+    totalDarts: sumNumbers(stats.map((item) => item.totalDarts)),
+    highestTurnScore: maxNumber(stats.map((item) => item.highestTurnScore)),
+    bustCount: sumNumbers(stats.map((item) => item.bustCount)),
+    checkoutCount: sumNumbers(stats.map((item) => item.checkoutCount))
+  });
 }
 
 function buildSoftStatsRpcPayload(input: {
@@ -2093,9 +2305,9 @@ export async function submitManualResultAction(formData: FormData) {
   const { user, profile } = await requireUser();
   const matchId = fromFormString(formData.get("match_id"));
   const submissionId = submissionIdFromForm(formData);
-  const winnerParticipantId = fromFormString(formData.get("winner_participant_id"));
-  const scoreA = Number(formData.get("score_a"));
-  const scoreB = Number(formData.get("score_b"));
+  const requestedWinnerParticipantId = fromFormString(formData.get("winner_participant_id"));
+  const requestedScoreA = Number(formData.get("score_a"));
+  const requestedScoreB = Number(formData.get("score_b"));
   const isAdmin = profile?.role === "admin";
   if (!isAdmin) {
     await assertMatchMember(matchId, user.id);
@@ -2145,7 +2357,7 @@ export async function submitManualResultAction(formData: FormData) {
   const participantAUserIds = await getTeamUserIds(admin, match.participant_a_id);
   const participantBUserIds = await getTeamUserIds(admin, match.participant_b_id);
   const allUserIds = [...new Set([...participantAUserIds, ...participantBUserIds])];
-  const userStats = parseManualStatsForUsers(formData, allUserIds);
+  const summaryUserStats = parseManualStatsForUsers(formData, allUserIds);
   const dartMode = ((match.dart_mode || "steel") === "soft" ? "soft" : "steel") as MatchDartMode;
   const legRules = (Array.isArray(match.leg_rules) && match.leg_rules.length > 0
     ? match.leg_rules
@@ -2157,11 +2369,35 @@ export async function submitManualResultAction(formData: FormData) {
           gameVariant: match.game_variant || (dartMode === "soft" ? "soft_501" : "501")
         }
       ]) as MatchLegRule[];
-  const legLineups = parseLineupsFromForm({
+  const legLineups = parseDetailedLineupsFromForm({
     formData,
     legRules,
     participantAUserIds,
     participantBUserIds
+  });
+  const legResults = parseAdminLegResultsFromForm({
+    formData,
+    legRules,
+    participantAId: match.participant_a_id,
+    participantBId: match.participant_b_id,
+    legLineups,
+    allUserIds
+  });
+  const legUserStats = mergeManualStatsByUser(...legResults.map((result) => (result.userStats || {}) as ManualStatsById));
+  const userStats = mergeManualStatsByUser(summaryUserStats, legUserStats);
+  const inferredScore = inferMatchScoreFromLegResults({
+    legResults,
+    participantAId: match.participant_a_id,
+    participantBId: match.participant_b_id
+  });
+  const scoreA = legResults.length > 0 ? inferredScore.scoreA : Number.isFinite(requestedScoreA) ? requestedScoreA : 0;
+  const scoreB = legResults.length > 0 ? inferredScore.scoreB : Number.isFinite(requestedScoreB) ? requestedScoreB : 0;
+  const winnerParticipantId = inferWinnerFromScore({
+    winnerParticipantId: requestedWinnerParticipantId,
+    scoreA,
+    scoreB,
+    participantAId: match.participant_a_id,
+    participantBId: match.participant_b_id
   });
   const participantAPlayedUserIds = userIdsFromLineups({
     participantId: match.participant_a_id,
@@ -2184,6 +2420,7 @@ export async function submitManualResultAction(formData: FormData) {
     gameVariant: match.game_variant,
     legRules,
     legLineups,
+    legResults,
     submissionId,
     participantStats: {
       [match.participant_a_id]: buildParticipantManualStats(participantAPlayedUserIds, userStats),
@@ -2191,6 +2428,9 @@ export async function submitManualResultAction(formData: FormData) {
     },
     userStats
   });
+  if (!winnerParticipantId) {
+    throw new Error("请选择胜方，或录入每局胜方让系统自动推导总胜方。");
+  }
 
   if (isAdmin) {
     const settlement = winnerParticipantId
@@ -2217,6 +2457,7 @@ export async function submitManualResultAction(formData: FormData) {
       scoreA,
       scoreB,
       details,
+      legResults,
       ratingLogs: settlement.ratingLogs,
       statEvents: settlement.statEvents
     });
@@ -2350,6 +2591,8 @@ export async function confirmManualResultAction(formData: FormData) {
       scoreA: confirmation.proposed_score_a,
       scoreB: confirmation.proposed_score_b,
       details,
+      legResults:
+        ((confirmation.details as { legResults?: MatchLegResult[] } | null)?.legResults || []) as MatchLegResult[],
       ratingLogs: settlement.ratingLogs,
       statEvents: settlement.statEvents,
       confirmationId
@@ -2379,9 +2622,9 @@ export async function adminUpdateMatchResultAction(formData: FormData) {
   const matchId = fromFormString(formData.get("match_id"));
   const tournamentId = fromFormString(formData.get("tournament_id"));
   const submissionId = submissionIdFromForm(formData);
-  const winnerParticipantId = fromFormString(formData.get("winner_participant_id"));
-  const scoreA = Number(formData.get("score_a"));
-  const scoreB = Number(formData.get("score_b"));
+  const requestedWinnerParticipantId = fromFormString(formData.get("winner_participant_id"));
+  const requestedScoreA = Number(formData.get("score_a"));
+  const requestedScoreB = Number(formData.get("score_b"));
   const admin = createSupabaseAdminClient();
   const { data: match, error: matchError } = await admin
     .from("matches")
@@ -2396,9 +2639,8 @@ export async function adminUpdateMatchResultAction(formData: FormData) {
 
   const participantAUserIds = await getTeamUserIds(admin, match.participant_a_id);
   const participantBUserIds = await getTeamUserIds(admin, match.participant_b_id);
-  const userStats = parseManualStatsForUsers(formData, [
-    ...new Set([...participantAUserIds, ...participantBUserIds])
-  ]);
+  const allUserIds = [...new Set([...participantAUserIds, ...participantBUserIds])];
+  const summaryUserStats = parseManualStatsForUsers(formData, allUserIds);
   const dartMode = ((match.dart_mode || "steel") === "soft" ? "soft" : "steel") as MatchDartMode;
   const legRules = (Array.isArray(match.leg_rules) && match.leg_rules.length > 0
     ? match.leg_rules
@@ -2410,11 +2652,35 @@ export async function adminUpdateMatchResultAction(formData: FormData) {
           gameVariant: match.game_variant || (dartMode === "soft" ? "soft_501" : "501")
         }
       ]) as MatchLegRule[];
-  const legLineups = parseLineupsFromForm({
+  const legLineups = parseDetailedLineupsFromForm({
     formData,
     legRules,
     participantAUserIds,
     participantBUserIds
+  });
+  const legResults = parseAdminLegResultsFromForm({
+    formData,
+    legRules,
+    participantAId: match.participant_a_id,
+    participantBId: match.participant_b_id,
+    legLineups,
+    allUserIds
+  });
+  const legUserStats = mergeManualStatsByUser(...legResults.map((result) => (result.userStats || {}) as ManualStatsById));
+  const userStats = mergeManualStatsByUser(summaryUserStats, legUserStats);
+  const inferredScore = inferMatchScoreFromLegResults({
+    legResults,
+    participantAId: match.participant_a_id,
+    participantBId: match.participant_b_id
+  });
+  const scoreA = legResults.length > 0 ? inferredScore.scoreA : Number.isFinite(requestedScoreA) ? requestedScoreA : 0;
+  const scoreB = legResults.length > 0 ? inferredScore.scoreB : Number.isFinite(requestedScoreB) ? requestedScoreB : 0;
+  const winnerParticipantId = inferWinnerFromScore({
+    winnerParticipantId: requestedWinnerParticipantId,
+    scoreA,
+    scoreB,
+    participantAId: match.participant_a_id,
+    participantBId: match.participant_b_id
   });
   const participantAPlayedUserIds = userIdsFromLineups({
     participantId: match.participant_a_id,
@@ -2436,6 +2702,7 @@ export async function adminUpdateMatchResultAction(formData: FormData) {
     gameVariant: match.game_variant,
     legRules,
     legLineups,
+    legResults,
     submissionId,
     participantStats: {
       [match.participant_a_id]: buildParticipantManualStats(participantAPlayedUserIds, userStats),
@@ -2443,6 +2710,9 @@ export async function adminUpdateMatchResultAction(formData: FormData) {
     },
     userStats
   });
+  if (!winnerParticipantId) {
+    throw new Error("请选择胜方，或录入每局胜方让系统自动推导总胜方。");
+  }
   const recalculate = match.status === "completed";
   const settlement = winnerParticipantId
     ? await buildSettlementSideEffects({
@@ -2469,6 +2739,7 @@ export async function adminUpdateMatchResultAction(formData: FormData) {
     scoreA,
     scoreB,
     details,
+    legResults,
     ratingLogs: settlement.ratingLogs,
     statEvents: settlement.statEvents,
     recalculate

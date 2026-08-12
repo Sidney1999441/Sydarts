@@ -34,6 +34,11 @@ export default async function LoginPage({
             密码
             <input className="form-input" type="password" name="password" required />
           </label>
+          <div className="-mt-2 flex justify-end">
+            <Link className="text-sm font-semibold text-board underline" href="/auth/forgot-password">
+              忘记密码？
+            </Link>
+          </div>
           <Button type="submit">登录</Button>
         </form>
         <p className="mt-5 text-sm text-muted">

@@ -4,6 +4,36 @@ export function compactPlayerName(value?: string | null) {
     .trim();
 }
 
+export function isOpaqueIdentifier(value?: string | null) {
+  const text = String(value || "").trim();
+  return (
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(text) ||
+    /^[A-Za-z0-9_-]{20,}$/.test(text)
+  );
+}
+
+export function formatUserDisplayName({
+  userId,
+  displayName,
+  uid,
+  fallback,
+  includeUid = true
+}: {
+  userId?: string | null;
+  displayName?: string | null;
+  uid?: string | null;
+  fallback?: string | null;
+  includeUid?: boolean;
+}) {
+  const compactName = compactPlayerName(displayName || fallback);
+  if (compactName && !isOpaqueIdentifier(compactName)) {
+    return `${compactName}${includeUid && uid ? ` / UID ${uid}` : ""}`;
+  }
+  if (uid) return `UID ${uid}`;
+  if (userId) return `选手 ${userId.slice(0, 6)}`;
+  return "未命名选手";
+}
+
 export function normalizeNameForCompare(value?: string | null) {
   return compactPlayerName(value)
     .toLocaleLowerCase()

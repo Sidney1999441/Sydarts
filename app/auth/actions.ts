@@ -1,6 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { fromFormString } from "@/lib/utils";
@@ -48,6 +49,42 @@ function getAuthActionErrorMessage(error: unknown) {
   return message;
 }
 
+function sanitizeOrigin(value: string | null | undefined) {
+  if (!value) return null;
+
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  try {
+    return new URL(trimmed).origin;
+  } catch {
+    const host = trimmed.replace(/^https?:\/\//i, "").split("/")[0];
+    if (!host) return null;
+    const protocol = host.includes("localhost") || host.startsWith("127.0.0.1") ? "http" : "https";
+    return `${protocol}://${host}`;
+  }
+}
+
+async function getRequestOrigin() {
+  const configuredOrigin =
+    sanitizeOrigin(process.env.NEXT_PUBLIC_SITE_URL) ||
+    sanitizeOrigin(process.env.NEXT_PUBLIC_APP_URL) ||
+    sanitizeOrigin(process.env.SITE_URL) ||
+    sanitizeOrigin(process.env.APP_URL);
+
+  if (configuredOrigin) return configuredOrigin;
+
+  const headerStore = await headers();
+  const forwardedHost = headerStore.get("x-forwarded-host")?.split(",")[0]?.trim();
+  const forwardedProto = headerStore.get("x-forwarded-proto")?.split(",")[0]?.trim();
+  const host = forwardedHost || headerStore.get("host");
+  const cleanedHost = host?.replace(/^https?:\/\//i, "").split("/")[0] || "";
+  const protocol =
+    forwardedProto || (cleanedHost.includes("localhost") || cleanedHost.startsWith("127.0.0.1") ? "http" : "https");
+
+  return `${protocol}://${cleanedHost}`;
+}
+
 export async function signUpAction(formData: FormData) {
   const email = fromFormString(formData.get("email"));
   const password = fromFormString(formData.get("password"));
@@ -73,6 +110,31 @@ export async function signUpAction(formData: FormData) {
 
   if (failureMessage) redirect(`/auth/register?message=${encodeURIComponent(failureMessage)}`);
   redirect(`/auth/login?message=${encodeURIComponent("注册成功，请登录。")}`);
+}
+
+export async function requestPasswordResetAction(formData: FormData) {
+  const email = fromFormString(formData.get("email"));
+  let failureMessage: string | null = null;
+
+  try {
+    const origin = await getRequestOrigin();
+    const supabase = await createSupabaseServerClient({ timeoutMs: AUTH_REQUEST_TIMEOUT_MS });
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${origin}/auth/reset-password`
+    });
+
+    if (error) failureMessage = getAuthActionErrorMessage(error);
+  } catch (error) {
+    failureMessage = getAuthActionErrorMessage(error);
+  }
+
+  if (failureMessage) {
+    redirect(`/auth/forgot-password?message=${encodeURIComponent(failureMessage)}`);
+  }
+
+  redirect(
+    `/auth/forgot-password?message=${encodeURIComponent("如果该邮箱已注册，重置邮件会发送到邮箱，请按邮件提示设置新密码。")}`
+  );
 }
 
 export async function signInAction(formData: FormData) {

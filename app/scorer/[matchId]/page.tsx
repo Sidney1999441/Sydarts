@@ -9,7 +9,8 @@ import {
   getMatchLineupSubmissions
 } from "@/lib/matches/lineups";
 import { getMatchStatusLabel } from "@/lib/matches/status";
-import { compactPlayerName } from "@/lib/scorer/display-names";
+import { formatUserDisplayName, isOpaqueIdentifier } from "@/lib/scorer/display-names";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { SetupNotice } from "@/components/SetupNotice";
 import { Card } from "@/components/ui/Card";
@@ -33,6 +34,7 @@ export default async function MatchScorerPage({
 
   const { user } = await requireUser();
   const supabase = await createSupabaseServerClient();
+  const admin = createSupabaseAdminClient();
   const { data: match } = await supabase
     .from("matches")
     .select("*")
@@ -67,17 +69,17 @@ export default async function MatchScorerPage({
   const memberUserIds = [...new Set([...(teamMembers || []).map((member) => member.user_id), ...userIds])] as string[];
   const { data: profiles } =
     memberUserIds.length > 0
-      ? await supabase.from("profiles").select("id, uid, display_name, avatar_url").in("id", memberUserIds)
+      ? await admin.from("profiles").select("id, uid, display_name, avatar_url").in("id", memberUserIds)
       : { data: [] };
   const profileById = new Map((profiles || []).map((profile) => [profile.id, profile]));
   function profileDisplayName(userId: string, fallback?: string | null) {
-    const profile = profileById.get(userId);
-    const displayName = compactPlayerName(profile?.display_name || fallback);
-    if (displayName && !isOpaqueIdentifier(displayName)) {
-      return `${displayName}${profile?.uid ? ` / UID ${profile.uid}` : ""}`;
-    }
-    if (profile?.uid) return `UID ${profile.uid}`;
-    return `选手 ${userId.slice(0, 6)}`;
+    const profile = profileById.get(userId) || { id: userId, uid: null, display_name: null, avatar_url: null };
+    return formatUserDisplayName({
+      userId,
+      displayName: profile?.display_name,
+      uid: profile?.uid,
+      fallback
+    });
   }
   const membersByTeamId = new Map<string, Array<{ userId: string; name: string; avatarUrl?: string | null }>>();
   for (const member of teamMembers || []) {
@@ -103,9 +105,13 @@ export default async function MatchScorerPage({
         ? membersByTeamId.get(participant.team_id) || []
         : [];
 
+    const memberNames = members.map((member) => member.name).filter(Boolean).join(" / ");
+    const rawName = participant?.display_name || fallback;
+    const displayName = rawName && !isOpaqueIdentifier(rawName) ? rawName : memberNames || rawName;
+
     return {
       id: participantId,
-      name: participant?.display_name || fallback,
+      name: displayName || fallback,
       avatarUrl: members.find((member) => member.avatarUrl)?.avatarUrl || null,
       members
     };
@@ -306,10 +312,6 @@ type ScorerParticipantInfo = {
   avatarUrl?: string | null;
   members: Array<{ userId: string; name: string; avatarUrl?: string | null }>;
 };
-
-function isOpaqueIdentifier(value: string) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
-}
 
 function readScoringDraft(details: unknown, participantAId: string, participantBId: string): ScoringDraftPayload | null {
   if (!details || typeof details !== "object" || Array.isArray(details)) return null;

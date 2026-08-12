@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { FileImage, Monitor, Trophy } from "lucide-react";
+import { CalendarDays, FileImage, Monitor, Trophy } from "lucide-react";
 import {
   cancelRegistrationAction,
   registerForTournamentAction,
@@ -16,6 +16,8 @@ import {
   getMatchLineupSubmissions
 } from "@/lib/matches/lineups";
 import { getMatchStatusLabel, isUnplayedMatch } from "@/lib/matches/status";
+import { formatUserDisplayName, isOpaqueIdentifier } from "@/lib/scorer/display-names";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { cn, formatDateTime } from "@/lib/utils";
 import { SetupNotice } from "@/components/SetupNotice";
@@ -23,11 +25,9 @@ import { CodlPageHeader } from "@/components/CodlPageHeader";
 import { TournamentBracket } from "@/components/TournamentBracket";
 import { MatchLineupSubmissionForm } from "@/components/scorer/MatchLineupSubmissionForm";
 import {
-  BoardReservationPanel,
   MatchBoardReservationBadge,
   type BoardReservationBoard,
-  type BoardReservationRow,
-  type BoardReservationSlot
+  type BoardReservationRow
 } from "@/components/tournament/BoardReservationPanel";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -40,8 +40,7 @@ import type {
   MatchSummary,
   ParticipantSeed,
   Tournament,
-  TournamentBoard,
-  TournamentBoardTimeSlot
+  TournamentBoard
 } from "@/types/domain";
 
 export const dynamic = "force-dynamic";
@@ -60,12 +59,15 @@ export default async function TournamentDetailPage({
   searchParams?: Promise<{ schedule?: string }>;
 }) {
   const { id } = await params;
-  const { schedule = "all" } = (await searchParams) || {};
+  const query = (await searchParams) || {};
+  const schedule = query.schedule || "all";
+  const shouldOpenSchedule = Boolean(query.schedule);
   const { user, profile } = await getCurrentUserAndProfile();
 
   if (!hasSupabaseEnv()) return <SetupNotice />;
 
   const supabase = await createSupabaseServerClient();
+  const admin = createSupabaseAdminClient();
   const { data: tournament } = await supabase
     .from("tournaments")
     .select("*")
@@ -88,7 +90,6 @@ export default async function TournamentDetailPage({
     { data: registration },
     { data: savedTeams },
     { data: boards },
-    { data: boardSlots },
     { data: reservations }
   ] = await Promise.all([
     supabase
@@ -122,7 +123,6 @@ export default async function TournamentDetailPage({
           .order("updated_at", { ascending: false })
       : Promise.resolve({ data: [] }),
     supabase.from("tournament_boards").select("*").eq("tournament_id", id).order("available_start_at"),
-    supabase.from("tournament_board_time_slots").select("*").eq("tournament_id", id).order("daily_start_time"),
     supabase
       .from("match_board_reservations")
       .select("*")
@@ -140,9 +140,7 @@ export default async function TournamentDetailPage({
   const participantRowById = new Map((participants || []).map((participant) => [participant.id, participant]));
   const tournamentData = tournament as Tournament;
   const matchRows = (matches || []) as MatchRow[];
-  const boardSlotRows = (boardSlots || []) as TournamentBoardTimeSlot[];
-  const slotsByBoardId = groupBoardSlots(boardSlotRows);
-  const boardRows = ((boards || []) as TournamentBoard[]).map((board) => toBoardView(board, slotsByBoardId.get(board.id)));
+  const boardRows = ((boards || []) as TournamentBoard[]).map((board) => toBoardView(board));
   const reservationRows = ((reservations || []) as MatchBoardReservation[]).map(toReservationView);
   const boardById = new Map(boardRows.map((board) => [board.id, board]));
   const reservationByMatchId = new Map(reservationRows.map((reservation) => [reservation.matchId, reservation]));
@@ -175,7 +173,7 @@ export default async function TournamentDetailPage({
   ] as string[];
   const { data: statProfiles } =
     statUserIds.length > 0
-      ? await supabase.from("profiles").select("id, uid, display_name, avatar_url").in("id", statUserIds)
+      ? await admin.from("profiles").select("id, uid, display_name, avatar_url").in("id", statUserIds)
       : { data: [] };
   const statProfileById = new Map((statProfiles || []).map((item) => [item.id, item]));
   const teamAvatarById = new Map((participantTeams || []).map((team) => [team.id, team.avatar_url]));
@@ -186,7 +184,11 @@ export default async function TournamentDetailPage({
     const profileRow = statProfileById.get(member.user_id);
     members.push({
       userId: member.user_id,
-      name: `${profileRow?.display_name || member.user_id}${profileRow?.uid ? ` / UID ${profileRow.uid}` : ""}`
+      name: formatUserDisplayName({
+        userId: member.user_id,
+        displayName: profileRow?.display_name,
+        uid: profileRow?.uid
+      })
     });
     teamMembersByTeamId.set(member.team_id, members);
   }
@@ -199,7 +201,12 @@ export default async function TournamentDetailPage({
       participantMembersById.set(participant.id, [
         {
           userId: participant.user_id,
-          name: `${profileRow?.display_name || participant.display_name}${profileRow?.uid ? ` / UID ${profileRow.uid}` : ""}`
+          name: formatUserDisplayName({
+            userId: participant.user_id,
+            displayName: profileRow?.display_name,
+            uid: profileRow?.uid,
+            fallback: participant.display_name
+          })
         }
       ]);
     } else if (participant.team_id) {
@@ -212,11 +219,26 @@ export default async function TournamentDetailPage({
       participantMembersById.set(participant.id, members);
     }
   }
+  const participantDisplayNameById = new Map<string, string>();
+  for (const participant of participants || []) {
+    const rawName = participant.display_name || "";
+    const memberNames = (participantMembersById.get(participant.id) || [])
+      .map((member) => member.name)
+      .filter(Boolean)
+      .join(" / ");
+    participantDisplayNameById.set(
+      participant.id,
+      rawName && !isOpaqueIdentifier(rawName) ? rawName : memberNames || rawName || "TBD"
+    );
+  }
+  const getParticipantDisplayName = (participantId?: string | null, fallback = "TBD") =>
+    participantId ? participantDisplayNameById.get(participantId) || participantById.get(participantId)?.name || fallback : fallback;
   const personalLeaderboards = buildPersonalLeaderboards({
     matches: matchRows,
     profilesByUserId: statProfileById,
     participantMembersById,
-    participantById
+    participantById,
+    participantDisplayNameById
   });
   const showStandings = tournamentData.format !== "single_elimination";
   const showGroups = (groups || []).length > 1;
@@ -260,6 +282,13 @@ export default async function TournamentDetailPage({
         actions={
           <div className="grid gap-2">
             <Link
+              className="inline-flex min-h-11 touch-manipulation items-center justify-center gap-2 rounded-lg bg-board px-4 text-sm font-black text-white shadow-soft"
+              href={`/tournaments/${id}?schedule=all#schedule`}
+            >
+              <CalendarDays className="h-4 w-4" aria-hidden />
+              查看赛程
+            </Link>
+            <Link
               className="inline-flex min-h-11 touch-manipulation items-center justify-center gap-2 rounded-lg bg-primary px-4 text-sm font-black text-white shadow-soft"
               href={`/tournaments/${id}/display`}
             >
@@ -298,30 +327,36 @@ export default async function TournamentDetailPage({
                 {tournamentData.format === "league_playoff" ? "联赛排名" : "排名"}
               </h2>
               <div className="mt-4 grid gap-2">
-                {standings.map((row, index) => (
-                  <div key={row.participantId} className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-3 rounded-lg border border-wire bg-field/75 p-3 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center">
-                    <div className={cn(
-                      "grid h-10 w-10 place-items-center rounded-lg text-sm font-black",
-                      index < 3 ? "bg-board text-white" : "bg-surface text-board"
-                    )}>
-                      {index + 1}
+                {standings.map((row, index) => {
+                  const points = Number.isFinite(Number(row.points)) ? Number(row.points) : row.wins * 3;
+                  return (
+                    <div key={row.participantId} className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] gap-3 rounded-lg border border-wire bg-field/75 p-3 sm:items-center">
+                      <div className={cn(
+                        "grid h-10 w-10 place-items-center rounded-lg text-sm font-black",
+                        index < 3 ? "bg-board text-white" : "bg-surface text-board"
+                      )}>
+                        {index + 1}
+                      </div>
+                      <PlayerIdentity
+                        name={getParticipantDisplayName(row.participantId, row.name)}
+                        avatarUrl={participantAvatarById.get(row.participantId)}
+                        subtitle={`${row.played} 场 · ${row.wins} 胜 ${row.losses} 负 · Rating ${participantById.get(row.participantId)?.rating || 1000}`}
+                        size="sm"
+                        compact
+                      />
+                      <div className="rounded-lg bg-board px-3 py-2 text-center text-white shadow-sm">
+                        <div className="text-[10px] font-black text-white/75">积分</div>
+                        <div className="text-xl font-black leading-none">{points}</div>
+                      </div>
+                      <div className="col-span-3 grid grid-cols-4 gap-1 text-center text-xs font-black sm:col-start-2 sm:col-span-2 sm:grid-cols-4">
+                        <RankMetric label="场" value={row.played} />
+                        <RankMetric label="胜" value={row.wins} />
+                        <RankMetric label="负" value={row.losses} />
+                        <RankMetric label="Leg" value={row.legDiff > 0 ? `+${row.legDiff}` : row.legDiff} />
+                      </div>
                     </div>
-                    <PlayerIdentity
-                      name={row.name}
-                      avatarUrl={participantAvatarById.get(row.participantId)}
-                      subtitle={`Rating ${participantById.get(row.participantId)?.rating || 1000}`}
-                      size="sm"
-                      compact
-                    />
-                    <div className="col-span-2 grid grid-cols-5 gap-1 text-center text-xs font-black sm:col-span-1 sm:min-w-72">
-                      <RankMetric label="积分" value={row.points} strong />
-                      <RankMetric label="场" value={row.played} />
-                      <RankMetric label="胜" value={row.wins} />
-                      <RankMetric label="负" value={row.losses} />
-                      <RankMetric label="Leg" value={row.legDiff > 0 ? `+${row.legDiff}` : row.legDiff} />
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
                 {standings.length === 0 ? <p className="text-sm text-muted">暂无排名数据。</p> : null}
               </div>
             </Card>
@@ -343,7 +378,7 @@ export default async function TournamentDetailPage({
                         {members.map((member) => (
                           <li key={member.id} className="rounded-lg bg-field px-3 py-2">
                             <PlayerIdentity
-                              name={member.name}
+                              name={getParticipantDisplayName(member.id, member.name)}
                               avatarUrl={participantAvatarById.get(member.id)}
                               subtitle={`Rating ${member.rating}`}
                               size="sm"
@@ -361,29 +396,69 @@ export default async function TournamentDetailPage({
         </section>
       ) : null}
 
-      {personalLeaderboards.hats.length > 0 ||
-      personalLeaderboards.average.length > 0 ||
-      personalLeaderboards.checkout.length > 0 ? (
+      {hasPersonalLeaderboards(personalLeaderboards) ? (
         <Card>
           <h2 className="text-lg font-bold">个人排行榜</h2>
-          <div className="mt-4 grid gap-3 lg:grid-cols-3">
-            <PersonalLeaderboardList
-              title="帽子数"
-              rows={personalLeaderboards.hats}
-              metric={(row) => `${row.hats}`}
-              emptyText="暂无帽子数据"
+          <div className="mt-4 grid gap-4">
+            <LeaderboardSection
+              title="硬镖榜单"
+              description="只统计硬镖比赛和混合赛制中的硬镖局。"
+              lists={[
+                {
+                  title: "最高均分",
+                  rows: personalLeaderboards.steel.average,
+                  metric: (row) => row.bestAverage.toFixed(1),
+                  emptyText: "暂无硬镖均分数据"
+                },
+                {
+                  title: "180 榜",
+                  rows: personalLeaderboards.steel.count180,
+                  metric: (row) => `${row.count180}`,
+                  emptyText: "暂无 180 数据"
+                },
+                {
+                  title: "最高拆分",
+                  rows: personalLeaderboards.steel.checkout,
+                  metric: (row) => `${row.bestCheckout}`,
+                  emptyText: "暂无硬镖拆分数据"
+                }
+              ]}
             />
-            <PersonalLeaderboardList
-              title="最高均分"
-              rows={personalLeaderboards.average}
-              metric={(row) => row.bestAverage.toFixed(1)}
-              emptyText="暂无均分数据"
-            />
-            <PersonalLeaderboardList
-              title="最高拆分"
-              rows={personalLeaderboards.checkout}
-              metric={(row) => `${row.bestCheckout}`}
-              emptyText="暂无拆分数据"
+            <LeaderboardSection
+              title="软镖榜单"
+              description="只统计软镖比赛和混合赛制中的软镖局。"
+              lists={[
+                {
+                  title: "PPR 榜",
+                  rows: personalLeaderboards.soft.average,
+                  metric: (row) => row.bestAverage.toFixed(1),
+                  emptyText: "暂无软镖 PPR 数据"
+                },
+                {
+                  title: "MPR 榜",
+                  rows: personalLeaderboards.soft.mpr,
+                  metric: (row) => row.bestMpr.toFixed(2),
+                  emptyText: "暂无 MPR 数据"
+                },
+                {
+                  title: "帽子榜",
+                  rows: personalLeaderboards.soft.hats,
+                  metric: (row) => `${row.hats}`,
+                  emptyText: "暂无软镖帽子数据"
+                },
+                {
+                  title: "高分赛榜",
+                  rows: personalLeaderboards.soft.highScore,
+                  metric: (row) => `${row.bestHighScore}`,
+                  emptyText: "暂无高分赛数据"
+                },
+                {
+                  title: "白马榜",
+                  rows: personalLeaderboards.soft.whiteHorse,
+                  metric: (row) => `${row.whiteHorse}`,
+                  emptyText: "暂无白马数据"
+                }
+              ]}
             />
           </div>
         </Card>
@@ -396,7 +471,7 @@ export default async function TournamentDetailPage({
             matches={knockoutMatches}
             participants={(participants || []).map((participant) => ({
               id: participant.id,
-              display_name: participant.display_name,
+              display_name: getParticipantDisplayName(participant.id, participant.display_name),
               avatar_url: participantAvatarById.get(participant.id) || null
             }))}
           />
@@ -404,31 +479,34 @@ export default async function TournamentDetailPage({
       ) : null}
 
       {(groupMatches.length > 0 || knockoutMatches.length === 0) ? (
-        <Card>
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <h2 className="text-lg font-bold">
-              {tournamentData.format === "league_playoff" ? "联赛赛程" : "赛程"}
-            </h2>
-            <div className="flex flex-wrap gap-2">
-              <ScheduleFilterLink href={`/tournaments/${id}?schedule=all`} active={schedule === "all"}>
-                全部赛程
-              </ScheduleFilterLink>
-              <ScheduleFilterLink href={`/tournaments/${id}?schedule=mine`} active={schedule === "mine"}>
-                我的比赛
-              </ScheduleFilterLink>
-              <ScheduleFilterLink href={`/tournaments/${id}?schedule=pending`} active={schedule === "pending"}>
-                未开始
-              </ScheduleFilterLink>
-              <ScheduleFilterLink href={`/tournaments/${id}?schedule=completed`} active={schedule === "completed"}>
-                已结束
-              </ScheduleFilterLink>
-            </div>
+        <details
+          id="schedule"
+          open={shouldOpenSchedule}
+          className="scroll-mt-24 rounded-lg border border-wire bg-surface/95 p-4 shadow-[0_18px_45px_rgb(17_24_39/0.06)] sm:p-5"
+        >
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-lg font-bold marker:hidden">
+            <span>{tournamentData.format === "league_playoff" ? "联赛赛程" : "赛程"}</span>
+            <span className="rounded-full bg-field px-3 py-1 text-xs font-black text-board">点击展开/收起</span>
+          </summary>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <ScheduleFilterLink href={`/tournaments/${id}?schedule=all#schedule`} active={schedule === "all"}>
+              全部赛程
+            </ScheduleFilterLink>
+            <ScheduleFilterLink href={`/tournaments/${id}?schedule=mine#schedule`} active={schedule === "mine"}>
+              我的比赛
+            </ScheduleFilterLink>
+            <ScheduleFilterLink href={`/tournaments/${id}?schedule=pending#schedule`} active={schedule === "pending"}>
+              未开始
+            </ScheduleFilterLink>
+            <ScheduleFilterLink href={`/tournaments/${id}?schedule=completed#schedule`} active={schedule === "completed"}>
+              已结束
+            </ScheduleFilterLink>
           </div>
           <div className="mt-4 grid min-w-0 gap-3">
             {filteredScheduleRows.map((match) => {
             const dartMode = ((match.dart_mode || "steel") === "soft" ? "soft" : "steel") as MatchDartMode;
-            const participantAName = participantById.get(match.participant_a_id || "")?.name || "TBD";
-            const participantBName = participantById.get(match.participant_b_id || "")?.name || "TBD";
+            const participantAName = getParticipantDisplayName(match.participant_a_id, "TBD");
+            const participantBName = getParticipantDisplayName(match.participant_b_id, "TBD");
             const participantAIsMine = isUserInParticipant(match.participant_a_id);
             const participantBIsMine = isUserInParticipant(match.participant_b_id);
             const participantAMembers = match.participant_a_id ? participantMembersById.get(match.participant_a_id) || [] : [];
@@ -473,11 +551,6 @@ export default async function TournamentDetailPage({
               (isAdmin || isUserInParticipant(match.participant_a_id) || isUserInParticipant(match.participant_b_id));
             const currentReservation = reservationByMatchId.get(match.id) || null;
             const currentBoard = currentReservation ? boardById.get(currentReservation.boardId) || null : null;
-            const canReserve =
-              match.status !== "completed" &&
-              match.status !== "bye" &&
-              Boolean(match.participant_a_id && match.participant_b_id) &&
-              (isAdmin || participantAIsMine || participantBIsMine);
 
             return (
               <div key={match.id} className="grid min-w-0 gap-3 rounded-lg border border-wire bg-surface/90 p-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
@@ -541,15 +614,6 @@ export default async function TournamentDetailPage({
                       submittedLineups={submittedLineups}
                     />
                   ) : null}
-                  {canReserve || currentReservation ? (
-                    <BoardReservationPanel
-                      matchId={match.id}
-                      boards={boardRows}
-                      reservations={reservationRows}
-                      currentReservation={currentReservation}
-                      canReserve={canReserve}
-                    />
-                  ) : null}
                 </div>
                 <div className="flex min-w-0 flex-wrap gap-2">
                   {canScore ? (
@@ -572,7 +636,7 @@ export default async function TournamentDetailPage({
               <p className="text-sm text-muted">当前筛选下暂无赛程。</p>
             ) : null}
           </div>
-        </Card>
+        </details>
       ) : null}
     </div>
   );
@@ -584,65 +648,186 @@ type PersonalLeaderboardRow = {
   avatarUrl: string | null;
   teamName: string;
   hats: number;
+  whiteHorse: number;
+  count180: number;
   bestAverage: number;
+  bestMpr: number;
+  bestHighScore: number;
   bestCheckout: number;
+};
+
+type PersonalLeaderboardGroup = {
+  hats: PersonalLeaderboardRow[];
+  whiteHorse: PersonalLeaderboardRow[];
+  count180: PersonalLeaderboardRow[];
+  highScore: PersonalLeaderboardRow[];
+  average: PersonalLeaderboardRow[];
+  mpr: PersonalLeaderboardRow[];
+  checkout: PersonalLeaderboardRow[];
+};
+
+type PersonalLeaderboards = {
+  steel: PersonalLeaderboardGroup;
+  soft: PersonalLeaderboardGroup;
+};
+
+type PersonalStatEntry = {
+  userId: string;
+  dartMode: MatchDartMode;
+  gameVariant?: string | number | null;
+  stats: Record<string, unknown>;
 };
 
 function buildPersonalLeaderboards({
   matches,
   profilesByUserId,
   participantMembersById,
-  participantById
+  participantById,
+  participantDisplayNameById
 }: {
   matches: MatchRow[];
   profilesByUserId: Map<string, { display_name?: string | null; avatar_url?: string | null }>;
   participantMembersById: Map<string, Array<{ userId: string; name: string }>>;
   participantById: Map<string, ParticipantSeed>;
+  participantDisplayNameById: Map<string, string>;
 }) {
   const teamNameByUserId = new Map<string, string>();
   const fallbackNameByUserId = new Map<string, string>();
 
   for (const [participantId, members] of participantMembersById) {
-    const teamName = participantById.get(participantId)?.name || "";
+    const teamName = participantDisplayNameById.get(participantId) || participantById.get(participantId)?.name || "";
     for (const member of members) {
       teamNameByUserId.set(member.userId, teamName);
       fallbackNameByUserId.set(member.userId, member.name);
     }
   }
 
-  const rowsByUserId = new Map<string, PersonalLeaderboardRow>();
+  const rowsByMode = {
+    steel: new Map<string, PersonalLeaderboardRow>(),
+    soft: new Map<string, PersonalLeaderboardRow>()
+  };
+
   for (const match of matches) {
     if (match.status !== "completed") continue;
-    const userStats = readMatchUserStats(match.details);
-    for (const [userId, stats] of Object.entries(userStats)) {
-      const hats = statNumber(stats, ["countHatTrick"]) || 0;
-      const average = statNumber(stats, ["averageScore", "averagePer3Darts"]) || 0;
-      const checkout = statNumber(stats, ["highestCheckout"]) || 0;
-      if (hats <= 0 && average <= 0 && checkout <= 0) continue;
 
-      const profile = profilesByUserId.get(userId);
-      const current = rowsByUserId.get(userId) || {
-        userId,
-        name: profile?.display_name || fallbackNameByUserId.get(userId) || `选手 ${userId.slice(0, 6)}`,
+    for (const statEntry of readPersonalStatEntries(match)) {
+      const stats = statEntry.stats;
+      const hats = statNumber(stats, ["countHatTrick"]) || 0;
+      const whiteHorse = statNumber(stats, ["countWhiteHorse"]) || 0;
+      const count180 = statNumber(stats, ["count180", "countTon80"]) || 0;
+      const average = statNumber(stats, ["averageScore", "averagePer3Darts"]) || 0;
+      const mpr = statNumber(stats, ["averageMpr"]) || 0;
+      const highScore =
+        statEntry.dartMode === "soft" && String(statEntry.gameVariant || "") === "soft_high_score"
+          ? statNumber(stats, ["highestTurnScore", "totalScoredPoints"]) || 0
+          : 0;
+      const checkout = statNumber(stats, ["highestCheckout"]) || 0;
+      const hasSteelStat = average > 0 || count180 > 0 || checkout > 0;
+      const hasSoftStat = average > 0 || mpr > 0 || hats > 0 || whiteHorse > 0 || highScore > 0 || checkout > 0;
+      if (statEntry.dartMode === "steel" && !hasSteelStat) continue;
+      if (statEntry.dartMode === "soft" && !hasSoftStat) continue;
+
+      const profile = profilesByUserId.get(statEntry.userId);
+      const current = rowsByMode[statEntry.dartMode].get(statEntry.userId) || {
+        userId: statEntry.userId,
+        name: profile?.display_name || fallbackNameByUserId.get(statEntry.userId) || `选手 ${statEntry.userId.slice(0, 6)}`,
         avatarUrl: profile?.avatar_url || null,
-        teamName: teamNameByUserId.get(userId) || "",
+        teamName: teamNameByUserId.get(statEntry.userId) || "",
         hats: 0,
+        whiteHorse: 0,
+        count180: 0,
         bestAverage: 0,
+        bestMpr: 0,
+        bestHighScore: 0,
         bestCheckout: 0
       };
       current.hats += hats;
+      current.whiteHorse += whiteHorse;
+      current.count180 += count180;
       current.bestAverage = Math.max(current.bestAverage, average);
+      current.bestMpr = Math.max(current.bestMpr, mpr);
+      current.bestHighScore = Math.max(current.bestHighScore, highScore);
       current.bestCheckout = Math.max(current.bestCheckout, checkout);
-      rowsByUserId.set(userId, current);
+      rowsByMode[statEntry.dartMode].set(statEntry.userId, current);
     }
   }
 
-  const rows = [...rowsByUserId.values()];
   return {
-    hats: rows.filter((row) => row.hats > 0).sort((a, b) => b.hats - a.hats || b.bestAverage - a.bestAverage).slice(0, 5),
-    average: rows.filter((row) => row.bestAverage > 0).sort((a, b) => b.bestAverage - a.bestAverage).slice(0, 5),
-    checkout: rows.filter((row) => row.bestCheckout > 0).sort((a, b) => b.bestCheckout - a.bestCheckout).slice(0, 5)
+    steel: rankPersonalRows([...rowsByMode.steel.values()]),
+    soft: rankPersonalRows([...rowsByMode.soft.values()])
   };
+}
+
+function hasPersonalLeaderboards(leaderboards: PersonalLeaderboards) {
+  return Object.values(leaderboards).some((group) =>
+    Object.values(group).some((rows) => rows.length > 0)
+  );
+}
+
+function rankPersonalRows(rows: PersonalLeaderboardRow[]): PersonalLeaderboardGroup {
+  return {
+    hats: rows
+      .filter((row) => row.hats > 0)
+      .sort((a, b) => b.hats - a.hats || b.bestAverage - a.bestAverage)
+      .slice(0, 5),
+    whiteHorse: rows
+      .filter((row) => row.whiteHorse > 0)
+      .sort((a, b) => b.whiteHorse - a.whiteHorse || b.bestMpr - a.bestMpr)
+      .slice(0, 5),
+    count180: rows
+      .filter((row) => row.count180 > 0)
+      .sort((a, b) => b.count180 - a.count180 || b.bestAverage - a.bestAverage)
+      .slice(0, 5),
+    highScore: rows
+      .filter((row) => row.bestHighScore > 0)
+      .sort((a, b) => b.bestHighScore - a.bestHighScore || b.hats - a.hats)
+      .slice(0, 5),
+    average: rows
+      .filter((row) => row.bestAverage > 0)
+      .sort((a, b) => b.bestAverage - a.bestAverage)
+      .slice(0, 5),
+    mpr: rows
+      .filter((row) => row.bestMpr > 0)
+      .sort((a, b) => b.bestMpr - a.bestMpr)
+      .slice(0, 5),
+    checkout: rows
+      .filter((row) => row.bestCheckout > 0)
+      .sort((a, b) => b.bestCheckout - a.bestCheckout)
+      .slice(0, 5)
+  };
+}
+
+function readPersonalStatEntries(match: MatchRow): PersonalStatEntry[] {
+  const legEntries = readLegUserStatEntries(match.details);
+  if (legEntries.length > 0) return legEntries;
+
+  const matchDartMode: MatchDartMode = match.dart_mode === "soft" ? "soft" : "steel";
+  return Object.entries(readMatchUserStats(match.details)).map(([userId, stats]) => ({
+    userId,
+    dartMode: matchDartMode,
+    gameVariant: match.game_variant,
+    stats
+  }));
+}
+
+function readLegUserStatEntries(details: unknown): PersonalStatEntry[] {
+  if (!details || typeof details !== "object" || Array.isArray(details)) return [];
+  const legResults = (details as { legResults?: unknown }).legResults;
+  if (!Array.isArray(legResults)) return [];
+
+  return legResults.flatMap((legResult) => {
+    if (!legResult || typeof legResult !== "object" || Array.isArray(legResult)) return [];
+    const dartMode: MatchDartMode = (legResult as { dartMode?: unknown }).dartMode === "soft" ? "soft" : "steel";
+    const gameVariant = (legResult as { gameVariant?: unknown }).gameVariant;
+    const userStats = (legResult as { userStats?: unknown }).userStats;
+    if (!userStats || typeof userStats !== "object" || Array.isArray(userStats)) return [];
+    return Object.entries(userStats as Record<string, Record<string, unknown>>).map(([userId, stats]) => ({
+      userId,
+      dartMode,
+      gameVariant: typeof gameVariant === "string" || typeof gameVariant === "number" ? gameVariant : null,
+      stats
+    }));
+  });
 }
 
 function readMatchUserStats(details: unknown) {
@@ -678,6 +863,43 @@ function RankMetric({
   );
 }
 
+function LeaderboardSection({
+  title,
+  description,
+  lists
+}: {
+  title: string;
+  description: string;
+  lists: Array<{
+    title: string;
+    rows: PersonalLeaderboardRow[];
+    metric: (row: PersonalLeaderboardRow) => string;
+    emptyText: string;
+  }>;
+}) {
+  return (
+    <section className="rounded-lg border border-wire bg-field/75 p-3 sm:p-4">
+      <div className="flex flex-wrap items-end justify-between gap-2">
+        <div>
+          <h3 className="text-base font-black text-ink">{title}</h3>
+          <p className="mt-1 text-xs font-semibold text-muted">{description}</p>
+        </div>
+      </div>
+      <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {lists.map((list) => (
+          <PersonalLeaderboardList
+            key={list.title}
+            title={list.title}
+            rows={list.rows}
+            metric={list.metric}
+            emptyText={list.emptyText}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function PersonalLeaderboardList({
   title,
   rows,
@@ -690,7 +912,7 @@ function PersonalLeaderboardList({
   emptyText: string;
 }) {
   return (
-    <section className="rounded-lg border border-wire bg-field p-3">
+    <section className="rounded-lg border border-wire bg-surface p-3">
       <h3 className="text-sm font-black text-board">{title}</h3>
       <div className="mt-3 grid gap-2">
         {rows.map((row, index) => (
@@ -891,36 +1113,13 @@ function ScheduleLineupSide({
   );
 }
 
-function groupBoardSlots(slots: TournamentBoardTimeSlot[]) {
-  const slotsByBoardId = new Map<string, TournamentBoardTimeSlot[]>();
-  for (const slot of slots) {
-    const list = slotsByBoardId.get(slot.board_id) || [];
-    list.push(slot);
-    slotsByBoardId.set(slot.board_id, list);
-  }
-  return slotsByBoardId;
-}
-
-function toBoardView(board: TournamentBoard, slots: TournamentBoardTimeSlot[] = []): BoardReservationBoard {
+function toBoardView(board: TournamentBoard): BoardReservationBoard {
   return {
     id: board.id,
     name: board.name,
     availableStartAt: board.available_start_at,
     availableEndAt: board.available_end_at,
-    status: board.status,
-    slots: slots.map(toBoardSlotView)
-  };
-}
-
-function toBoardSlotView(slot: TournamentBoardTimeSlot): BoardReservationSlot {
-  return {
-    id: slot.id,
-    boardId: slot.board_id,
-    availableStartAt: slot.available_start_at,
-    availableEndAt: slot.available_end_at,
-    dailyStartTime: slot.daily_start_time,
-    dailyEndTime: slot.daily_end_time,
-    status: slot.status
+    status: board.status
   };
 }
 

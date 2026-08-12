@@ -1,15 +1,45 @@
 import Link from "next/link";
-import { ArrowRight, BarChart3, CalendarDays, Gauge, IdCard, Monitor, ShieldCheck, Trophy } from "lucide-react";
+import {
+  ArrowRight,
+  BarChart3,
+  CalendarDays,
+  Clock3,
+  Gauge,
+  IdCard,
+  MapPin,
+  Monitor,
+  ShieldCheck,
+  Trophy
+} from "lucide-react";
 import { SetupNotice } from "@/components/SetupNotice";
 import { TournamentCard } from "@/components/TournamentCard";
+import {
+  BoardReservationPanel,
+  MatchBoardReservationBadge,
+  type BoardReservationBoard,
+  type BoardReservationRow,
+  type BoardReservationSlot
+} from "@/components/tournament/BoardReservationPanel";
 import { Card } from "@/components/ui/Card";
+import { PlayerIdentity } from "@/components/ui/PlayerIdentity";
 import { getCurrentUserAndProfile } from "@/lib/auth/guards";
+import { getCompactMatchRulesSummary, getDartModeLabel } from "@/lib/darts/variants";
 import { hasSupabaseEnv } from "@/lib/env";
+import { getMatchStatusLabel, isUnplayedMatch } from "@/lib/matches/status";
+import { formatUserDisplayName, isOpaqueIdentifier } from "@/lib/scorer/display-names";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { defaultSiteTheme } from "@/lib/theme";
-import { formatDateTime } from "@/lib/utils";
+import { cn, formatDateTime } from "@/lib/utils";
 import { APP_VERSION } from "@/lib/version";
-import type { Tournament } from "@/types/domain";
+import type {
+  MatchBoardReservation,
+  MatchDartMode,
+  MatchSummary,
+  Tournament,
+  TournamentBoard,
+  TournamentBoardTimeSlot
+} from "@/types/domain";
 
 export const dynamic = "force-dynamic";
 
@@ -34,55 +64,18 @@ export default async function HomePage() {
     .order("tournament_start_at", { ascending: true })
     .limit(6);
 
-  let nextMatches: {
-    data:
-      | Array<{
-          id: string;
-          tournament_id: string;
-          round_number: number;
-          match_number: number;
-          status: string;
-          scheduled_at: string | null;
-          participant_a_id: string | null;
-          participant_b_id: string | null;
-        }>
-      | null;
-  } = { data: [] };
-
-  if (user) {
-    const { data: teamMemberships } = await supabase
-      .from("team_members")
-      .select("team_id")
-      .eq("user_id", user.id);
-    const teamIds = (teamMemberships || []).map((item) => item.team_id);
-    const participantFilters = [`user_id.eq.${user.id}`];
-    if (teamIds.length > 0) participantFilters.push(`team_id.in.(${teamIds.join(",")})`);
-    const { data: myParticipants } = await supabase
-      .from("tournament_participants")
-      .select("id")
-      .or(participantFilters.join(","));
-    const participantIds = (myParticipants || []).map((participant) => participant.id);
-
-    nextMatches =
-      participantIds.length > 0
-        ? await supabase
-            .from("matches")
-            .select("id, tournament_id, round_number, match_number, status, scheduled_at, participant_a_id, participant_b_id")
-            .or(`participant_a_id.in.(${participantIds.join(",")}),participant_b_id.in.(${participantIds.join(",")})`)
-            .in("status", ["not_started", "in_progress"])
-            .order("scheduled_at", { ascending: true, nullsFirst: false })
-            .limit(5)
-        : { data: [] };
-  }
+  const weeklySchedule = user ? await loadWeeklySchedule(supabase, user.id, profile?.role === "admin") : null;
 
   const activeTournaments = tournaments || [];
   const needsRealName = Boolean(user && (!profile?.real_name || !profile?.id_card_number));
 
   return (
     <div className="grid gap-5">
-      <Hero platformName={platformName} isAdmin={profile?.role === "admin"} />
+      <WeeklySchedulePanel schedule={weeklySchedule} isSignedIn={Boolean(user)} />
 
       {needsRealName ? <RealNamePrompt /> : null}
+
+      <Hero platformName={platformName} isAdmin={profile?.role === "admin"} />
 
       <section className="grid gap-3 md:grid-cols-3">
         <MiniMetric label="用户" value={profile?.display_name || "访客"} />
@@ -90,7 +83,7 @@ export default async function HomePage() {
         <MiniMetric label="进行中" value={activeTournaments.filter((item) => item.status === "in_progress").length} />
       </section>
 
-      <section className="grid gap-3 lg:grid-cols-[1fr_380px]">
+      <section className="grid gap-3">
         <div className="grid gap-3">
           <SectionTitle title="赛事" href="/tournaments" />
           <div className="grid gap-3 md:grid-cols-2">
@@ -104,34 +97,623 @@ export default async function HomePage() {
             ) : null}
           </div>
         </div>
-
-        <Card>
-          <div className="flex items-center gap-2">
-            <Trophy className="h-5 w-5 text-board" aria-hidden />
-            <h2 className="text-lg font-black">下一场</h2>
-          </div>
-          <div className="mt-4 grid gap-2">
-            {(nextMatches.data || []).length > 0 ? (
-              nextMatches.data?.map((match) => (
-                <Link
-                  key={match.id}
-                  href={`/scorer/${match.id}`}
-                  className="flex min-h-14 touch-manipulation items-center justify-between rounded-lg border border-wire px-3 text-sm font-bold hover:bg-field"
-                >
-                  <span>R{match.round_number} / M{match.match_number}</span>
-                  <span className="text-xs text-muted">
-                    {match.scheduled_at ? formatDateTime(match.scheduled_at) : "待排期"}
-                  </span>
-                </Link>
-              ))
-            ) : (
-              <p className="text-sm text-muted">暂无待打比赛。</p>
-            )}
-          </div>
-        </Card>
       </section>
     </div>
   );
+}
+
+type SupabaseServerClient = Awaited<ReturnType<typeof createSupabaseServerClient>>;
+
+type HomeParticipantRow = {
+  id: string;
+  tournament_id: string;
+  display_name: string;
+  user_id: string | null;
+  team_id: string | null;
+  participant_type: "user" | "team";
+};
+
+type HomeTeamMemberRow = {
+  team_id: string;
+  user_id: string;
+  role?: string | null;
+};
+
+type HomeTeamRow = {
+  id: string;
+  avatar_url?: string | null;
+  captain_user_id?: string | null;
+};
+
+type HomeProfileRow = {
+  id: string;
+  uid?: string | null;
+  display_name?: string | null;
+  avatar_url?: string | null;
+};
+
+type HomeMatchRow = MatchSummary & {
+  tournament_id: string;
+  stage: "group" | "knockout";
+  round_number: number;
+  match_number: number;
+  scheduled_at?: string | null;
+};
+
+type WeeklyScheduleMatch = {
+  match: HomeMatchRow;
+  tournament: Tournament;
+  dartMode: MatchDartMode;
+  participantAName: string;
+  participantBName: string;
+  participantAAvatarUrl: string | null;
+  participantBAvatarUrl: string | null;
+  participantAIsMine: boolean;
+  participantBIsMine: boolean;
+  currentReservation: BoardReservationRow | null;
+  currentBoard: BoardReservationBoard | null;
+  boardRows: BoardReservationBoard[];
+  reservationRows: BoardReservationRow[];
+  canReserve: boolean;
+  isOverdue: boolean;
+};
+
+type WeeklyScheduleData = {
+  weekLabel: string;
+  items: WeeklyScheduleMatch[];
+  overdueCount: number;
+};
+
+async function loadWeeklySchedule(
+  supabase: SupabaseServerClient,
+  userId: string,
+  isAdmin: boolean
+): Promise<WeeklyScheduleData> {
+  const now = new Date();
+  const weekStart = startOfLocalWeek(now);
+  const weekEnd = addLocalDays(weekStart, 7);
+
+  const { data: teamMemberships } = await supabase
+    .from("team_members")
+    .select("team_id")
+    .eq("user_id", userId);
+  const teamIds = [...new Set((teamMemberships || []).map((item) => item.team_id).filter(Boolean))] as string[];
+
+  const [{ data: directParticipants }, teamParticipantsResult] = await Promise.all([
+    supabase
+      .from("tournament_participants")
+      .select("id, tournament_id, display_name, user_id, team_id, participant_type")
+      .eq("user_id", userId)
+      .eq("status", "active"),
+    teamIds.length > 0
+      ? supabase
+          .from("tournament_participants")
+          .select("id, tournament_id, display_name, user_id, team_id, participant_type")
+          .in("team_id", teamIds)
+          .eq("status", "active")
+      : Promise.resolve({ data: [] })
+  ]);
+
+  const myParticipants = uniqueById([...(directParticipants || []), ...((teamParticipantsResult.data || []) as HomeParticipantRow[])]) as HomeParticipantRow[];
+  const myParticipantIds = myParticipants.map((participant) => participant.id);
+
+  if (myParticipantIds.length === 0) {
+    return {
+      weekLabel: formatWeekRange(weekStart, weekEnd),
+      items: [],
+      overdueCount: 0
+    };
+  }
+
+  const [matchesAsA, matchesAsB] = await Promise.all([
+    supabase
+      .from("matches")
+      .select("*")
+      .in("participant_a_id", myParticipantIds)
+      .in("status", ["not_started", "in_progress", "pending_confirmation", "disputed"])
+      .order("round_number")
+      .order("match_number"),
+    supabase
+      .from("matches")
+      .select("*")
+      .in("participant_b_id", myParticipantIds)
+      .in("status", ["not_started", "in_progress", "pending_confirmation", "disputed"])
+      .order("round_number")
+      .order("match_number")
+  ]);
+
+  const matchRows = uniqueById([...(matchesAsA.data || []), ...(matchesAsB.data || [])]) as HomeMatchRow[];
+  const tournamentIds = [...new Set(matchRows.map((match) => match.tournament_id).filter(Boolean))] as string[];
+  const allParticipantIds = [
+    ...new Set(matchRows.flatMap((match) => [match.participant_a_id, match.participant_b_id]).filter(Boolean))
+  ] as string[];
+
+  if (tournamentIds.length === 0 || allParticipantIds.length === 0) {
+    return {
+      weekLabel: formatWeekRange(weekStart, weekEnd),
+      items: [],
+      overdueCount: 0
+    };
+  }
+
+  const [
+    { data: tournamentRows },
+    { data: allParticipants },
+    { data: boards },
+    { data: boardSlots },
+    { data: reservations }
+  ] = await Promise.all([
+    supabase.from("tournaments").select("*").in("id", tournamentIds),
+    supabase
+      .from("tournament_participants")
+      .select("id, tournament_id, display_name, user_id, team_id, participant_type")
+      .in("id", allParticipantIds),
+    supabase.from("tournament_boards").select("*").in("tournament_id", tournamentIds).order("available_start_at"),
+    supabase.from("tournament_board_time_slots").select("*").in("tournament_id", tournamentIds).order("daily_start_time"),
+    supabase
+      .from("match_board_reservations")
+      .select("*")
+      .in("tournament_id", tournamentIds)
+      .eq("status", "active")
+      .order("reserved_start_at")
+  ]);
+
+  const activeTournaments = ((tournamentRows || []) as Tournament[]).filter((tournament) =>
+    ["registration_open", "in_progress"].includes(tournament.status)
+  );
+  const tournamentById = new Map(activeTournaments.map((tournament) => [tournament.id, tournament]));
+  const participantRows = (allParticipants || []) as HomeParticipantRow[];
+  const participantRowById = new Map(participantRows.map((participant) => [participant.id, participant]));
+  const allTeamIds = [...new Set(participantRows.map((participant) => participant.team_id).filter(Boolean))] as string[];
+  const allUserIds = [...new Set(participantRows.map((participant) => participant.user_id).filter(Boolean))] as string[];
+
+  const [{ data: teamMembers }, { data: participantTeams }] = await Promise.all([
+    allTeamIds.length > 0
+      ? supabase.from("team_members").select("team_id, user_id, role").in("team_id", allTeamIds)
+      : Promise.resolve({ data: [] }),
+    allTeamIds.length > 0
+      ? supabase.from("teams").select("id, avatar_url, captain_user_id").in("id", allTeamIds)
+      : Promise.resolve({ data: [] })
+  ]);
+  const memberRows = (teamMembers || []) as HomeTeamMemberRow[];
+  const profileIds = [...new Set([...allUserIds, ...memberRows.map((member) => member.user_id)])];
+  const profileRows = await fetchHomeProfiles(supabase, profileIds);
+  const profileById = new Map(profileRows.map((profile) => [profile.id, profile]));
+  const teamById = new Map(((participantTeams || []) as HomeTeamRow[]).map((team) => [team.id, team]));
+  const teamMembersByTeamId = new Map<string, Array<{ userId: string; name: string; avatarUrl?: string | null }>>();
+
+  for (const member of memberRows) {
+    const list = teamMembersByTeamId.get(member.team_id) || [];
+    const profile = profileById.get(member.user_id);
+    list.push({
+      userId: member.user_id,
+      name: formatUserDisplayName({
+        userId: member.user_id,
+        displayName: profile?.display_name,
+        uid: profile?.uid
+      }),
+      avatarUrl: profile?.avatar_url || null
+    });
+    teamMembersByTeamId.set(member.team_id, list);
+  }
+
+  const participantMembersById = new Map<string, Array<{ userId: string; name: string; avatarUrl?: string | null }>>();
+  const participantAvatarById = new Map<string, string | null>();
+  const participantDisplayNameById = new Map<string, string>();
+
+  for (const participant of participantRows) {
+    if (participant.participant_type === "user" && participant.user_id) {
+      const profile = profileById.get(participant.user_id);
+      const name = formatUserDisplayName({
+        userId: participant.user_id,
+        displayName: profile?.display_name,
+        uid: profile?.uid,
+        fallback: participant.display_name,
+        includeUid: false
+      });
+      participantMembersById.set(participant.id, [{ userId: participant.user_id, name, avatarUrl: profile?.avatar_url || null }]);
+      participantAvatarById.set(participant.id, profile?.avatar_url || null);
+      participantDisplayNameById.set(participant.id, participant.display_name && !isOpaqueIdentifier(participant.display_name) ? participant.display_name : name);
+      continue;
+    }
+
+    const members = participant.team_id ? teamMembersByTeamId.get(participant.team_id) || [] : [];
+    const firstMemberAvatar = members.map((member) => member.avatarUrl || null).find(Boolean) || null;
+    const teamAvatar = participant.team_id ? teamById.get(participant.team_id)?.avatar_url || null : null;
+    const memberNames = members.map((member) => member.name).filter(Boolean).join(" / ");
+    participantMembersById.set(participant.id, members);
+    participantAvatarById.set(participant.id, teamAvatar || firstMemberAvatar || null);
+    participantDisplayNameById.set(
+      participant.id,
+      participant.display_name && !isOpaqueIdentifier(participant.display_name)
+        ? participant.display_name
+        : memberNames || participant.display_name || "TBD"
+    );
+  }
+
+  const boardSlotRows = (boardSlots || []) as TournamentBoardTimeSlot[];
+  const slotsByBoardId = groupBoardSlots(boardSlotRows);
+  const boardRows = ((boards || []) as TournamentBoard[]).map((board) => toBoardView(board, slotsByBoardId.get(board.id)));
+  const boardRowsByTournamentId = new Map<string, BoardReservationBoard[]>();
+  for (const board of boardRows) {
+    const source = (boards || []).find((item) => item.id === board.id) as TournamentBoard | undefined;
+    if (!source) continue;
+    const list = boardRowsByTournamentId.get(source.tournament_id) || [];
+    list.push(board);
+    boardRowsByTournamentId.set(source.tournament_id, list);
+  }
+  const reservationSourceRows = (reservations || []) as MatchBoardReservation[];
+  const reservationRows = reservationSourceRows.map(toReservationView);
+  const reservationsByTournamentId = new Map<string, BoardReservationRow[]>();
+  for (const reservation of reservationSourceRows) {
+    const list = reservationsByTournamentId.get(reservation.tournament_id) || [];
+    list.push(toReservationView(reservation));
+    reservationsByTournamentId.set(reservation.tournament_id, list);
+  }
+  const boardById = new Map(boardRows.map((board) => [board.id, board]));
+  const reservationByMatchId = new Map(reservationRows.map((reservation) => [reservation.matchId, reservation]));
+  const selectedIds = new Set<string>();
+  const items: WeeklyScheduleMatch[] = [];
+  const sortedMatches = matchRows
+    .filter((match) => tournamentById.has(match.tournament_id) && isUnplayedMatch(match.status))
+    .sort(compareHomeMatches);
+
+  const addItem = (match: HomeMatchRow, isOverdue: boolean) => {
+    if (selectedIds.has(match.id)) return;
+    const tournament = tournamentById.get(match.tournament_id);
+    if (!tournament) return;
+    const currentReservation = reservationByMatchId.get(match.id) || null;
+    const tournamentBoards = boardRowsByTournamentId.get(match.tournament_id) || [];
+    const tournamentReservations = reservationsByTournamentId.get(match.tournament_id) || [];
+    const participantAIsMine = myParticipantIds.includes(match.participant_a_id || "");
+    const participantBIsMine = myParticipantIds.includes(match.participant_b_id || "");
+    const currentBoard = currentReservation ? boardById.get(currentReservation.boardId) || null : null;
+
+    items.push({
+      match,
+      tournament,
+      dartMode: match.dart_mode === "soft" ? "soft" : "steel",
+      participantAName: getParticipantDisplayName(participantDisplayNameById, participantRowById, match.participant_a_id),
+      participantBName: getParticipantDisplayName(participantDisplayNameById, participantRowById, match.participant_b_id),
+      participantAAvatarUrl: match.participant_a_id ? participantAvatarById.get(match.participant_a_id) || null : null,
+      participantBAvatarUrl: match.participant_b_id ? participantAvatarById.get(match.participant_b_id) || null : null,
+      participantAIsMine,
+      participantBIsMine,
+      currentReservation,
+      currentBoard,
+      boardRows: tournamentBoards,
+      reservationRows: tournamentReservations,
+      canReserve: Boolean(isAdmin || participantAIsMine || participantBIsMine),
+      isOverdue
+    });
+    selectedIds.add(match.id);
+  };
+
+  for (const match of sortedMatches) {
+    const tournament = tournamentById.get(match.tournament_id);
+    if (!tournament) continue;
+    const currentReservation = reservationByMatchId.get(match.id) || null;
+    const matchTime = getMatchScheduleTime(match, currentReservation);
+    const scheduledThisWeek = Boolean(matchTime && matchTime >= weekStart && matchTime < weekEnd);
+    const overdue = isMatchOverdue(match, tournament, currentReservation, weekStart);
+    if (overdue || scheduledThisWeek) {
+      addItem(match, overdue);
+    }
+  }
+
+  const selectedCurrentWeekModeKeys = new Set(
+    items
+      .filter((item) => !item.isOverdue)
+      .map((item) => `${item.match.tournament_id}:${item.dartMode}`)
+  );
+
+  for (const tournament of activeTournaments) {
+    for (const dartMode of ["soft", "steel"] as MatchDartMode[]) {
+      const key = `${tournament.id}:${dartMode}`;
+      if (selectedCurrentWeekModeKeys.has(key)) continue;
+      const nextMatch = sortedMatches.find(
+        (match) =>
+          match.tournament_id === tournament.id &&
+          (match.dart_mode === "soft" ? "soft" : "steel") === dartMode &&
+          !selectedIds.has(match.id) &&
+          !isMatchOverdue(match, tournament, reservationByMatchId.get(match.id) || null, weekStart)
+      );
+      if (nextMatch) {
+        addItem(nextMatch, false);
+        selectedCurrentWeekModeKeys.add(key);
+      }
+    }
+  }
+
+  items.sort((a, b) => {
+    if (a.isOverdue !== b.isOverdue) return a.isOverdue ? -1 : 1;
+    const aTime = getMatchScheduleTime(a.match, a.currentReservation)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+    const bTime = getMatchScheduleTime(b.match, b.currentReservation)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+    return aTime - bTime || compareHomeMatches(a.match, b.match);
+  });
+
+  return {
+    weekLabel: formatWeekRange(weekStart, weekEnd),
+    items,
+    overdueCount: items.filter((item) => item.isOverdue).length
+  };
+}
+
+async function fetchHomeProfiles(supabase: SupabaseServerClient, profileIds: string[]) {
+  if (profileIds.length === 0) return [] as HomeProfileRow[];
+
+  try {
+    const admin = createSupabaseAdminClient();
+    const { data } = await admin.from("profiles").select("id, uid, display_name, avatar_url").in("id", profileIds);
+    return (data || []) as HomeProfileRow[];
+  } catch {
+    const { data } = await supabase.from("profiles").select("id, uid, display_name, avatar_url").in("id", profileIds);
+    return (data || []) as HomeProfileRow[];
+  }
+}
+
+function WeeklySchedulePanel({
+  schedule,
+  isSignedIn
+}: {
+  schedule: WeeklyScheduleData | null;
+  isSignedIn: boolean;
+}) {
+  return (
+    <Card className="border-board/20 bg-gradient-to-b from-sky-50 to-surface">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2 text-xs font-black uppercase text-board">
+            <Clock3 className="h-4 w-4" aria-hidden />
+            Weekly Matches
+          </div>
+          <h2 className="mt-1 text-xl font-black">本周赛程</h2>
+          <p className="mt-1 text-sm font-semibold leading-6 text-muted">
+            {schedule ? `${schedule.weekLabel} · 本周默认安排一软一硬，未完成补赛会标黄保留。` : "登录后自动显示你本周要处理的比赛。"}
+          </p>
+        </div>
+        {schedule?.overdueCount ? (
+          <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-black text-amber-800">
+            {schedule.overdueCount} 场补赛
+          </span>
+        ) : null}
+      </div>
+
+      {!isSignedIn ? (
+        <Link
+          href="/auth/login"
+          className="mt-4 inline-flex min-h-11 touch-manipulation items-center justify-center rounded-lg bg-board px-4 text-sm font-black text-white"
+        >
+          登录查看本周赛程
+        </Link>
+      ) : schedule && schedule.items.length > 0 ? (
+        <div className="mt-4 grid gap-3 lg:grid-cols-2">
+          {schedule.items.map((item) => (
+            <WeeklyScheduleMatchCard key={item.match.id} item={item} />
+          ))}
+        </div>
+      ) : (
+        <p className="mt-4 rounded-lg bg-surface p-3 text-sm font-semibold text-muted">
+          本周暂无待处理比赛。可以先去赛事页查看完整排名和历史赛程。
+        </p>
+      )}
+    </Card>
+  );
+}
+
+function WeeklyScheduleMatchCard({ item }: { item: WeeklyScheduleMatch }) {
+  const scheduledTime = getMatchScheduleTime(item.match, item.currentReservation);
+
+  return (
+    <article
+      className={cn(
+        "grid min-w-0 gap-3 rounded-lg border p-3 shadow-[0_12px_28px_rgb(17_24_39/0.05)]",
+        item.isOverdue ? "border-amber-300 bg-amber-50" : "border-wire bg-surface"
+      )}
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <DartModeBadge dartMode={item.dartMode} />
+        {item.isOverdue ? (
+          <span className="rounded-full bg-amber-200 px-2.5 py-1 text-xs font-black text-amber-900">补赛</span>
+        ) : null}
+        <span className="rounded-full bg-field px-2.5 py-1 text-xs font-black text-muted">
+          {getMatchStatusLabel(item.match.status)}
+        </span>
+      </div>
+
+      <div className="min-w-0">
+        <div className="truncate text-sm font-black text-board">{item.tournament.name}</div>
+        <div className="mt-1 text-base font-black">
+          第 {item.match.round_number} 轮 · 第 {item.match.match_number} 场
+        </div>
+        <div className="mt-1 text-xs font-bold text-muted">
+          {getCompactMatchRulesSummary({
+            dartMode: item.dartMode,
+            gameVariant: item.match.game_variant,
+            legRules: item.match.leg_rules
+          })}
+        </div>
+      </div>
+
+      <div className="grid min-w-0 gap-2 sm:grid-cols-2">
+        <PlayerIdentity
+          className={cn("rounded-lg bg-field p-2", item.participantAIsMine && "bg-board/10 ring-1 ring-board/25")}
+          name={item.participantAName}
+          avatarUrl={item.participantAAvatarUrl}
+          subtitle={`比分 ${item.match.score_a}`}
+          size="sm"
+          compact
+        />
+        <PlayerIdentity
+          className={cn("rounded-lg bg-field p-2", item.participantBIsMine && "bg-board/10 ring-1 ring-board/25")}
+          name={item.participantBName}
+          avatarUrl={item.participantBAvatarUrl}
+          subtitle={`比分 ${item.match.score_b}`}
+          size="sm"
+          compact
+        />
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 text-xs font-bold text-muted">
+        <MatchBoardReservationBadge reservation={item.currentReservation} board={item.currentBoard} />
+        {scheduledTime ? (
+          <span className="inline-flex items-center gap-1 rounded-full bg-field px-2 py-1">
+            <MapPin className="h-3.5 w-3.5" aria-hidden />
+            {formatDateTime(scheduledTime.toISOString())}
+          </span>
+        ) : null}
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <Link
+          href={`/scorer/${item.match.id}`}
+          className="inline-flex min-h-11 touch-manipulation items-center justify-center rounded-lg bg-board px-3 text-sm font-black text-white"
+        >
+          排阵 / 计分
+        </Link>
+        <Link
+          href={`/tournaments/${item.tournament.id}?schedule=mine#schedule`}
+          className="inline-flex min-h-11 touch-manipulation items-center justify-center rounded-lg border border-wire bg-surface px-3 text-sm font-black text-board"
+        >
+          查看赛程
+        </Link>
+      </div>
+
+      {item.canReserve || item.currentReservation ? (
+        <BoardReservationPanel
+          matchId={item.match.id}
+          boards={item.boardRows}
+          reservations={item.reservationRows}
+          currentReservation={item.currentReservation}
+          canReserve={item.canReserve}
+        />
+      ) : null}
+    </article>
+  );
+}
+
+function DartModeBadge({ dartMode }: { dartMode?: string | null }) {
+  const isSoft = dartMode === "soft";
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-black",
+        isSoft ? "bg-sky-100 text-board ring-1 ring-sky-200" : "bg-zinc-900 text-white"
+      )}
+    >
+      {getDartModeLabel(dartMode)}
+    </span>
+  );
+}
+
+function uniqueById<T extends { id: string }>(items: T[]) {
+  const map = new Map<string, T>();
+  for (const item of items) map.set(item.id, item);
+  return [...map.values()];
+}
+
+function compareHomeMatches(a: HomeMatchRow, b: HomeMatchRow) {
+  return (
+    a.round_number - b.round_number ||
+    a.match_number - b.match_number ||
+    a.id.localeCompare(b.id)
+  );
+}
+
+function getParticipantDisplayName(
+  displayNameById: Map<string, string>,
+  participantById: Map<string, HomeParticipantRow>,
+  participantId?: string | null
+) {
+  if (!participantId) return "TBD";
+  return displayNameById.get(participantId) || participantById.get(participantId)?.display_name || "TBD";
+}
+
+function getMatchScheduleTime(match: HomeMatchRow, reservation?: BoardReservationRow | null) {
+  const value = reservation?.reservedStartAt || match.scheduled_at || null;
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date : null;
+}
+
+function isMatchOverdue(
+  match: HomeMatchRow,
+  tournament: Tournament,
+  reservation: BoardReservationRow | null,
+  weekStart: Date
+) {
+  const scheduledTime = getMatchScheduleTime(match, reservation);
+  if (scheduledTime && scheduledTime < weekStart) return true;
+  if (!tournament.tournament_start_at) return false;
+
+  const tournamentWeekStart = startOfLocalWeek(new Date(tournament.tournament_start_at));
+  if (weekStart <= tournamentWeekStart) return false;
+  const expectedRound = Math.floor((weekStart.getTime() - tournamentWeekStart.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1;
+  return match.round_number < expectedRound;
+}
+
+function startOfLocalWeek(value: Date) {
+  const date = new Date(value);
+  date.setHours(0, 0, 0, 0);
+  const day = date.getDay();
+  const offset = day === 0 ? -6 : 1 - day;
+  date.setDate(date.getDate() + offset);
+  return date;
+}
+
+function addLocalDays(value: Date, days: number) {
+  const date = new Date(value);
+  date.setDate(date.getDate() + days);
+  return date;
+}
+
+function formatWeekRange(weekStart: Date, weekEnd: Date) {
+  const formatter = new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit" });
+  return `${formatter.format(weekStart)}-${formatter.format(addLocalDays(weekEnd, -1))}`;
+}
+
+function groupBoardSlots(slots: TournamentBoardTimeSlot[]) {
+  const slotsByBoardId = new Map<string, TournamentBoardTimeSlot[]>();
+  for (const slot of slots) {
+    const list = slotsByBoardId.get(slot.board_id) || [];
+    list.push(slot);
+    slotsByBoardId.set(slot.board_id, list);
+  }
+  return slotsByBoardId;
+}
+
+function toBoardView(board: TournamentBoard, slots: TournamentBoardTimeSlot[] = []): BoardReservationBoard {
+  return {
+    id: board.id,
+    name: board.name,
+    availableStartAt: board.available_start_at,
+    availableEndAt: board.available_end_at,
+    status: board.status,
+    slots: slots.map(toBoardSlotView)
+  };
+}
+
+function toBoardSlotView(slot: TournamentBoardTimeSlot): BoardReservationSlot {
+  return {
+    id: slot.id,
+    boardId: slot.board_id,
+    availableStartAt: slot.available_start_at,
+    availableEndAt: slot.available_end_at,
+    dailyStartTime: slot.daily_start_time,
+    dailyEndTime: slot.daily_end_time,
+    status: slot.status
+  };
+}
+
+function toReservationView(reservation: MatchBoardReservation): BoardReservationRow {
+  return {
+    id: reservation.id,
+    matchId: reservation.match_id,
+    boardId: reservation.board_id,
+    reservedStartAt: reservation.reserved_start_at,
+    reservedEndAt: reservation.reserved_end_at,
+    status: reservation.status
+  };
 }
 
 function RealNamePrompt() {
