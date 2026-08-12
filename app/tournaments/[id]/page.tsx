@@ -8,7 +8,7 @@ import {
 } from "@/lib/actions/tournaments";
 import { getCurrentUserAndProfile } from "@/lib/auth/guards";
 import { hasSupabaseEnv } from "@/lib/env";
-import { updateTournamentStandings } from "@/lib/algorithms/standings";
+import { updateTournamentStandings, type StandingRow } from "@/lib/algorithms/standings";
 import { getCompactMatchRulesSummary, getDartModeLabel, getGameVariantLabel, resolveMatchLegRules } from "@/lib/darts/variants";
 import {
   areBothMatchLineupsSubmitted,
@@ -31,7 +31,7 @@ import {
 } from "@/components/tournament/BoardReservationPanel";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
-import { PlayerIdentity } from "@/components/ui/PlayerIdentity";
+import { PlayerAvatar, PlayerIdentity } from "@/components/ui/PlayerIdentity";
 import type {
   MatchBoardReservation,
   MatchDartMode,
@@ -240,6 +240,16 @@ export default async function TournamentDetailPage({
     participantById,
     participantDisplayNameById
   });
+  const standingPodiumRows = standings.slice(0, 3).map((row, index) => ({
+    row,
+    rank: index + 1,
+    name: getParticipantDisplayName(row.participantId, row.name),
+    avatarUrl: participantAvatarById.get(row.participantId) || null,
+    rating: participantById.get(row.participantId)?.rating || 1000,
+    points: Number.isFinite(Number(row.points)) ? Number(row.points) : row.wins * 3,
+    members: participantMembersById.get(row.participantId) || []
+  }));
+  const standingListRows = standings.slice(3);
   const showStandings = tournamentData.format !== "single_elimination";
   const showGroups = (groups || []).length > 1;
 
@@ -304,21 +314,6 @@ export default async function TournamentDetailPage({
         }
       />
 
-      <Card>
-        <dl className="grid gap-3 text-sm md:grid-cols-4">
-          <Info label="地点" value={tournamentData.location || "待定"} />
-          <Info label="比赛开始" value={formatDateTime(tournamentData.tournament_start_at)} />
-          <Info label="赛制" value={getTournamentFormatLabel(tournamentData.format)} />
-          <Info label="参赛" value={`${participantSeeds.length}/${tournamentData.max_participants}`} />
-          <Info label="类型" value={`${tournamentData.tournament_type} / 每队 ${tournamentData.team_size} 人`} />
-          <Info label="镖种" value={getDartModeLabel(tournamentData.dart_mode)} />
-          <Info label="硬镖" value={`${tournamentData.dart_game} / BO${tournamentData.best_of}`} />
-          <Info label="软镖" value={getGameVariantLabel({ dartMode: "soft", gameVariant: tournamentData.soft_game })} />
-          <Info label="报名开始" value={formatDateTime(tournamentData.registration_start_at)} />
-          <Info label="报名截止" value={formatDateTime(tournamentData.registration_end_at)} />
-        </dl>
-      </Card>
-
       {showStandings || showGroups ? (
         <section className={cn("grid min-w-0 gap-4", showStandings && showGroups && "lg:grid-cols-[1.1fr_0.9fr]")}>
           {showStandings ? (
@@ -326,16 +321,29 @@ export default async function TournamentDetailPage({
               <h2 className="text-lg font-bold">
                 {tournamentData.format === "league_playoff" ? "联赛排名" : "排名"}
               </h2>
-              <div className="mt-4 grid gap-2">
-                {standings.map((row, index) => {
+              {standingPodiumRows.length > 0 ? (
+                <div className="mt-4">
+                  <StandingPodium rows={standingPodiumRows} />
+                </div>
+              ) : null}
+              {standingListRows.length > 0 ? (
+                <div className="mt-4 grid gap-2">
+                  {standingListRows.map((row, index) => {
                   const points = Number.isFinite(Number(row.points)) ? Number(row.points) : row.wins * 3;
+                  const rank = index + 4;
                   return (
-                    <div key={row.participantId} className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] gap-3 rounded-lg border border-wire bg-field/75 p-3 sm:items-center">
+                    <div
+                      key={row.participantId}
+                      className={cn(
+                        "grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] gap-3 rounded-lg border p-3 sm:items-center",
+                        getPodiumTone(rank, "list")
+                      )}
+                    >
                       <div className={cn(
                         "grid h-10 w-10 place-items-center rounded-lg text-sm font-black",
-                        index < 3 ? "bg-board text-white" : "bg-surface text-board"
+                        getPodiumTone(rank, "rank")
                       )}>
-                        {index + 1}
+                        {rank}
                       </div>
                       <PlayerIdentity
                         name={getParticipantDisplayName(row.participantId, row.name)}
@@ -356,9 +364,11 @@ export default async function TournamentDetailPage({
                       </div>
                     </div>
                   );
-                })}
-                {standings.length === 0 ? <p className="text-sm text-muted">暂无排名数据。</p> : null}
-              </div>
+                  })}
+                </div>
+              ) : standings.length === 0 ? (
+                <p className="mt-4 text-sm text-muted">暂无排名数据。</p>
+              ) : null}
             </Card>
           ) : null}
 
@@ -463,6 +473,8 @@ export default async function TournamentDetailPage({
           </div>
         </Card>
       ) : null}
+
+      <TournamentInfoDetails tournament={tournamentData} participantCount={participantSeeds.length} />
 
       {knockoutMatches.length > 0 ? (
         <Card>
@@ -863,6 +875,77 @@ function RankMetric({
   );
 }
 
+type StandingPodiumRow = {
+  row: StandingRow;
+  rank: number;
+  name: string;
+  avatarUrl: string | null;
+  rating: number;
+  points: number;
+  members: Array<{ userId: string; name: string }>;
+};
+
+function StandingPodium({ rows }: { rows: StandingPodiumRow[] }) {
+  return (
+    <div className="grid gap-2 sm:grid-cols-3">
+      {rows.map((item) => (
+        <article
+          key={item.row.participantId}
+          className={cn(
+            "codl-podium-card relative overflow-hidden rounded-lg border p-3 shadow-soft",
+            getPodiumTone(item.rank, "card"),
+            item.rank === 1 && "sm:-mt-2 sm:pb-5"
+          )}
+        >
+          <div className="codl-podium-shine" aria-hidden />
+          <div className="relative flex items-start justify-between gap-2">
+            <span className={cn("rounded-full px-2.5 py-1 text-xs font-black", getPodiumTone(item.rank, "badge"))}>
+              TOP {item.rank}
+            </span>
+            <Trophy className={cn("h-5 w-5", getPodiumTone(item.rank, "icon"))} aria-hidden />
+          </div>
+          <div className="relative mt-3 flex items-center gap-3">
+            <PlayerAvatar
+              name={item.name}
+              avatarUrl={item.avatarUrl}
+              size={item.rank === 1 ? "xl" : "lg"}
+              className={cn("codl-podium-avatar", getPodiumTone(item.rank, "avatar"))}
+            />
+            <div className="min-w-0">
+              <div className="truncate text-base font-black text-ink">{item.name}</div>
+              <div className="mt-1 text-xs font-bold text-muted">
+                {item.row.played} 场 · {item.row.wins} 胜 · Rating {item.rating}
+              </div>
+              {item.members.length > 0 ? (
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {item.members.slice(0, 4).map((member) => (
+                    <span
+                      key={member.userId}
+                      className="max-w-full truncate rounded-full bg-white/80 px-2 py-0.5 text-[11px] font-black text-muted ring-1 ring-wire/70"
+                    >
+                      {member.name}
+                    </span>
+                  ))}
+                  {item.members.length > 4 ? (
+                    <span className="rounded-full bg-white/80 px-2 py-0.5 text-[11px] font-black text-muted ring-1 ring-wire/70">
+                      +{item.members.length - 4}
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          </div>
+          <div className="relative mt-3 grid grid-cols-3 gap-1 text-center">
+            <RankMetric label="积分" value={item.points} strong />
+            <RankMetric label="Leg" value={item.row.legDiff > 0 ? `+${item.row.legDiff}` : item.row.legDiff} />
+            <RankMetric label="胜率" value={item.row.played > 0 ? `${Math.round((item.row.wins / item.row.played) * 100)}%` : "-"} />
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
+
 function LeaderboardSection({
   title,
   description,
@@ -911,17 +994,32 @@ function PersonalLeaderboardList({
   metric: (row: PersonalLeaderboardRow) => string;
   emptyText: string;
 }) {
+  const topRows = rows.slice(0, 3);
+  const restRows = rows.slice(3);
+
   return (
     <section className="rounded-lg border border-wire bg-surface p-3">
       <h3 className="text-sm font-black text-board">{title}</h3>
+      {topRows.length > 0 ? (
+        <div className="mt-3 grid gap-2">
+          {topRows.map((row, index) => (
+            <PersonalPodiumCard
+              key={row.userId}
+              row={row}
+              rank={index + 1}
+              metric={metric(row)}
+            />
+          ))}
+        </div>
+      ) : null}
       <div className="mt-3 grid gap-2">
-        {rows.map((row, index) => (
-          <div key={row.userId} className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-lg bg-surface p-2">
+        {restRows.map((row, index) => (
+          <div key={row.userId} className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-lg bg-field/70 p-2">
             <div className={cn(
               "grid h-8 w-8 place-items-center rounded-lg text-xs font-black",
-              index === 0 ? "bg-board text-white" : "bg-field text-board"
+              "bg-surface text-board"
             )}>
-              {index + 1}
+              {index + 4}
             </div>
             <PlayerIdentity
               name={row.name}
@@ -939,6 +1037,68 @@ function PersonalLeaderboardList({
       </div>
     </section>
   );
+}
+
+function PersonalPodiumCard({
+  row,
+  rank,
+  metric
+}: {
+  row: PersonalLeaderboardRow;
+  rank: number;
+  metric: string;
+}) {
+  return (
+    <article className={cn("codl-podium-card relative overflow-hidden rounded-lg border p-3", getPodiumTone(rank, "card"))}>
+      <div className="codl-podium-shine" aria-hidden />
+      <div className="relative grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3">
+        <PlayerAvatar
+          name={row.name}
+          avatarUrl={row.avatarUrl}
+          size={rank === 1 ? "lg" : "md"}
+          className={cn("codl-podium-avatar", getPodiumTone(rank, "avatar"))}
+        />
+        <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-[10px] font-black", getPodiumTone(rank, "badge"))}>
+              TOP {rank}
+            </span>
+            <span className="truncate text-sm font-black text-ink">{row.name}</span>
+          </div>
+          {row.teamName ? <div className="mt-1 truncate text-xs font-semibold text-muted">{row.teamName}</div> : null}
+        </div>
+        <div className="rounded-lg bg-white/80 px-2 py-1 text-right text-xl font-black text-board shadow-sm">
+          {metric}
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function getPodiumTone(rank: number, part: "card" | "badge" | "rank" | "icon" | "avatar" | "list") {
+  if (rank === 1) {
+    if (part === "card") return "border-amber-300 bg-gradient-to-br from-amber-50 via-white to-sky-50";
+    if (part === "badge" || part === "rank") return "bg-amber-400 text-slate-950";
+    if (part === "icon") return "text-amber-500";
+    if (part === "avatar") return "border-amber-300 ring-amber-300";
+    return "border-amber-200 bg-amber-50/75";
+  }
+  if (rank === 2) {
+    if (part === "card") return "border-slate-300 bg-gradient-to-br from-slate-100 via-white to-sky-50";
+    if (part === "badge" || part === "rank") return "bg-slate-300 text-slate-950";
+    if (part === "icon") return "text-slate-500";
+    if (part === "avatar") return "border-slate-300 ring-slate-300";
+    return "border-slate-200 bg-slate-50";
+  }
+  if (rank === 3) {
+    if (part === "card") return "border-orange-300 bg-gradient-to-br from-orange-50 via-white to-sky-50";
+    if (part === "badge" || part === "rank") return "bg-orange-300 text-slate-950";
+    if (part === "icon") return "text-orange-500";
+    if (part === "avatar") return "border-orange-300 ring-orange-300";
+    return "border-orange-200 bg-orange-50/80";
+  }
+  if (part === "rank") return "bg-surface text-board";
+  return "border-wire bg-field/75";
 }
 
 function DartModeBadge({ dartMode }: { dartMode?: string | null }) {
@@ -1147,6 +1307,49 @@ function Info({ label, value }: { label: string; value: string }) {
       <dt className="text-xs font-black text-muted">{label}</dt>
       <dd className="mt-1 break-words font-black">{value}</dd>
     </div>
+  );
+}
+
+function TournamentInfoDetails({
+  tournament,
+  participantCount
+}: {
+  tournament: Tournament;
+  participantCount: number;
+}) {
+  return (
+    <Card className="p-0 sm:p-0">
+      <details className="codl-mobile-fold group">
+        <summary className="flex min-h-14 cursor-pointer touch-manipulation items-center justify-between gap-3 px-4 py-3 sm:px-5">
+          <div className="min-w-0">
+            <h2 className="text-base font-black">赛事信息</h2>
+            <p className="mt-1 truncate text-xs font-semibold text-muted">
+              {getTournamentFormatLabel(tournament.format)} · {getDartModeLabel(tournament.dart_mode)} · {tournament.location || "地点待定"}
+            </p>
+          </div>
+          <span className="shrink-0 rounded-full bg-field px-3 py-1 text-xs font-black text-board group-open:hidden">
+            展开
+          </span>
+          <span className="hidden shrink-0 rounded-full bg-board px-3 py-1 text-xs font-black text-white group-open:inline-flex">
+            收起
+          </span>
+        </summary>
+        <div className="border-t border-wire px-4 pb-4 sm:px-5 sm:pb-5">
+          <dl className="mt-4 grid gap-3 text-sm md:grid-cols-4">
+            <Info label="地点" value={tournament.location || "待定"} />
+            <Info label="比赛开始" value={formatDateTime(tournament.tournament_start_at)} />
+            <Info label="赛制" value={getTournamentFormatLabel(tournament.format)} />
+            <Info label="参赛" value={`${participantCount}/${tournament.max_participants}`} />
+            <Info label="类型" value={`${tournament.tournament_type} / 每队 ${tournament.team_size} 人`} />
+            <Info label="镖种" value={getDartModeLabel(tournament.dart_mode)} />
+            <Info label="硬镖" value={`${tournament.dart_game} / BO${tournament.best_of}`} />
+            <Info label="软镖" value={getGameVariantLabel({ dartMode: "soft", gameVariant: tournament.soft_game })} />
+            <Info label="报名开始" value={formatDateTime(tournament.registration_start_at)} />
+            <Info label="报名截止" value={formatDateTime(tournament.registration_end_at)} />
+          </dl>
+        </div>
+      </details>
+    </Card>
   );
 }
 

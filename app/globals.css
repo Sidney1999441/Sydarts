@@ -307,6 +307,58 @@ th {
   display: grid;
 }
 
+.codl-podium-card {
+  isolation: isolate;
+}
+
+.codl-podium-shine {
+  position: absolute;
+  inset: -45% -25% auto auto;
+  width: 9rem;
+  aspect-ratio: 1;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgb(255 255 255 / 0.82), transparent 62%);
+  opacity: 0.9;
+  transform: rotate(18deg);
+  animation: codl-podium-shine 4.8s ease-in-out infinite;
+}
+
+.codl-podium-avatar {
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 0.9), 0 16px 36px rgb(var(--color-primary) / 0.14);
+  animation: codl-podium-avatar 3.6s ease-in-out infinite;
+}
+
+@keyframes codl-podium-shine {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) rotate(18deg);
+    opacity: 0.55;
+  }
+
+  50% {
+    transform: translate3d(-0.75rem, 0.5rem, 0) rotate(18deg);
+    opacity: 0.95;
+  }
+}
+
+@keyframes codl-podium-avatar {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-2px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .codl-podium-shine,
+  .codl-podium-avatar {
+    animation: none;
+  }
+}
+
 body.codl-display-active {
   overflow-x: hidden;
   background: rgb(var(--color-primary));

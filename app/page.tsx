@@ -138,6 +138,8 @@ type HomeMatchRow = MatchSummary & {
   round_number: number;
   match_number: number;
   scheduled_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
 };
 
 type WeeklyScheduleMatch = {
@@ -161,6 +163,8 @@ type WeeklyScheduleMatch = {
 type WeeklyScheduleData = {
   weekLabel: string;
   items: WeeklyScheduleMatch[];
+  nextWeekLabel: string;
+  nextWeekItems: WeeklyScheduleMatch[];
   overdueCount: number;
 };
 
@@ -172,6 +176,15 @@ async function loadWeeklySchedule(
   const now = new Date();
   const weekStart = startOfLocalWeek(now);
   const weekEnd = addLocalDays(weekStart, 7);
+  const nextWeekEnd = addLocalDays(weekEnd, 7);
+  const emptySchedule = (): WeeklyScheduleData => ({
+    weekLabel: formatWeekRange(weekStart, weekEnd),
+    items: [],
+    nextWeekLabel: formatWeekRange(weekEnd, nextWeekEnd),
+    nextWeekItems: [],
+    overdueCount: 0
+  });
+  const visibleMatchStatuses = ["not_started", "in_progress", "pending_confirmation", "disputed", "completed"];
 
   const { data: teamMemberships } = await supabase
     .from("team_members")
@@ -198,11 +211,7 @@ async function loadWeeklySchedule(
   const myParticipantIds = myParticipants.map((participant) => participant.id);
 
   if (myParticipantIds.length === 0) {
-    return {
-      weekLabel: formatWeekRange(weekStart, weekEnd),
-      items: [],
-      overdueCount: 0
-    };
+    return emptySchedule();
   }
 
   const [matchesAsA, matchesAsB] = await Promise.all([
@@ -210,14 +219,14 @@ async function loadWeeklySchedule(
       .from("matches")
       .select("*")
       .in("participant_a_id", myParticipantIds)
-      .in("status", ["not_started", "in_progress", "pending_confirmation", "disputed"])
+      .in("status", visibleMatchStatuses)
       .order("round_number")
       .order("match_number"),
     supabase
       .from("matches")
       .select("*")
       .in("participant_b_id", myParticipantIds)
-      .in("status", ["not_started", "in_progress", "pending_confirmation", "disputed"])
+      .in("status", visibleMatchStatuses)
       .order("round_number")
       .order("match_number")
   ]);
@@ -229,11 +238,7 @@ async function loadWeeklySchedule(
   ] as string[];
 
   if (tournamentIds.length === 0 || allParticipantIds.length === 0) {
-    return {
-      weekLabel: formatWeekRange(weekStart, weekEnd),
-      items: [],
-      overdueCount: 0
-    };
+    return emptySchedule();
   }
 
   const [
@@ -354,14 +359,15 @@ async function loadWeeklySchedule(
   const reservationByMatchId = new Map(reservationRows.map((reservation) => [reservation.matchId, reservation]));
   const selectedIds = new Set<string>();
   const items: WeeklyScheduleMatch[] = [];
+  const nextWeekSelectedIds = new Set<string>();
+  const nextWeekItems: WeeklyScheduleMatch[] = [];
   const sortedMatches = matchRows
-    .filter((match) => tournamentById.has(match.tournament_id) && isUnplayedMatch(match.status))
+    .filter((match) => tournamentById.has(match.tournament_id) && (isUnplayedMatch(match.status) || match.status === "completed"))
     .sort(compareHomeMatches);
 
-  const addItem = (match: HomeMatchRow, isOverdue: boolean) => {
-    if (selectedIds.has(match.id)) return;
+  const buildScheduleItem = (match: HomeMatchRow, isOverdue: boolean): WeeklyScheduleMatch | null => {
     const tournament = tournamentById.get(match.tournament_id);
-    if (!tournament) return;
+    if (!tournament) return null;
     const currentReservation = reservationByMatchId.get(match.id) || null;
     const tournamentBoards = boardRowsByTournamentId.get(match.tournament_id) || [];
     const tournamentReservations = reservationsByTournamentId.get(match.tournament_id) || [];
@@ -369,7 +375,7 @@ async function loadWeeklySchedule(
     const participantBIsMine = myParticipantIds.includes(match.participant_b_id || "");
     const currentBoard = currentReservation ? boardById.get(currentReservation.boardId) || null : null;
 
-    items.push({
+    return {
       match,
       tournament,
       dartMode: match.dart_mode === "soft" ? "soft" : "steel",
@@ -383,10 +389,25 @@ async function loadWeeklySchedule(
       currentBoard,
       boardRows: tournamentBoards,
       reservationRows: tournamentReservations,
-      canReserve: Boolean(isAdmin || participantAIsMine || participantBIsMine),
+      canReserve: isUnplayedMatch(match.status) && Boolean(isAdmin || participantAIsMine || participantBIsMine),
       isOverdue
-    });
+    };
+  };
+
+  const addItem = (match: HomeMatchRow, isOverdue: boolean) => {
+    if (selectedIds.has(match.id)) return;
+    const item = buildScheduleItem(match, isOverdue);
+    if (!item) return;
+    items.push(item);
     selectedIds.add(match.id);
+  };
+
+  const addNextWeekItem = (match: HomeMatchRow) => {
+    if (selectedIds.has(match.id) || nextWeekSelectedIds.has(match.id)) return;
+    const item = buildScheduleItem(match, false);
+    if (!item) return;
+    nextWeekItems.push(item);
+    nextWeekSelectedIds.add(match.id);
   };
 
   for (const match of sortedMatches) {
@@ -395,8 +416,10 @@ async function loadWeeklySchedule(
     const currentReservation = reservationByMatchId.get(match.id) || null;
     const matchTime = getMatchScheduleTime(match, currentReservation);
     const scheduledThisWeek = Boolean(matchTime && matchTime >= weekStart && matchTime < weekEnd);
-    const overdue = isMatchOverdue(match, tournament, currentReservation, weekStart);
-    if (overdue || scheduledThisWeek) {
+    const completedTime = match.status === "completed" ? getMatchCompletionTime(match, currentReservation) : null;
+    const completedThisWeek = Boolean(completedTime && completedTime >= weekStart && completedTime < weekEnd);
+    const overdue = isUnplayedMatch(match.status) && isMatchOverdue(match, tournament, currentReservation, weekStart);
+    if (overdue || scheduledThisWeek || completedThisWeek) {
       addItem(match, overdue);
     }
   }
@@ -415,6 +438,7 @@ async function loadWeeklySchedule(
         (match) =>
           match.tournament_id === tournament.id &&
           (match.dart_mode === "soft" ? "soft" : "steel") === dartMode &&
+          isUnplayedMatch(match.status) &&
           !selectedIds.has(match.id) &&
           !isMatchOverdue(match, tournament, reservationByMatchId.get(match.id) || null, weekStart)
       );
@@ -425,16 +449,39 @@ async function loadWeeklySchedule(
     }
   }
 
+  const selectedNextWeekModeKeys = new Set<string>();
+  for (const tournament of activeTournaments) {
+    for (const dartMode of ["soft", "steel"] as MatchDartMode[]) {
+      const key = `${tournament.id}:${dartMode}`;
+      if (selectedNextWeekModeKeys.has(key)) continue;
+      const nextMatch = sortedMatches.find(
+        (match) =>
+          match.tournament_id === tournament.id &&
+          (match.dart_mode === "soft" ? "soft" : "steel") === dartMode &&
+          isUnplayedMatch(match.status) &&
+          !selectedIds.has(match.id) &&
+          !isMatchOverdue(match, tournament, reservationByMatchId.get(match.id) || null, weekStart)
+      );
+      if (nextMatch) {
+        addNextWeekItem(nextMatch);
+        selectedNextWeekModeKeys.add(key);
+      }
+    }
+  }
+
   items.sort((a, b) => {
     if (a.isOverdue !== b.isOverdue) return a.isOverdue ? -1 : 1;
     const aTime = getMatchScheduleTime(a.match, a.currentReservation)?.getTime() ?? Number.MAX_SAFE_INTEGER;
     const bTime = getMatchScheduleTime(b.match, b.currentReservation)?.getTime() ?? Number.MAX_SAFE_INTEGER;
     return aTime - bTime || compareHomeMatches(a.match, b.match);
   });
+  nextWeekItems.sort((a, b) => compareHomeMatches(a.match, b.match));
 
   return {
     weekLabel: formatWeekRange(weekStart, weekEnd),
     items,
+    nextWeekLabel: formatWeekRange(weekEnd, nextWeekEnd),
+    nextWeekItems,
     overdueCount: items.filter((item) => item.isOverdue).length
   };
 }
@@ -497,18 +544,25 @@ function WeeklySchedulePanel({
           本周暂无待处理比赛。可以先去赛事页查看完整排名和历史赛程。
         </p>
       )}
+
+      {isSignedIn && schedule && schedule.nextWeekItems.length > 0 ? (
+        <NextWeekOpponentPanel schedule={schedule} />
+      ) : null}
     </Card>
   );
 }
 
 function WeeklyScheduleMatchCard({ item }: { item: WeeklyScheduleMatch }) {
   const scheduledTime = getMatchScheduleTime(item.match, item.currentReservation);
+  const completedTime = item.match.status === "completed" ? getMatchCompletionTime(item.match, item.currentReservation) : null;
+  const isCompleted = item.match.status === "completed";
+  const winnerName = getMatchWinnerName(item);
 
   return (
     <article
       className={cn(
         "grid min-w-0 gap-3 rounded-lg border p-3 shadow-[0_12px_28px_rgb(17_24_39/0.05)]",
-        item.isOverdue ? "border-amber-300 bg-amber-50" : "border-wire bg-surface"
+        isCompleted ? "border-emerald-200 bg-emerald-50/70" : item.isOverdue ? "border-amber-300 bg-amber-50" : "border-wire bg-surface"
       )}
     >
       <div className="flex flex-wrap items-center gap-2">
@@ -519,6 +573,9 @@ function WeeklyScheduleMatchCard({ item }: { item: WeeklyScheduleMatch }) {
         <span className="rounded-full bg-field px-2.5 py-1 text-xs font-black text-muted">
           {getMatchStatusLabel(item.match.status)}
         </span>
+        {isCompleted ? (
+          <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-black text-emerald-800">本周赛果</span>
+        ) : null}
       </div>
 
       <div className="min-w-0">
@@ -554,8 +611,29 @@ function WeeklyScheduleMatchCard({ item }: { item: WeeklyScheduleMatch }) {
         />
       </div>
 
+      {isCompleted ? (
+        <div className="rounded-lg border border-emerald-200 bg-white/80 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-xs font-black uppercase text-emerald-700">Result</span>
+            {completedTime ? (
+              <span className="text-xs font-bold text-muted">{formatDateTime(completedTime.toISOString())}</span>
+            ) : null}
+          </div>
+          <div className="mt-1 flex items-end justify-between gap-3">
+            <div className="text-2xl font-black text-primary">
+              {item.match.score_a}:{item.match.score_b}
+            </div>
+            <div className="min-w-0 text-right text-sm font-black text-emerald-800">
+              胜方 {winnerName}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <div className="flex flex-wrap items-center gap-2 text-xs font-bold text-muted">
-        <MatchBoardReservationBadge reservation={item.currentReservation} board={item.currentBoard} />
+        {item.currentReservation || !isCompleted ? (
+          <MatchBoardReservationBadge reservation={item.currentReservation} board={item.currentBoard} />
+        ) : null}
         {scheduledTime ? (
           <span className="inline-flex items-center gap-1 rounded-full bg-field px-2 py-1">
             <MapPin className="h-3.5 w-3.5" aria-hidden />
@@ -566,10 +644,13 @@ function WeeklyScheduleMatchCard({ item }: { item: WeeklyScheduleMatch }) {
 
       <div className="grid grid-cols-2 gap-2">
         <Link
-          href={`/scorer/${item.match.id}`}
-          className="inline-flex min-h-11 touch-manipulation items-center justify-center rounded-lg bg-board px-3 text-sm font-black text-white"
+          href={isCompleted ? `/reports/official/${item.match.id}` : `/scorer/${item.match.id}`}
+          className={cn(
+            "inline-flex min-h-11 touch-manipulation items-center justify-center rounded-lg px-3 text-sm font-black",
+            isCompleted ? "bg-emerald-700 text-white" : "bg-board text-white"
+          )}
         >
-          排阵 / 计分
+          {isCompleted ? "查看战报" : "排阵 / 计分"}
         </Link>
         <Link
           href={`/tournaments/${item.tournament.id}?schedule=mine#schedule`}
@@ -579,7 +660,7 @@ function WeeklyScheduleMatchCard({ item }: { item: WeeklyScheduleMatch }) {
         </Link>
       </div>
 
-      {item.canReserve || item.currentReservation ? (
+      {!isCompleted && (item.canReserve || item.currentReservation) ? (
         <BoardReservationPanel
           matchId={item.match.id}
           boards={item.boardRows}
@@ -589,6 +670,54 @@ function WeeklyScheduleMatchCard({ item }: { item: WeeklyScheduleMatch }) {
         />
       ) : null}
     </article>
+  );
+}
+
+function NextWeekOpponentPanel({ schedule }: { schedule: WeeklyScheduleData }) {
+  return (
+    <div className="mt-5 border-t border-wire pt-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h3 className="text-base font-black">下周对手</h3>
+          <p className="text-xs font-semibold text-muted">{schedule.nextWeekLabel} · 方便提前约时间和准备布阵。</p>
+        </div>
+        <Link
+          href="/tournaments"
+          className="inline-flex min-h-9 touch-manipulation items-center justify-center rounded-lg border border-wire bg-surface px-3 text-xs font-black text-board"
+        >
+          查看赛事
+        </Link>
+      </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+        {schedule.nextWeekItems.map((item) => (
+          <NextWeekOpponentCard key={item.match.id} item={item} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function NextWeekOpponentCard({ item }: { item: WeeklyScheduleMatch }) {
+  const opponent = getOpponentIdentity(item);
+
+  return (
+    <Link
+      href={`/tournaments/${item.tournament.id}?schedule=mine#schedule`}
+      className="grid min-w-0 gap-2 rounded-lg border border-wire bg-white/80 p-3 text-primary shadow-[0_10px_24px_rgb(17_24_39/0.04)] active:bg-field"
+    >
+      <div className="flex items-center justify-between gap-2">
+        <DartModeBadge dartMode={item.dartMode} />
+        <span className="text-xs font-black text-muted">第 {item.match.round_number} 轮</span>
+      </div>
+      <PlayerIdentity
+        className="min-w-0"
+        name={opponent.name}
+        avatarUrl={opponent.avatarUrl}
+        subtitle={`${item.tournament.name} · 第 ${item.match.match_number} 场`}
+        size="sm"
+        compact
+      />
+    </Link>
   );
 }
 
@@ -634,6 +763,40 @@ function getMatchScheduleTime(match: HomeMatchRow, reservation?: BoardReservatio
   if (!value) return null;
   const date = new Date(value);
   return Number.isFinite(date.getTime()) ? date : null;
+}
+
+function getMatchCompletionTime(match: HomeMatchRow, reservation?: BoardReservationRow | null) {
+  const value = match.updated_at || reservation?.reservedStartAt || match.scheduled_at || match.created_at || null;
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date : null;
+}
+
+function getMatchWinnerName(item: WeeklyScheduleMatch) {
+  if (item.match.winner_participant_id === item.match.participant_a_id) return item.participantAName;
+  if (item.match.winner_participant_id === item.match.participant_b_id) return item.participantBName;
+  if (item.match.score_a > item.match.score_b) return item.participantAName;
+  if (item.match.score_b > item.match.score_a) return item.participantBName;
+  return "未设定";
+}
+
+function getOpponentIdentity(item: WeeklyScheduleMatch) {
+  if (item.participantAIsMine && !item.participantBIsMine) {
+    return {
+      name: item.participantBName,
+      avatarUrl: item.participantBAvatarUrl
+    };
+  }
+  if (item.participantBIsMine && !item.participantAIsMine) {
+    return {
+      name: item.participantAName,
+      avatarUrl: item.participantAAvatarUrl
+    };
+  }
+  return {
+    name: `${item.participantAName} vs ${item.participantBName}`,
+    avatarUrl: item.participantAAvatarUrl || item.participantBAvatarUrl
+  };
 }
 
 function isMatchOverdue(
