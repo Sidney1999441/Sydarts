@@ -138,8 +138,6 @@ export default async function TournamentDetailPage({
     rating: participant.rating_snapshot || 1000
   }));
   const participantById = new Map(participantSeeds.map((participant) => [participant.id, participant]));
-  const participantLevel = (participantId: string) =>
-    calculatePlayerLevel({ rating: participantById.get(participantId)?.rating || 1000 }).level;
   const participantRowById = new Map((participants || []).map((participant) => [participant.id, participant]));
   const tournamentData = tournament as Tournament;
   const matchRows = (matches || []) as MatchRow[];
@@ -176,9 +174,12 @@ export default async function TournamentDetailPage({
   ] as string[];
   const { data: statProfiles } =
     statUserIds.length > 0
-      ? await admin.from("profiles").select("id, uid, display_name, avatar_url").in("id", statUserIds)
+      ? await admin.from("profiles").select("id, uid, display_name, avatar_url, rating, tournament_rating").in("id", statUserIds)
       : { data: [] };
   const statProfileById = new Map((statProfiles || []).map((item) => [item.id, item]));
+  const tournamentRatingByUserId = new Map(
+    (statProfiles || []).map((item) => [item.id, Number(item.tournament_rating ?? item.rating ?? 1000)])
+  );
   const teamAvatarById = new Map((participantTeams || []).map((team) => [team.id, team.avatar_url]));
   const teamById = new Map((participantTeams || []).map((team) => [team.id, team]));
   const teamMembersByTeamId = new Map<string, Array<{ userId: string; name: string }>>();
@@ -236,6 +237,23 @@ export default async function TournamentDetailPage({
   }
   const getParticipantDisplayName = (participantId?: string | null, fallback = "TBD") =>
     participantId ? participantDisplayNameById.get(participantId) || participantById.get(participantId)?.name || fallback : fallback;
+  const participantLevel = (participantId: string) => {
+    const participant = participantRowById.get(participantId);
+    const snapshotRating = Number(participantById.get(participantId)?.rating || 1000);
+    const memberIds = (participantMembersById.get(participantId) || []).map((member) => member.userId);
+    const memberRatings = memberIds
+      .map((userId) => tournamentRatingByUserId.get(userId))
+      .filter((rating): rating is number => Number.isFinite(rating));
+    const isTeamParticipant = participant?.participant_type === "team" || Boolean(participant?.team_id);
+    const ratingForLevel =
+      memberRatings.length > 0
+        ? Math.round(memberRatings.reduce((total, rating) => total + rating, 0) / memberRatings.length)
+        : isTeamParticipant
+          ? Math.round(snapshotRating / Math.max(memberIds.length || 2, 1))
+          : snapshotRating;
+
+    return calculatePlayerLevel({ rating: ratingForLevel }).level;
+  };
   const personalLeaderboards = buildPersonalLeaderboards({
     matches: matchRows,
     profilesByUserId: statProfileById,
@@ -356,15 +374,12 @@ export default async function TournamentDetailPage({
                         size="sm"
                         compact
                       />
-                      <div className="col-span-2 rounded-lg bg-board px-3 py-2 text-center text-white shadow-sm sm:col-span-1">
-                        <div className="text-[10px] font-black text-white/75">积分</div>
-                        <div className="text-xl font-black leading-none">{points}</div>
-                      </div>
-                      <div className="col-span-2 grid grid-cols-2 gap-1 text-center text-xs font-black min-[420px]:grid-cols-4 sm:col-start-2 sm:col-span-2 sm:grid-cols-4">
-                        <RankMetric label="场" value={row.played} />
-                        <RankMetric label="胜" value={row.wins} />
-                        <RankMetric label="负" value={row.losses} />
-                        <RankMetric label="Leg" value={row.legDiff > 0 ? `+${row.legDiff}` : row.legDiff} />
+                      <div className="col-span-2 grid grid-cols-[1.05fr_repeat(4,1fr)] gap-1 text-center text-xs font-black sm:col-span-1 sm:min-w-[300px]">
+                        <RankMetric label="积分" value={points} strong compact />
+                        <RankMetric label="场" value={row.played} compact />
+                        <RankMetric label="胜" value={row.wins} compact />
+                        <RankMetric label="负" value={row.losses} compact />
+                        <RankMetric label="Leg" value={row.legDiff > 0 ? `+${row.legDiff}` : row.legDiff} compact />
                       </div>
                     </div>
                   );
@@ -866,16 +881,26 @@ function statNumber(stats: Record<string, unknown>, keys: string[]) {
 function RankMetric({
   label,
   value,
-  strong = false
+  strong = false,
+  compact = false
 }: {
   label: string;
   value: ReactNode;
   strong?: boolean;
+  compact?: boolean;
 }) {
   return (
-    <div className={cn("min-w-0 rounded-lg bg-surface px-1.5 py-2", strong && "bg-board text-white")}>
-      <div className={cn("whitespace-nowrap text-[10px] font-black", strong ? "text-white/75" : "text-muted")}>{label}</div>
-      <div className="mt-0.5 truncate text-sm font-black">{value}</div>
+    <div
+      className={cn(
+        "min-w-0 rounded-lg text-center shadow-sm",
+        compact ? "px-1 py-1.5" : "px-1.5 py-2",
+        strong ? "bg-board text-white" : "bg-surface"
+      )}
+    >
+      <div className={cn("whitespace-nowrap font-black", compact ? "text-[9px]" : "text-[10px]", strong ? "text-white/75" : "text-muted")}>
+        {label}
+      </div>
+      <div className="mt-0.5 truncate text-sm font-black leading-none">{value}</div>
     </div>
   );
 }
