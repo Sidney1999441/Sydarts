@@ -56,6 +56,13 @@ type ScoringHistoryEntry = {
   throwers: ThrowerByParticipant;
 };
 
+type TurnRoundRow = {
+  legNumber: number;
+  roundNumber: number;
+  participantATurn?: ScoreTurn;
+  participantBTurn?: ScoreTurn;
+};
+
 export type ScoringCompletePayload = {
   submissionId: string;
   winnerParticipantId: string;
@@ -138,6 +145,56 @@ function compactSideName(name: string) {
   const parts = clean.split(/\s*\/\s*/).filter(Boolean);
   if (parts.length > 1) return `${parts[0]} +${parts.length - 1}`;
   return clean;
+}
+
+function buildTurnRoundRows(turns: ScoreTurn[], participantAId: string, participantBId: string) {
+  const turnsByLeg = new Map<number, ScoreTurn[]>();
+  for (const turn of turns) {
+    const legTurns = turnsByLeg.get(turn.legNumber) || [];
+    legTurns.push(turn);
+    turnsByLeg.set(turn.legNumber, legTurns);
+  }
+
+  return Array.from(turnsByLeg.entries())
+    .sort(([legA], [legB]) => legA - legB)
+    .map(([legNumber, legTurns]) => {
+      const rows: TurnRoundRow[] = [];
+      let pending: TurnRoundRow = { legNumber, roundNumber: 1 };
+
+      for (const turn of legTurns) {
+        const side =
+          turn.participantId === participantAId
+            ? "participantATurn"
+            : turn.participantId === participantBId
+              ? "participantBTurn"
+              : null;
+        if (!side) continue;
+
+        if (pending[side]) {
+          rows.push(pending);
+          pending = { legNumber, roundNumber: rows.length + 1 };
+        }
+
+        pending = { ...pending, [side]: turn };
+
+        if (pending.participantATurn && pending.participantBTurn) {
+          rows.push(pending);
+          pending = { legNumber, roundNumber: rows.length + 1 };
+        }
+      }
+
+      if (pending.participantATurn || pending.participantBTurn) {
+        rows.push(pending);
+      }
+
+      return { legNumber, rows };
+    });
+}
+
+function getTurnRoundNumber(turns: ScoreTurn[], target: ScoreTurn | null) {
+  if (!target) return null;
+  const legTurnCount = turns.filter((turn) => turn.legNumber === target.legNumber).length;
+  return Math.max(1, Math.ceil(legTurnCount / 2));
 }
 
 function defaultRules(startingScore: GameScore, bestOf: BestOf, participantMode: LegParticipantMode): MatchLegRule[] {
@@ -314,6 +371,21 @@ export function TouchScoreboard({
   const submissionIdRef = useRef(safeInitialDraft?.submissionId || createResultSubmissionId());
   const draftSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastDraftSignatureRef = useRef("");
+  const autoSubmitSignatureRef = useRef("");
+
+  function buildDraftCore() {
+    if (!lineupConfirmed || !firstParticipantId || state.winnerParticipantId) return null;
+    return {
+      version: 1 as const,
+      submissionId: submissionIdRef.current,
+      state,
+      lineups,
+      firstParticipantId,
+      firstThrowMode,
+      roundLimit,
+      activeThrowerByParticipant
+    };
+  }
 
   useEffect(() => {
     if (!lineupConfirmed) {
@@ -328,18 +400,9 @@ export function TouchScoreboard({
   }, [lineupConfirmed]);
 
   useEffect(() => {
-    if (!onSaveDraft || !lineupConfirmed || !firstParticipantId || state.winnerParticipantId || isSaved) return;
-
-    const draftCore = {
-      version: 1 as const,
-      submissionId: submissionIdRef.current,
-      state,
-      lineups,
-      firstParticipantId,
-      firstThrowMode,
-      roundLimit,
-      activeThrowerByParticipant
-    };
+    if (!onSaveDraft || isSaved) return;
+    const draftCore = buildDraftCore();
+    if (!draftCore) return;
     const signature = JSON.stringify(draftCore);
     if (signature === lastDraftSignatureRef.current) return;
     if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current);
@@ -477,6 +540,15 @@ export function TouchScoreboard({
       : lineup.participantBUserIds[0];
     const playerName = userId ? memberNames.get(userId) : null;
     return playerName ? composeParticipantMemberName(names[participantId], playerName) : names[participantId];
+  }
+
+  function lineupMemberName(participantId: string, legNumber = state.currentLeg) {
+    const rule = state.legRules[legNumber - 1];
+    if (rule?.participantMode === "singles") return "";
+    const memberNamesInLineup = lineupUserIds(participantId, legNumber)
+      .map((userId) => memberNames.get(userId))
+      .filter(Boolean) as string[];
+    return memberNamesInLineup.join(" / ");
   }
 
   function turnDisplayName(turn: ScoreTurn) {
@@ -672,6 +744,33 @@ export function TouchScoreboard({
     if (onClearDraft) void onClearDraft().catch(() => setDraftStatus("error"));
   }
 
+  function saveDraftNow() {
+    if (!onSaveDraft) return;
+    const draftCore = buildDraftCore();
+    if (!draftCore) {
+      setMessage(firstParticipantId ? "当前没有需要保存的进度。" : "开局后才能保存当前进度。");
+      return;
+    }
+
+    if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current);
+    const signature = JSON.stringify(draftCore);
+    lastDraftSignatureRef.current = signature;
+    setDraftStatus("saving");
+    onSaveDraft({
+      ...draftCore,
+      savedAt: new Date().toISOString()
+    })
+      .then(() => {
+        setDraftStatus("saved");
+        setMessage("当前进度已保存，断线后可从这里继续。");
+      })
+      .catch((error) => {
+        lastDraftSignatureRef.current = "";
+        setDraftStatus("error");
+        setMessage(error instanceof Error ? error.message : "保存进度失败，请稍后重试。");
+      });
+  }
+
   function saveResult() {
     if (!state.winnerParticipantId || isSaved || isPending) return;
     startTransition(async () => {
@@ -689,10 +788,26 @@ export function TouchScoreboard({
         setDraftStatus("idle");
         setMessage(successMessage);
       } catch (error) {
+        autoSubmitSignatureRef.current = "";
         setMessage(error instanceof Error ? error.message : "保存失败，请稍后重试。");
       }
     });
   }
+
+  useEffect(() => {
+    if (!state.winnerParticipantId || isSaved) return;
+    const signature = [
+      submissionIdRef.current,
+      state.winnerParticipantId,
+      state.participants[0]?.legsWon || 0,
+      state.participants[1]?.legsWon || 0,
+      state.turns.length,
+      state.legResults.length
+    ].join(":");
+    if (autoSubmitSignatureRef.current === signature) return;
+    autoSubmitSignatureRef.current = signature;
+    saveResult();
+  }, [isSaved, state.legResults.length, state.participants, state.turns.length, state.winnerParticipantId]);
 
   if (!lineupConfirmed) {
     return (
@@ -803,6 +918,7 @@ export function TouchScoreboard({
       : null;
   const roundLimitReached = isRoundLimitReached();
   const lastTurn = state.turns.at(-1) || null;
+  const lastTurnRoundNumber = getTurnRoundNumber(state.turns, lastTurn);
   const matchScoreLabel = `${state.participants[0]?.legsWon || 0}:${state.participants[1]?.legsWon || 0}`;
   const draftStatusLabel = onSaveDraft ? getDraftStatusLabel(draftStatus) : "";
 
@@ -825,6 +941,7 @@ export function TouchScoreboard({
                 key={participant.participantId}
                 name={displayName(participant.participantId)}
                 avatarUrl={displayAvatarUrl(participant.participantId)}
+                memberLine={lineupMemberName(participant.participantId)}
                 isActive={isActive}
                 rule={currentRule}
                 remaining={participant.remaining}
@@ -833,10 +950,14 @@ export function TouchScoreboard({
               />
             );
           })}
-          <div className="codl-score-actions col-span-2 grid grid-cols-4 gap-1 lg:col-span-1 lg:gap-2">
+          <div className="codl-score-actions col-span-2 grid grid-cols-5 gap-1 lg:col-span-1 lg:gap-2">
             <SmallAction onClick={undoLast} disabled={history.length === 0}>
               <Undo2 className="h-4 w-4" aria-hidden />
               撤销
+            </SmallAction>
+            <SmallAction onClick={saveDraftNow} disabled={!onSaveDraft || draftStatus === "saving"}>
+              <Save className="h-4 w-4" aria-hidden />
+              保存
             </SmallAction>
             <SmallAction onClick={() => setShowDetails((value) => !value)}>
               {showDetails ? <EyeOff className="h-4 w-4" aria-hidden /> : <Eye className="h-4 w-4" aria-hidden />}
@@ -973,6 +1094,7 @@ export function TouchScoreboard({
           <LastTurnPanel
             turn={lastTurn}
             currentLeg={state.currentLeg}
+            roundNumber={lastTurnRoundNumber}
             turnDisplayName={turnDisplayName}
           />
 
@@ -1504,6 +1626,7 @@ function ThrowerPicker({
 function PlayerPanel({
   name,
   avatarUrl,
+  memberLine,
   isActive,
   rule,
   remaining,
@@ -1512,6 +1635,7 @@ function PlayerPanel({
 }: {
   name: string;
   avatarUrl?: string | null;
+  memberLine?: string;
   isActive: boolean;
   rule: MatchLegRule;
   remaining: number;
@@ -1533,10 +1657,15 @@ function PlayerPanel({
             <div className={`text-[10px] font-black uppercase sm:text-xs ${isActive ? "text-white/70 sm:text-muted" : "text-white/55 sm:text-muted"}`}>
               {isActive ? "出镖" : "等待"} · L{legsWon}
             </div>
-            <h2 className="codl-player-name mt-0.5 min-w-0 truncate text-xs font-black leading-tight sm:text-lg">
-              <span className="sm:hidden">{compactSideName(name)}</span>
+            <h2 className="codl-player-name mt-0.5 min-w-0 text-xs font-black leading-tight sm:text-lg">
+              <span className="sm:hidden">{name}</span>
               <span className="hidden sm:inline">{name}</span>
             </h2>
+            {memberLine ? (
+              <div className={`codl-player-member-line mt-0.5 min-w-0 text-[10px] font-bold leading-tight sm:text-xs ${isActive ? "text-white/80 sm:text-muted" : "text-white/65 sm:text-muted"}`}>
+                {memberLine}
+              </div>
+            ) : null}
             <div className="mt-0.5 hidden truncate text-xs text-muted sm:block">{getLegRuleLabel(rule)}</div>
           </div>
         </div>
@@ -1748,6 +1877,113 @@ function TurnTimeline({
   displayName?: (participantId: string, legNumber?: number) => string;
   turnDisplayName?: (turn: ScoreTurn) => string;
 }) {
+  const groupedTurns = buildTurnRoundRows(turns, participantA.id, participantB.id);
+  const participantAName = names[participantA.id] || participantA.name;
+  const participantBName = names[participantB.id] || participantB.name;
+
+  return (
+    <div className="min-h-0 overflow-y-auto pr-1">
+      {turns.length === 0 ? (
+        <p className="rounded-lg bg-field p-3 text-sm text-muted">暂无回合记录。</p>
+      ) : (
+        <div className="grid gap-2">
+          {groupedTurns.map((leg) => (
+            <section key={leg.legNumber} className="overflow-hidden rounded-lg border border-wire bg-surface">
+              <div className="sticky top-0 z-10 grid grid-cols-[4.4rem_minmax(0,1fr)_minmax(0,1fr)] gap-1 border-b border-wire bg-surface/95 px-2 py-2 text-xs font-black text-muted backdrop-blur">
+                <div className="text-board">第 {leg.legNumber} 局</div>
+                <div className="truncate text-center">{compactSideName(participantAName)}</div>
+                <div className="truncate text-center">{compactSideName(participantBName)}</div>
+              </div>
+              <div className="grid gap-1 p-1.5">
+                {leg.rows.map((row) => (
+                  <div
+                    key={`${row.legNumber}-${row.roundNumber}`}
+                    className="grid grid-cols-[4.4rem_minmax(0,1fr)_minmax(0,1fr)] items-stretch gap-1"
+                  >
+                    <div className="grid place-items-center rounded-lg bg-field px-1 text-center text-xs font-black text-muted">
+                      第 {row.roundNumber} 轮
+                    </div>
+                    <TurnRoundCell
+                      turn={row.participantATurn}
+                      fallbackName={participantAName}
+                      displayName={displayName}
+                      turnDisplayName={turnDisplayName}
+                    />
+                    <TurnRoundCell
+                      turn={row.participantBTurn}
+                      fallbackName={participantBName}
+                      displayName={displayName}
+                      turnDisplayName={turnDisplayName}
+                    />
+                  </div>
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TurnRoundCell({
+  turn,
+  fallbackName,
+  displayName,
+  turnDisplayName
+}: {
+  turn?: ScoreTurn;
+  fallbackName: string;
+  displayName?: (participantId: string, legNumber?: number) => string;
+  turnDisplayName?: (turn: ScoreTurn) => string;
+}) {
+  if (!turn) {
+    return (
+      <div className="grid min-h-14 place-items-center rounded-lg bg-field/60 px-2 py-2 text-center text-xs font-bold text-muted">
+        -
+      </div>
+    );
+  }
+
+  const name = turnDisplayName
+    ? turnDisplayName(turn)
+    : displayName
+      ? displayName(turn.participantId, turn.legNumber)
+      : fallbackName;
+  const statusLabel = turn.isCheckout ? "结镖" : turn.isBust ? "爆镖" : `剩 ${turn.remainingAfter}`;
+  const statusClass = turn.isCheckout ? "text-emerald-700" : turn.isBust ? "text-red-700" : "text-muted";
+
+  return (
+    <div className="min-w-0 rounded-lg bg-field px-2 py-2">
+      <div className="flex items-start justify-between gap-1">
+        <div className="min-w-0">
+          <div className="truncate text-[11px] font-bold text-muted">{compactSideName(name)}</div>
+          <div className={`mt-0.5 text-[11px] font-black ${statusClass}`}>{statusLabel}</div>
+        </div>
+        <div className="shrink-0 text-2xl font-black leading-none text-board">{turn.score}</div>
+      </div>
+      <div className="mt-1 truncate text-[11px] font-semibold text-muted">
+        {turn.remainingBefore} -&gt; {turn.remainingAfter} · {turn.darts || 3} 镖
+      </div>
+    </div>
+  );
+}
+
+function LegacyTurnTimeline({
+  turns,
+  names,
+  participantA,
+  participantB,
+  displayName,
+  turnDisplayName
+}: {
+  turns: ScoreTurn[];
+  names: Record<string, string>;
+  participantA: ParticipantInfo;
+  participantB: ParticipantInfo;
+  displayName?: (participantId: string, legNumber?: number) => string;
+  turnDisplayName?: (turn: ScoreTurn) => string;
+}) {
   const columns = [participantA, participantB];
 
   return (
@@ -1855,10 +2091,12 @@ function SmallAction({
 function LastTurnPanel({
   turn,
   currentLeg,
+  roundNumber,
   turnDisplayName
 }: {
   turn: ScoreTurn | null;
   currentLeg: number;
+  roundNumber: number | null;
   turnDisplayName: (turn: ScoreTurn) => string;
 }) {
   if (!turn) {
@@ -1887,7 +2125,8 @@ function LastTurnPanel({
         </div>
         <div className={`shrink-0 text-3xl font-black leading-none ${statusClass}`}>{turn.score}</div>
       </div>
-      <div className="codl-last-turn-detail flex items-center justify-between gap-2 text-xs font-bold text-muted">
+      <div className="codl-last-turn-detail codl-last-turn-detail-fixed flex items-center justify-between gap-2 text-xs font-bold text-muted">
+        <span>第 {turn.legNumber} 局 · 第 {roundNumber || 1} 轮 · {turn.darts || 3} 镖</span>
         <span>第 {turn.legNumber} 局 · {turn.darts || 3} 镖</span>
         <span className={statusClass}>
           {statusLabel} {turn.remainingBefore} → {turn.remainingAfter}

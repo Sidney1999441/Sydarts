@@ -498,10 +498,16 @@ body.codl-display-active main {
   }
 
   body.codl-scoreboard-active main {
+    display: grid;
+    grid-template-rows: minmax(0, 1fr);
     height: calc(100dvh - 4rem);
     max-width: none;
     overflow: hidden;
     padding: 0.5rem 0.5rem calc(0.5rem + env(safe-area-inset-bottom));
+  }
+
+  body.codl-scoreboard-active main > * {
+    min-height: 0;
   }
 
   .codl-casual-score-shell {
@@ -517,8 +523,7 @@ body.codl-display-active main {
   }
 
   .codl-official-score-header {
-    min-height: 2.85rem;
-    padding: 0.45rem 0.55rem;
+    display: none;
   }
 
   .codl-official-score-title {
@@ -526,7 +531,8 @@ body.codl-display-active main {
   }
 
   .codl-touch-scoreboard {
-    height: 100%;
+    height: calc(100dvh - 5rem - env(safe-area-inset-bottom));
+    max-height: calc(100dvh - 5rem - env(safe-area-inset-bottom));
     min-height: 0;
     overflow: hidden;
     padding-bottom: 0;
@@ -551,22 +557,38 @@ body.codl-display-active main {
   }
 
   .codl-player-panel {
-    min-height: clamp(4.2rem, 10dvh, 4.9rem);
+    min-height: clamp(3.45rem, 7.6dvh, 4.1rem);
     align-content: space-between;
-    padding: 0.45rem 0.5rem;
+    padding: 0.35rem 0.45rem;
   }
 
   .codl-player-name {
-    font-size: clamp(0.78rem, 3.4vw, 0.98rem);
+    display: -webkit-box;
+    max-height: 2.15em;
+    overflow: hidden;
+    font-size: clamp(0.76rem, 3.2vw, 0.94rem);
+    line-height: 1.08;
+    overflow-wrap: anywhere;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .codl-player-member-line {
+    display: -webkit-box;
+    max-height: 2.05em;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
   }
 
   .codl-player-score {
-    font-size: clamp(2.1rem, 9.2vw, 3rem);
+    font-size: clamp(1.8rem, 8.2vw, 2.45rem);
   }
 
   .codl-player-ppr {
-    margin-top: 0.25rem;
-    padding-block: 0.25rem;
+    margin-top: 0.18rem;
+    padding-block: 0.18rem;
   }
 
   .codl-score-actions {
@@ -574,14 +596,15 @@ body.codl-display-active main {
   }
 
   .codl-score-actions button {
-    min-height: 2.55rem;
+    min-height: 2.35rem;
+    font-size: clamp(0.66rem, 2.9vw, 0.78rem);
   }
 
   .codl-score-input {
     min-height: 0;
     overflow: hidden;
-    grid-template-rows: auto minmax(0, 1fr) clamp(3rem, 6.5dvh, 3.55rem) minmax(3rem, 0.16fr);
-    gap: 0.375rem;
+    grid-template-rows: auto minmax(0, 1fr) clamp(3.05rem, 7.4dvh, 4.05rem) minmax(3.55rem, 0.2fr);
+    gap: clamp(0.25rem, 0.7dvh, 0.5rem);
     padding: 0.375rem;
   }
 
@@ -616,16 +639,16 @@ body.codl-display-active main {
   .codl-mobile-keypad {
     grid-row: 2;
     min-height: 0;
-    height: auto;
+    height: 100%;
     align-self: stretch;
     grid-template-columns: clamp(3.9rem, 18vw, 4.7rem) minmax(0, 1fr);
-    gap: 0.375rem;
+    gap: clamp(0.25rem, 0.7dvh, 0.5rem);
   }
 
   .codl-mobile-quick-grid {
     min-height: 0;
     grid-template-rows: repeat(9, minmax(0, 1fr));
-    gap: 0.25rem;
+    gap: clamp(0.2rem, 0.55dvh, 0.35rem);
   }
 
   .codl-quick-score {
@@ -639,14 +662,14 @@ body.codl-display-active main {
   .codl-number-pad {
     min-height: 0;
     grid-template-rows: repeat(4, minmax(0, 1fr));
-    gap: 0.375rem;
+    gap: clamp(0.25rem, 0.7dvh, 0.5rem);
   }
 
   .codl-score-key {
     height: 100%;
     min-height: 0;
     border-radius: 0.5rem;
-    font-size: clamp(1.75rem, 9vw, 2.75rem);
+    font-size: clamp(1.85rem, 7dvh, 3.1rem);
     line-height: 1;
   }
 
@@ -664,8 +687,13 @@ body.codl-display-active main {
   .codl-last-turn-panel {
     grid-row: 4;
     min-height: 0;
+    overflow: hidden;
     gap: 0.15rem;
     padding: 0.45rem 0.6rem;
+  }
+
+  .codl-last-turn-detail-fixed > span:nth-child(2) {
+    display: none;
   }
 }
 
@@ -685,12 +713,12 @@ body.codl-display-active main {
   }
 
   .codl-player-panel {
-    min-height: clamp(3.95rem, 10.5dvh, 4.55rem);
-    padding: 0.35rem 0.45rem;
+    min-height: clamp(3.35rem, 8.4dvh, 3.9rem);
+    padding: 0.32rem 0.42rem;
   }
 
   .codl-player-score {
-    font-size: clamp(1.95rem, 8.8vw, 2.65rem);
+    font-size: clamp(1.75rem, 8.1vw, 2.35rem);
   }
 
   .codl-player-ppr {
@@ -754,11 +782,11 @@ body.codl-display-active main {
   }
 
   .codl-player-panel {
-    min-height: 3.55rem;
+    min-height: 3.1rem;
   }
 
   .codl-player-score {
-    font-size: clamp(1.75rem, 8.2vw, 2.35rem);
+    font-size: clamp(1.55rem, 7.6vw, 2.1rem);
   }
 
   .codl-player-ppr {

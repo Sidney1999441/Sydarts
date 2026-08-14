@@ -9,6 +9,7 @@ import {
 import { getCurrentUserAndProfile } from "@/lib/auth/guards";
 import { hasSupabaseEnv } from "@/lib/env";
 import { updateTournamentStandings, type StandingRow } from "@/lib/algorithms/standings";
+import { calculatePlayerLevel } from "@/lib/algorithms/player-level";
 import { getCompactMatchRulesSummary, getDartModeLabel, getGameVariantLabel, resolveMatchLegRules } from "@/lib/darts/variants";
 import {
   areBothMatchLineupsSubmitted,
@@ -137,6 +138,8 @@ export default async function TournamentDetailPage({
     rating: participant.rating_snapshot || 1000
   }));
   const participantById = new Map(participantSeeds.map((participant) => [participant.id, participant]));
+  const participantLevel = (participantId: string) =>
+    calculatePlayerLevel({ rating: participantById.get(participantId)?.rating || 1000 }).level;
   const participantRowById = new Map((participants || []).map((participant) => [participant.id, participant]));
   const tournamentData = tournament as Tournament;
   const matchRows = (matches || []) as MatchRow[];
@@ -245,7 +248,7 @@ export default async function TournamentDetailPage({
     rank: index + 1,
     name: getParticipantDisplayName(row.participantId, row.name),
     avatarUrl: participantAvatarById.get(row.participantId) || null,
-    rating: participantById.get(row.participantId)?.rating || 1000,
+    level: participantLevel(row.participantId),
     points: Number.isFinite(Number(row.points)) ? Number(row.points) : row.wins * 3,
     members: participantMembersById.get(row.participantId) || []
   }));
@@ -335,7 +338,7 @@ export default async function TournamentDetailPage({
                     <div
                       key={row.participantId}
                       className={cn(
-                        "grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] gap-3 rounded-lg border p-3 sm:items-center",
+                        "grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-3 rounded-lg border p-3 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center",
                         getPodiumTone(rank, "list")
                       )}
                     >
@@ -348,15 +351,16 @@ export default async function TournamentDetailPage({
                       <PlayerIdentity
                         name={getParticipantDisplayName(row.participantId, row.name)}
                         avatarUrl={participantAvatarById.get(row.participantId)}
-                        subtitle={`${row.played} 场 · ${row.wins} 胜 ${row.losses} 负 · Rating ${participantById.get(row.participantId)?.rating || 1000}`}
+                        level={participantLevel(row.participantId)}
+                        subtitle={`${row.played} 场 · ${row.wins} 胜 ${row.losses} 负 · 等级 ${participantLevel(row.participantId)}`}
                         size="sm"
                         compact
                       />
-                      <div className="rounded-lg bg-board px-3 py-2 text-center text-white shadow-sm">
+                      <div className="col-span-2 rounded-lg bg-board px-3 py-2 text-center text-white shadow-sm sm:col-span-1">
                         <div className="text-[10px] font-black text-white/75">积分</div>
                         <div className="text-xl font-black leading-none">{points}</div>
                       </div>
-                      <div className="col-span-3 grid grid-cols-4 gap-1 text-center text-xs font-black sm:col-start-2 sm:col-span-2 sm:grid-cols-4">
+                      <div className="col-span-2 grid grid-cols-2 gap-1 text-center text-xs font-black min-[420px]:grid-cols-4 sm:col-start-2 sm:col-span-2 sm:grid-cols-4">
                         <RankMetric label="场" value={row.played} />
                         <RankMetric label="胜" value={row.wins} />
                         <RankMetric label="负" value={row.losses} />
@@ -390,7 +394,8 @@ export default async function TournamentDetailPage({
                             <PlayerIdentity
                               name={getParticipantDisplayName(member.id, member.name)}
                               avatarUrl={participantAvatarById.get(member.id)}
-                              subtitle={`Rating ${member.rating}`}
+                              level={participantLevel(member.id)}
+                              subtitle={`等级 ${participantLevel(member.id)}`}
                               size="sm"
                               compact
                             />
@@ -868,8 +873,8 @@ function RankMetric({
   strong?: boolean;
 }) {
   return (
-    <div className={cn("rounded-lg bg-surface px-1.5 py-2", strong && "bg-board text-white")}>
-      <div className={cn("text-[10px] font-black", strong ? "text-white/75" : "text-muted")}>{label}</div>
+    <div className={cn("min-w-0 rounded-lg bg-surface px-1.5 py-2", strong && "bg-board text-white")}>
+      <div className={cn("whitespace-nowrap text-[10px] font-black", strong ? "text-white/75" : "text-muted")}>{label}</div>
       <div className="mt-0.5 truncate text-sm font-black">{value}</div>
     </div>
   );
@@ -880,7 +885,7 @@ type StandingPodiumRow = {
   rank: number;
   name: string;
   avatarUrl: string | null;
-  rating: number;
+  level: number;
   points: number;
   members: Array<{ userId: string; name: string }>;
 };
@@ -908,13 +913,14 @@ function StandingPodium({ rows }: { rows: StandingPodiumRow[] }) {
             <PlayerAvatar
               name={item.name}
               avatarUrl={item.avatarUrl}
+              level={item.level}
               size={item.rank === 1 ? "xl" : "lg"}
               className={cn("codl-podium-avatar", getPodiumTone(item.rank, "avatar"))}
             />
             <div className="min-w-0">
               <div className="truncate text-base font-black text-ink">{item.name}</div>
               <div className="mt-1 text-xs font-bold text-muted">
-                {item.row.played} 场 · {item.row.wins} 胜 · Rating {item.rating}
+                {item.row.played} 场 · {item.row.wins} 胜 · 等级 {item.level}
               </div>
               {item.members.length > 0 ? (
                 <div className="mt-2 flex flex-wrap gap-1">

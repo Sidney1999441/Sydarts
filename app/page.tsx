@@ -184,7 +184,7 @@ async function loadWeeklySchedule(
     nextWeekItems: [],
     overdueCount: 0
   });
-  const visibleMatchStatuses = ["not_started", "in_progress", "pending_confirmation", "disputed", "completed"];
+  const visibleMatchStatuses = ["not_started", "in_progress", "pending_confirmation", "disputed", "completed", "bye"];
 
   const { data: teamMemberships } = await supabase
     .from("team_members")
@@ -362,7 +362,10 @@ async function loadWeeklySchedule(
   const nextWeekSelectedIds = new Set<string>();
   const nextWeekItems: WeeklyScheduleMatch[] = [];
   const sortedMatches = matchRows
-    .filter((match) => tournamentById.has(match.tournament_id) && (isUnplayedMatch(match.status) || match.status === "completed"))
+    .filter((match) =>
+      tournamentById.has(match.tournament_id) &&
+      (isUnplayedMatch(match.status) || match.status === "completed" || match.status === "bye")
+    )
     .sort(compareHomeMatches);
 
   const buildScheduleItem = (match: HomeMatchRow, isOverdue: boolean): WeeklyScheduleMatch | null => {
@@ -419,7 +422,8 @@ async function loadWeeklySchedule(
     const completedTime = match.status === "completed" ? getMatchCompletionTime(match, currentReservation) : null;
     const completedThisWeek = Boolean(completedTime && completedTime >= weekStart && completedTime < weekEnd);
     const overdue = isUnplayedMatch(match.status) && isMatchOverdue(match, tournament, currentReservation, weekStart);
-    if (overdue || scheduledThisWeek || completedThisWeek) {
+    const byeThisWeek = match.status === "bye" && isTournamentRoundInWeek(match, tournament, weekStart);
+    if (overdue || scheduledThisWeek || completedThisWeek || byeThisWeek) {
       addItem(match, overdue);
     }
   }
@@ -556,13 +560,20 @@ function WeeklyScheduleMatchCard({ item }: { item: WeeklyScheduleMatch }) {
   const scheduledTime = getMatchScheduleTime(item.match, item.currentReservation);
   const completedTime = item.match.status === "completed" ? getMatchCompletionTime(item.match, item.currentReservation) : null;
   const isCompleted = item.match.status === "completed";
+  const isBye = item.match.status === "bye";
   const winnerName = getMatchWinnerName(item);
 
   return (
     <article
       className={cn(
         "grid min-w-0 gap-3 rounded-lg border p-3 shadow-[0_12px_28px_rgb(17_24_39/0.05)]",
-        isCompleted ? "border-emerald-200 bg-emerald-50/70" : item.isOverdue ? "border-amber-300 bg-amber-50" : "border-wire bg-surface"
+        isCompleted
+          ? "border-emerald-200 bg-emerald-50/70"
+          : isBye
+            ? "border-sky-200 bg-sky-50/80"
+            : item.isOverdue
+              ? "border-amber-300 bg-amber-50"
+              : "border-wire bg-surface"
       )}
     >
       <div className="flex flex-wrap items-center gap-2">
@@ -575,6 +586,9 @@ function WeeklyScheduleMatchCard({ item }: { item: WeeklyScheduleMatch }) {
         </span>
         {isCompleted ? (
           <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-black text-emerald-800">本周赛果</span>
+        ) : null}
+        {isBye ? (
+          <span className="rounded-full bg-sky-100 px-2.5 py-1 text-xs font-black text-board">本轮轮空</span>
         ) : null}
       </div>
 
@@ -597,19 +611,25 @@ function WeeklyScheduleMatchCard({ item }: { item: WeeklyScheduleMatch }) {
           className={cn("rounded-lg bg-field p-2", item.participantAIsMine && "bg-board/10 ring-1 ring-board/25")}
           name={item.participantAName}
           avatarUrl={item.participantAAvatarUrl}
-          subtitle={`比分 ${item.match.score_a}`}
+          subtitle={isBye ? "本轮无需比赛" : `比分 ${item.match.score_a}`}
           size="sm"
           compact
         />
         <PlayerIdentity
           className={cn("rounded-lg bg-field p-2", item.participantBIsMine && "bg-board/10 ring-1 ring-board/25")}
-          name={item.participantBName}
+          name={isBye ? "轮空" : item.participantBName}
           avatarUrl={item.participantBAvatarUrl}
-          subtitle={`比分 ${item.match.score_b}`}
+          subtitle={isBye ? "等待下一轮赛程" : `比分 ${item.match.score_b}`}
           size="sm"
           compact
         />
       </div>
+
+      {isBye ? (
+        <div className="rounded-lg border border-sky-200 bg-white/80 p-3 text-sm font-black text-board">
+          本轮轮空，无需预约机台或进入计分。
+        </div>
+      ) : null}
 
       {isCompleted ? (
         <div className="rounded-lg border border-emerald-200 bg-white/80 p-3">
@@ -642,16 +662,18 @@ function WeeklyScheduleMatchCard({ item }: { item: WeeklyScheduleMatch }) {
         ) : null}
       </div>
 
-      <div className="grid grid-cols-2 gap-2">
-        <Link
-          href={isCompleted ? `/reports/official/${item.match.id}` : `/scorer/${item.match.id}`}
-          className={cn(
-            "inline-flex min-h-11 touch-manipulation items-center justify-center rounded-lg px-3 text-sm font-black",
-            isCompleted ? "bg-emerald-700 text-white" : "bg-board text-white"
-          )}
-        >
-          {isCompleted ? "查看战报" : "排阵 / 计分"}
-        </Link>
+      <div className={cn("grid gap-2", isBye ? "grid-cols-1" : "grid-cols-2")}>
+        {!isBye ? (
+          <Link
+            href={isCompleted ? `/reports/official/${item.match.id}` : `/scorer/${item.match.id}`}
+            className={cn(
+              "inline-flex min-h-11 touch-manipulation items-center justify-center rounded-lg px-3 text-sm font-black",
+              isCompleted ? "bg-emerald-700 text-white" : "bg-board text-white"
+            )}
+          >
+            {isCompleted ? "查看战报" : "排阵 / 计分"}
+          </Link>
+        ) : null}
         <Link
           href={`/tournaments/${item.tournament.id}?schedule=mine#schedule`}
           className="inline-flex min-h-11 touch-manipulation items-center justify-center rounded-lg border border-wire bg-surface px-3 text-sm font-black text-board"
@@ -813,6 +835,15 @@ function isMatchOverdue(
   if (weekStart <= tournamentWeekStart) return false;
   const expectedRound = Math.floor((weekStart.getTime() - tournamentWeekStart.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1;
   return match.round_number < expectedRound;
+}
+
+function isTournamentRoundInWeek(match: HomeMatchRow, tournament: Tournament, weekStart: Date) {
+  if (!tournament.tournament_start_at) return false;
+  const tournamentWeekStart = startOfLocalWeek(new Date(tournament.tournament_start_at));
+  if (weekStart < tournamentWeekStart) return false;
+  const expectedRound =
+    Math.floor((weekStart.getTime() - tournamentWeekStart.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1;
+  return match.round_number === expectedRound;
 }
 
 function startOfLocalWeek(value: Date) {

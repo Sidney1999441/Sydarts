@@ -176,6 +176,7 @@ export function SoftMatchScoreboard({
   const submissionIdRef = useRef(safeInitialDraft?.submissionId || createResultSubmissionId());
   const draftSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastDraftSignatureRef = useRef("");
+  const autoSubmitSignatureRef = useRef("");
 
   const currentRule = rules[currentLegIndex] || rules[0];
   const currentLineup = lineups.find((lineup) => lineup.legNumber === currentRule?.legNumber) || lineups[0];
@@ -216,10 +217,9 @@ export function SoftMatchScoreboard({
     }))
   ];
 
-  useEffect(() => {
-    if (!onSaveDraft || !lineupConfirmed || isSaved) return;
-
-    const draftCore = {
+  function buildDraftCore() {
+    if (!lineupConfirmed) return null;
+    return {
       version: 1 as const,
       submissionId: submissionIdRef.current,
       lineups,
@@ -235,6 +235,12 @@ export function SoftMatchScoreboard({
       legStats,
       ppdInputs
     };
+  }
+
+  useEffect(() => {
+    if (!onSaveDraft || isSaved) return;
+    const draftCore = buildDraftCore();
+    if (!draftCore) return;
     const signature = JSON.stringify(draftCore);
     if (signature === lastDraftSignatureRef.current) return;
     if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current);
@@ -370,6 +376,33 @@ export function SoftMatchScoreboard({
     if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current);
     lastDraftSignatureRef.current = "";
     if (onClearDraft) void onClearDraft().catch(() => setDraftStatus("error"));
+  }
+
+  function saveDraftNow() {
+    if (!onSaveDraft) return;
+    const draftCore = buildDraftCore();
+    if (!draftCore) {
+      setMessage("确认出场顺序后才能保存当前进度。");
+      return;
+    }
+
+    if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current);
+    const signature = JSON.stringify(draftCore);
+    lastDraftSignatureRef.current = signature;
+    setDraftStatus("saving");
+    onSaveDraft({
+      ...draftCore,
+      savedAt: new Date().toISOString()
+    })
+      .then(() => {
+        setDraftStatus("saved");
+        setMessage("当前进度已保存，断线后可从这里继续。");
+      })
+      .catch((error) => {
+        lastDraftSignatureRef.current = "";
+        setDraftStatus("error");
+        setMessage(error instanceof Error ? error.message : "保存进度失败，请稍后重试。");
+      });
   }
 
   function buildEntryUserStats(sideScoreA?: number, sideScoreB?: number) {
@@ -510,10 +543,25 @@ export function SoftMatchScoreboard({
         setDraftStatus("idle");
         setMessage(successMessage);
       } catch (error) {
+        autoSubmitSignatureRef.current = "";
         setMessage(error instanceof Error ? error.message : "保存失败，请稍后重试。");
       }
     });
   }
+
+  useEffect(() => {
+    if (!winnerParticipantId || isSaved) return;
+    const signature = [
+      submissionIdRef.current,
+      winnerParticipantId,
+      scoreA,
+      scoreB,
+      legEntries.length
+    ].join(":");
+    if (autoSubmitSignatureRef.current === signature) return;
+    autoSubmitSignatureRef.current = signature;
+    saveResult();
+  }, [isSaved, legEntries.length, scoreA, scoreB, winnerParticipantId]);
 
   if (rules.length === 0) {
     return (
@@ -804,10 +852,18 @@ export function SoftMatchScoreboard({
       {message ? <p className="text-sm font-semibold text-accent">{message}</p> : null}
 
       <section className="flex flex-wrap justify-between gap-2 rounded-lg border border-wire bg-surface p-3 shadow-soft">
-        <Button type="button" variant="secondary" onClick={resetMatch}>
-          <RotateCcw className="h-4 w-4" aria-hidden />
-          重开
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" variant="secondary" onClick={resetMatch}>
+            <RotateCcw className="h-4 w-4" aria-hidden />
+            重开
+          </Button>
+          {onSaveDraft ? (
+            <Button type="button" variant="secondary" onClick={saveDraftNow} disabled={draftStatus === "saving"}>
+              <Save className="h-4 w-4" aria-hidden />
+              保存进度
+            </Button>
+          ) : null}
+        </div>
         <Button type="button" onClick={completeCurrentLeg}>
           {currentLegIndex >= rules.length - 1 ? "保存本局，进入结算" : "保存本局，下一局"}
           <ChevronRight className="h-4 w-4" aria-hidden />

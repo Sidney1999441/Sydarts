@@ -6,6 +6,7 @@ import {
   saveTournamentBoardSlotAction
 } from "@/lib/actions/board-reservations";
 import { generateGroupsAndScheduleAction, generateLeaguePlayoffsAction } from "@/lib/actions/tournaments";
+import { calculatePlayerLevel } from "@/lib/algorithms/player-level";
 import { requireAdmin } from "@/lib/auth/guards";
 import { getDartModeLabel, getMatchRulesSummary } from "@/lib/darts/variants";
 import { hasSupabaseEnv } from "@/lib/env";
@@ -60,6 +61,7 @@ export default async function ScheduleAdminPage({
         .order("reserved_start_at")
     ]);
   const participantById = new Map((participants || []).map((participant) => [participant.id, participant]));
+  const levelFromRating = (rating?: number | null) => calculatePlayerLevel({ rating: rating || 1000 }).level;
   const groupMatches = (matches || []).filter((match) => match.stage === "group");
   const knockoutMatches = (matches || []).filter((match) => match.stage === "knockout");
   const isLeaguePlayoff = tournament?.format === "league_playoff";
@@ -135,7 +137,7 @@ export default async function ScheduleAdminPage({
                   <div className="font-bold">{group.name} 组</div>
                   <ul className="mt-2 grid gap-1 text-sm text-muted">
                     {members.map((member) => (
-                      <li key={member.id}>{member.display_name} / {member.rating_snapshot}</li>
+                      <li key={member.id}>{member.display_name} / Lv.{levelFromRating(member.rating_snapshot)}</li>
                     ))}
                   </ul>
                 </div>

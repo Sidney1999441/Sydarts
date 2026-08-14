@@ -11,6 +11,7 @@ import {
   updateTournamentTeamAction
 } from "@/lib/actions/tournaments";
 import { UsersRound } from "lucide-react";
+import { calculatePlayerLevel } from "@/lib/algorithms/player-level";
 import { requireAdmin } from "@/lib/auth/guards";
 import { hasSupabaseEnv } from "@/lib/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -76,6 +77,7 @@ export default async function ParticipantsAdminPage({
           .in("id", userIds)
       : { data: [] };
   const profileById = new Map((profiles || []).map((profile) => [profile.id, profile]));
+  const levelFromRating = (rating?: number | null) => calculatePlayerLevel({ rating: rating || 1000 }).level;
 
   return (
     <div className="grid gap-6">
@@ -101,7 +103,6 @@ export default async function ParticipantsAdminPage({
               <thead className="text-muted">
                 <tr>
                   <th className="py-2">用户</th>
-                  <th>Rating</th>
                   <th>等级</th>
                   <th>意向搭档</th>
                   <th>状态</th>
@@ -118,8 +119,7 @@ export default async function ParticipantsAdminPage({
                         <div className="text-xs text-muted">UID {profile?.uid || "------"}</div>
                         <div className="text-xs text-muted">{registration.user_id}</div>
                       </td>
-                      <td>{registration.rating_snapshot}</td>
-                      <td>{registration.skill_level_snapshot}</td>
+                      <td>Lv.{levelFromRating(registration.rating_snapshot)} · {registration.skill_level_snapshot}</td>
                       <td>
                         {registration.preferred_partner_user_id
                           ? `${profileById.get(registration.preferred_partner_user_id)?.display_name ||
@@ -140,7 +140,7 @@ export default async function ParticipantsAdminPage({
                 })}
                 {(registrations || []).length === 0 ? (
                   <tr>
-                    <td className="py-4 text-muted" colSpan={6}>暂无报名。</td>
+                    <td className="py-4 text-muted" colSpan={5}>暂无报名。</td>
                   </tr>
                 ) : null}
               </tbody>
@@ -251,7 +251,7 @@ export default async function ParticipantsAdminPage({
               <div key={participant.id} className="grid gap-4 rounded-lg border border-wire p-4">
                 <div>
                   <div className="font-bold">{participant.display_name}</div>
-                  <div className="mt-1 text-sm text-muted">Rating {participant.rating_snapshot}</div>
+                  <div className="mt-1 text-sm text-muted">等级 Lv.{levelFromRating(participant.rating_snapshot)}</div>
                   {team ? (
                     <div className="mt-1 text-xs text-muted">
                       队长 {captain?.display_name || team.captain_user_id || "未设置"}
@@ -293,7 +293,7 @@ export default async function ParticipantsAdminPage({
                         <input className="form-input" name="captain_identifier" defaultValue={captain?.uid || ""} placeholder="不填则默认第一行队员" />
                       </label>
                       <div className="rounded-lg bg-surface/80 p-3 text-xs font-semibold leading-5 text-muted">
-                        可先保存 1 人，后续再补齐；会同步报名、队长、队伍总 rating 和参赛主体快照。
+                        可先保存 1 人，后续再补齐；会同步报名、队长、队伍等级基准和参赛主体快照。
                       </div>
                     </div>
                     <label className="label">
@@ -314,7 +314,7 @@ export default async function ParticipantsAdminPage({
                   <ul className="mt-3 grid gap-1 text-xs text-muted">
                     {teamMembers.map((member) => (
                       <li key={member.id} className="flex flex-wrap items-center justify-between gap-2 rounded bg-field px-3 py-2">
-                        {profileById.get(member.user_id)?.display_name || member.user_id} · {member.rating_snapshot} · {member.role}
+                        {profileById.get(member.user_id)?.display_name || member.user_id} · Lv.{levelFromRating(member.rating_snapshot)} · {member.role}
                         <span className="ml-2">UID {profileById.get(member.user_id)?.uid || "------"}</span>
                         {team ? (
                           <form action={removeTournamentTeamMemberAction}>

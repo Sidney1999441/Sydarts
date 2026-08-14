@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowRight, History, Plus, UsersRound } from "lucide-react";
 import { createSavedTeamForCurrentUserAction, updateSavedTeamProfileAction } from "@/lib/actions/teams";
 import { saveTournamentTeamAsSavedAction, updateTournamentTeamAction } from "@/lib/actions/tournaments";
+import { calculatePlayerLevel } from "@/lib/algorithms/player-level";
 import { requireUser } from "@/lib/auth/guards";
 import { hasSupabaseEnv } from "@/lib/env";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -90,6 +91,7 @@ export default async function TeamsPage() {
   const tournamentById = new Map((tournaments || []).map((tournament) => [tournament.id, tournament]));
   const linkedSavedTeamById = new Map((linkedSavedTeams || []).map((team) => [team.id, team]));
   const profileById = new Map((profiles || []).map((profile) => [profile.id, profile as ProfileLite]));
+  const levelFromRating = (rating?: number | null) => calculatePlayerLevel({ rating: rating || 1000 }).level;
   const membersByTeamId = new Map<string, typeof members>();
   for (const member of members || []) {
     const list = membersByTeamId.get(member.team_id) || [];
@@ -226,7 +228,7 @@ export default async function TeamsPage() {
                           <span className="min-w-0 break-words font-semibold">
                             {profile?.display_name || member.user_id} / UID {profile?.uid || "------"} / {member.role}
                           </span>
-                          <span className="shrink-0 text-xs font-bold text-muted">Rating {member.rating_snapshot || 1000}</span>
+                          <span className="shrink-0 text-xs font-bold text-muted">等级 Lv.{levelFromRating(member.rating_snapshot)}</span>
                         </div>
                       );
                     })}

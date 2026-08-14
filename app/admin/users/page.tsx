@@ -3,7 +3,6 @@ import { updateUserAdminFieldsAction } from "@/lib/actions/users";
 import {
   calculatePlayerLevel,
   initialRatingTiers,
-  ratingToSkillLevel,
   type PlayerLevelStats,
   type SoftPlayerLevelStats
 } from "@/lib/algorithms/player-level";
@@ -249,6 +248,11 @@ export default async function AdminUsersPage({
               softRating,
               softStats: toSoftLevelStats(softStats)
             });
+            const softLevel = calculatePlayerLevel({
+              rating: softRating,
+              softRating,
+              softStats: toSoftLevelStats(softStats)
+            });
 
             return (
               <form
@@ -297,19 +301,19 @@ export default async function AdminUsersPage({
                         const level = calculatePlayerLevel({ rating: tier.rating });
                         return (
                           <option key={tier.id} value={tier.id}>
-                            {tier.label} · 目标{tier.targetLevel}级 · Rating {tier.rating} · {ratingToSkillLevel(tier.rating)} · {level.majorRank}
+                            {tier.label} · 目标{tier.targetLevel}级 · {level.majorRank}
                           </option>
                         );
                       })}
                     </select>
                     <span className="text-xs font-semibold text-muted">
-                      保存时会同步普通、赛事、软镖三条 Rating，并自动更新当前等级系统。
+                      保存时会同步普通、赛事、软镖三条等级基准，并自动更新当前等级系统。
                     </span>
                   </label>
                   <div className="grid gap-2 text-xs font-black text-muted sm:grid-cols-3 lg:w-[28rem]">
-                    <div className="rounded-lg bg-surface px-3 py-2">普通 {casualRating}</div>
-                    <div className="rounded-lg bg-surface px-3 py-2">赛事 {tournamentRating}</div>
-                    <div className="rounded-lg bg-surface px-3 py-2">软镖 {softRating}</div>
+                    <div className="rounded-lg bg-surface px-3 py-2">普通 Lv.{generalLevel.level}</div>
+                    <div className="rounded-lg bg-surface px-3 py-2">赛事 Lv.{tournamentLevel.level}</div>
+                    <div className="rounded-lg bg-surface px-3 py-2">软镖 Lv.{softLevel.level}</div>
                   </div>
                 </div>
 
@@ -344,11 +348,11 @@ export default async function AdminUsersPage({
 
                 <details className="rounded-lg border border-wire bg-surface/80 p-3">
                   <summary className="cursor-pointer text-sm font-black text-board">
-                    高级：手动微调 Rating
+                    高级：手动微调等级基准
                   </summary>
                   <div className="mt-3 grid gap-3 lg:grid-cols-3">
                     <label className="label">
-                      普通 Rating
+                      普通等级基准
                       <input
                         className="form-input"
                         type="number"
@@ -357,7 +361,7 @@ export default async function AdminUsersPage({
                       />
                     </label>
                     <label className="label">
-                      赛事 Rating
+                      赛事等级基准
                       <input
                         className="form-input"
                         type="number"
@@ -366,7 +370,7 @@ export default async function AdminUsersPage({
                       />
                     </label>
                     <label className="label">
-                      软镖 Rating
+                      软镖等级基准
                       <input
                         className="form-input"
                         type="number"
@@ -374,15 +378,15 @@ export default async function AdminUsersPage({
                         defaultValue={softRating}
                       />
                     </label>
-                    <ReadOnlyField label="普通分档" value={ratingToSkillLevel(casualRating)} />
-                    <ReadOnlyField label="赛事分档" value={ratingToSkillLevel(tournamentRating)} />
-                    <ReadOnlyField label="软镖分档" value={ratingToSkillLevel(softRating)} />
+                    <ReadOnlyField label="普通等级" value={generalLevel.label} />
+                    <ReadOnlyField label="赛事等级" value={tournamentLevel.label} />
+                    <ReadOnlyField label="软镖等级" value={softLevel.label} />
                   </div>
                 </details>
 
                 <div className="grid gap-3 lg:grid-cols-[1fr_1fr_1.1fr]">
-                  <AdminLevelCard title="普通段位" rating={casualRating} stats={generalStats} level={generalLevel} tone="general" />
-                  <AdminLevelCard title="赛事段位" rating={tournamentRating} stats={tournamentStats} level={tournamentLevel} tone="tournament" />
+                  <AdminLevelCard title="普通段位" stats={generalStats} level={generalLevel} tone="general" />
+                  <AdminLevelCard title="赛事段位" stats={tournamentStats} level={tournamentLevel} tone="tournament" />
                   <SoftStatsCard rating={softRating} stats={softStats} />
                 </div>
 
@@ -416,13 +420,11 @@ function ReadOnlyField({ label, value }: { label: string; value: string }) {
 
 function AdminLevelCard({
   title,
-  rating,
   stats,
   level,
   tone
 }: {
   title: string;
-  rating: number;
   stats: DbStats | null;
   level: ReturnType<typeof calculatePlayerLevel>;
   tone: "general" | "tournament";
@@ -435,7 +437,7 @@ function AdminLevelCard({
     <div className={`rounded-lg p-4 ${wrapperClass}`}>
       <div className="flex items-start justify-between gap-3">
         <div>
-          <div className="text-xs font-bold uppercase tracking-normal opacity-70">Rating {rating}</div>
+          <div className="text-xs font-bold uppercase tracking-normal opacity-70">等级 {level.level}</div>
           <h3 className="mt-1 text-base font-bold">{title}</h3>
         </div>
         <div className="text-right">
@@ -465,11 +467,17 @@ function AdminLevelCard({
 }
 
 function SoftStatsCard({ rating, stats }: { rating: number; stats: DbSoftStats | null }) {
+  const level = calculatePlayerLevel({
+    rating,
+    softRating: rating,
+    softStats: toSoftLevelStats(stats)
+  });
+
   return (
     <div className="rounded-lg bg-sky-50 p-4 text-sky-950">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <div className="text-xs font-bold uppercase tracking-normal text-sky-700">Rating {rating}</div>
+          <div className="text-xs font-bold uppercase tracking-normal text-sky-700">等级 {level.level}</div>
           <h3 className="mt-1 text-base font-bold">软镖补充</h3>
         </div>
         <div className="text-right text-xs text-sky-700">
