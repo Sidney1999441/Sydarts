@@ -17,6 +17,7 @@ const REQUIRED_TABLES = [
   "teams",
   "team_members",
   "tournament_participants",
+  "tournament_weekly_stars",
   "groups",
   "group_members",
   "matches",
@@ -31,6 +32,7 @@ const REQUIRED_TABLES = [
 
 const REQUIRED_COLUMN_SELECTS = [
   { table: "profiles", select: "real_name,id_card_number,real_name_submitted_at" },
+  { table: "tournament_weekly_stars", select: "tournament_id,week_start,user_id,reason" },
   { table: "match_turns", select: "user_id" },
   { table: "soft_user_stats", select: "total_marks,count_5_marks,count_6_marks,count_7_marks,count_9_marks" }
 ];

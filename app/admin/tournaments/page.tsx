@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { CalendarDays, ChevronRight, MapPin, Plus, Target } from "lucide-react";
+import { CalendarDays, ChevronRight, MapPin, Plus, Star, Target } from "lucide-react";
 import { deleteTournamentAction, setTournamentStatusAction } from "@/lib/actions/tournaments";
 import { requireAdmin } from "@/lib/auth/guards";
 import { getDartModeLabel, getGameVariantLabel } from "@/lib/darts/variants";
@@ -86,6 +86,10 @@ export default async function AdminTournamentsPage() {
                   <AdminLink href={`/admin/tournaments/${tournament.id}/participants`}>选手</AdminLink>
                   <AdminLink href={`/admin/tournaments/${tournament.id}/schedule`}>赛程</AdminLink>
                   <AdminLink href={`/admin/tournaments/${tournament.id}/results`}>成绩</AdminLink>
+                  <AdminLink href={`/admin/tournaments/${tournament.id}/stars`}>
+                    <Star className="h-4 w-4" aria-hidden />
+                    赛事之星
+                  </AdminLink>
                   <StatusForm tournamentId={tournament.id} status="registration_open" label="发布" />
                   <StatusForm tournamentId={tournament.id} status="registration_closed" label="关报名" />
                   <form action={deleteTournamentAction}>

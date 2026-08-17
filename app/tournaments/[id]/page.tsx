@@ -17,9 +17,15 @@ import {
   getMatchLineupSubmissions
 } from "@/lib/matches/lineups";
 import { getMatchStatusLabel, isUnplayedMatch } from "@/lib/matches/status";
-import { formatUserDisplayName, isOpaqueIdentifier } from "@/lib/scorer/display-names";
+import { compactPlayerName, formatUserDisplayName, isOpaqueIdentifier } from "@/lib/scorer/display-names";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import {
+  evaluateWeeklyStars,
+  mergeWeeklyStarOverrides,
+  type WeeklyStarIdentity,
+  type WeeklyStarOverride
+} from "@/lib/tournaments/weekly-stars";
 import { cn, formatDateTime } from "@/lib/utils";
 import { SetupNotice } from "@/components/SetupNotice";
 import { CodlPageHeader } from "@/components/CodlPageHeader";
@@ -30,6 +36,7 @@ import {
   type BoardReservationBoard,
   type BoardReservationRow
 } from "@/components/tournament/BoardReservationPanel";
+import { WeeklyStarBoard } from "@/components/tournament/WeeklyStarBoard";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { PlayerAvatar, PlayerIdentity } from "@/components/ui/PlayerIdentity";
@@ -50,6 +57,7 @@ type MatchRow = MatchSummary & {
   stage: "group" | "knockout";
   round_number: number;
   match_number: number;
+  updated_at: string;
 };
 
 export default async function TournamentDetailPage({
@@ -91,7 +99,8 @@ export default async function TournamentDetailPage({
     { data: registration },
     { data: savedTeams },
     { data: boards },
-    { data: reservations }
+    { data: reservations },
+    { data: weeklyStarOverrides }
   ] = await Promise.all([
     supabase
       .from("tournament_participants")
@@ -129,7 +138,12 @@ export default async function TournamentDetailPage({
       .select("*")
       .eq("tournament_id", id)
       .eq("status", "active")
-      .order("reserved_start_at")
+      .order("reserved_start_at"),
+    admin
+      .from("tournament_weekly_stars")
+      .select("week_start, user_id, reason")
+      .eq("tournament_id", id)
+      .order("week_start", { ascending: false })
   ]);
 
   const participantSeeds: ParticipantSeed[] = (participants || []).map((participant) => ({
@@ -261,6 +275,31 @@ export default async function TournamentDetailPage({
     participantById,
     participantDisplayNameById
   });
+  const weeklyStarIdentities = new Map<string, WeeklyStarIdentity>();
+  for (const [participantId, members] of participantMembersById) {
+    const participant = participantRowById.get(participantId);
+    const teamName = participant?.participant_type === "team"
+      ? participantDisplayNameById.get(participantId) || ""
+      : "";
+    for (const member of members) {
+      const profileRow = statProfileById.get(member.userId);
+      weeklyStarIdentities.set(member.userId, {
+        name: compactPlayerName(member.name) || member.name,
+        avatarUrl: profileRow?.avatar_url || null,
+        teamName
+      });
+    }
+  }
+  const weeklyStarEvaluation = evaluateWeeklyStars({
+    matches: matchRows,
+    participantMembersById,
+    identitiesByUserId: weeklyStarIdentities
+  });
+  const weeklyStars = mergeWeeklyStarOverrides({
+    evaluation: weeklyStarEvaluation,
+    overrides: (weeklyStarOverrides || []) as WeeklyStarOverride[],
+    identitiesByUserId: weeklyStarIdentities
+  });
   const standingPodiumRows = standings.slice(0, 3).map((row, index) => ({
     row,
     rank: index + 1,
@@ -334,6 +373,8 @@ export default async function TournamentDetailPage({
           </div>
         }
       />
+
+      <WeeklyStarBoard stars={weeklyStars} tournamentStartAt={tournamentData.tournament_start_at} />
 
       {showStandings || showGroups ? (
         <section className={cn("grid min-w-0 gap-4", showStandings && showGroups && "lg:grid-cols-[1.1fr_0.9fr]")}>
