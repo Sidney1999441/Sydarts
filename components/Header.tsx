@@ -3,7 +3,6 @@ import {
   CalendarDays,
   Gauge,
   HelpCircle,
-  Home,
   LogIn,
   LogOut,
   Monitor,
@@ -21,8 +20,7 @@ import { APP_VERSION } from "@/lib/version";
 import type { Profile } from "@/types/domain";
 
 const primaryNav = [
-  { href: "/", label: "首页", icon: Home },
-  { href: "/tournaments", label: "赛事", icon: CalendarDays },
+  { href: "/", label: "赛事", icon: CalendarDays },
   { href: "/scorer", label: "计分", icon: Gauge },
   { href: "/display", label: "大屏", icon: Monitor },
   { href: "/profile", label: "个人", icon: UserRound },
@@ -42,16 +40,16 @@ export function Header({
 }) {
   const displayName = profile?.display_name || userEmail;
   const authedNav = userEmail
-    ? [primaryNav[0], primaryNav[1], primaryNav[2], primaryNav[3], teamNavItem, primaryNav[4], primaryNav[5]]
+    ? [primaryNav[0], primaryNav[1], primaryNav[2], teamNavItem, primaryNav[3], primaryNav[4]]
     : primaryNav;
   const nav = profile?.role === "admin"
     ? [...authedNav, { href: "/admin", label: "后台", icon: Shield }]
     : authedNav;
   const dockNav = profile?.role === "admin"
-    ? [primaryNav[1], primaryNav[2], primaryNav[4], { href: "/admin", label: "后台", icon: Shield }, primaryNav[5]]
+    ? [primaryNav[0], primaryNav[1], primaryNav[3], { href: "/admin", label: "后台", icon: Shield }, primaryNav[4]]
     : userEmail
-      ? [primaryNav[1], primaryNav[2], teamNavItem, primaryNav[4], primaryNav[5]]
-      : [primaryNav[1], primaryNav[2], primaryNav[4], primaryNav[5]];
+      ? [primaryNav[0], primaryNav[1], teamNavItem, primaryNav[3], primaryNav[4]]
+      : [primaryNav[0], primaryNav[1], primaryNav[3], primaryNav[4]];
 
   return (
     <>

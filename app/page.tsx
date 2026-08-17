@@ -1,15 +1,10 @@
 import Link from "next/link";
 import {
   ArrowRight,
-  BarChart3,
   CalendarDays,
   Clock3,
-  Gauge,
   IdCard,
-  MapPin,
-  Monitor,
-  ShieldCheck,
-  Trophy
+  MapPin
 } from "lucide-react";
 import { SetupNotice } from "@/components/SetupNotice";
 import { TournamentCard } from "@/components/TournamentCard";
@@ -29,9 +24,7 @@ import { getMatchStatusLabel, isUnplayedMatch } from "@/lib/matches/status";
 import { formatUserDisplayName, isOpaqueIdentifier } from "@/lib/scorer/display-names";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { defaultSiteTheme } from "@/lib/theme";
 import { cn, formatDateTime } from "@/lib/utils";
-import { APP_VERSION } from "@/lib/version";
 import type {
   MatchBoardReservation,
   MatchDartMode,
@@ -45,28 +38,21 @@ export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
   const { user, profile } = await getCurrentUserAndProfile();
-  const platformName = defaultSiteTheme.platformName;
 
   if (!hasSupabaseEnv()) {
-    return (
-      <div className="grid gap-5">
-        <SetupNotice />
-        <Hero platformName={platformName} isAdmin={profile?.role === "admin"} />
-      </div>
-    );
+    return <SetupNotice />;
   }
 
   const supabase = await createSupabaseServerClient();
   const { data: tournaments } = await supabase
     .from("tournaments")
     .select("*")
-    .in("status", ["registration_open", "in_progress"])
-    .order("tournament_start_at", { ascending: true })
-    .limit(6);
+    .neq("status", "draft")
+    .order("tournament_start_at", { ascending: false });
 
   const weeklySchedule = user ? await loadWeeklySchedule(supabase, user.id, profile?.role === "admin") : null;
 
-  const activeTournaments = tournaments || [];
+  const publishedTournaments = sortTournamentsForWorkspace((tournaments || []) as Tournament[]);
   const needsRealName = Boolean(user && (!profile?.real_name || !profile?.id_card_number));
 
   return (
@@ -75,27 +61,29 @@ export default async function HomePage() {
 
       {needsRealName ? <RealNamePrompt /> : null}
 
-      <Hero platformName={platformName} isAdmin={profile?.role === "admin"} />
-
-      <section className="grid gap-3 md:grid-cols-3">
-        <MiniMetric label="用户" value={profile?.display_name || "访客"} />
-        <MiniMetric label="报名中" value={activeTournaments.filter((item) => item.status === "registration_open").length} />
-        <MiniMetric label="进行中" value={activeTournaments.filter((item) => item.status === "in_progress").length} />
-      </section>
-
-      <section className="grid gap-3">
-        <div className="grid gap-3">
-          <SectionTitle title="赛事" href="/tournaments" />
-          <div className="grid gap-3 md:grid-cols-2">
-            {activeTournaments.map((tournament) => (
-              <TournamentCard key={tournament.id} tournament={tournament as Tournament} />
-            ))}
-            {activeTournaments.length === 0 ? (
-              <Card>
-                <p className="text-sm text-muted">暂无开放赛事。</p>
-              </Card>
-            ) : null}
+      <section id="tournaments" className="scroll-mt-24 grid gap-3">
+        <div className="flex flex-wrap items-end justify-between gap-3 border-b border-wire pb-3">
+          <div>
+            <div className="flex items-center gap-2 text-xs font-black uppercase text-board">
+              <CalendarDays className="h-4 w-4" aria-hidden />
+              CODL Tournaments
+            </div>
+            <h2 className="mt-1 text-2xl font-black">选择赛事</h2>
+            <p className="mt-1 text-sm font-semibold text-muted">查看排名、赛程、战报和赛事详情。</p>
           </div>
+          <span className="rounded-full bg-field px-3 py-1.5 text-xs font-black text-muted">
+            共 {publishedTournaments.length} 项
+          </span>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {publishedTournaments.map((tournament) => (
+            <TournamentCard key={tournament.id} tournament={tournament} />
+          ))}
+          {publishedTournaments.length === 0 ? (
+            <Card>
+              <p className="text-sm text-muted">暂无已发布赛事。</p>
+            </Card>
+          ) : null}
         </div>
       </section>
     </div>
@@ -146,6 +134,7 @@ type WeeklyScheduleMatch = {
   match: HomeMatchRow;
   tournament: Tournament;
   dartMode: MatchDartMode;
+  blocksDartModes?: MatchDartMode[];
   participantAName: string;
   participantBName: string;
   participantAAvatarUrl: string | null;
@@ -209,12 +198,13 @@ async function loadWeeklySchedule(
 
   const myParticipants = uniqueById([...(directParticipants || []), ...((teamParticipantsResult.data || []) as HomeParticipantRow[])]) as HomeParticipantRow[];
   const myParticipantIds = myParticipants.map((participant) => participant.id);
+  const myTournamentIds = [...new Set(myParticipants.map((participant) => participant.tournament_id).filter(Boolean))] as string[];
 
-  if (myParticipantIds.length === 0) {
+  if (myParticipantIds.length === 0 || myTournamentIds.length === 0) {
     return emptySchedule();
   }
 
-  const [matchesAsA, matchesAsB] = await Promise.all([
+  const [matchesAsA, matchesAsB, allTournamentMatchesResult] = await Promise.all([
     supabase
       .from("matches")
       .select("*")
@@ -228,16 +218,24 @@ async function loadWeeklySchedule(
       .in("participant_b_id", myParticipantIds)
       .in("status", visibleMatchStatuses)
       .order("round_number")
+      .order("match_number"),
+    supabase
+      .from("matches")
+      .select("*")
+      .in("tournament_id", myTournamentIds)
+      .in("status", visibleMatchStatuses)
+      .order("round_number")
       .order("match_number")
   ]);
 
   const matchRows = uniqueById([...(matchesAsA.data || []), ...(matchesAsB.data || [])]) as HomeMatchRow[];
-  const tournamentIds = [...new Set(matchRows.map((match) => match.tournament_id).filter(Boolean))] as string[];
+  const tournamentMatchRows = uniqueById(allTournamentMatchesResult.data || []) as HomeMatchRow[];
+  const tournamentIds = myTournamentIds;
   const allParticipantIds = [
-    ...new Set(matchRows.flatMap((match) => [match.participant_a_id, match.participant_b_id]).filter(Boolean))
+    ...new Set([...matchRows.flatMap((match) => [match.participant_a_id, match.participant_b_id]), ...myParticipantIds].filter(Boolean))
   ] as string[];
 
-  if (tournamentIds.length === 0 || allParticipantIds.length === 0) {
+  if (tournamentIds.length === 0) {
     return emptySchedule();
   }
 
@@ -361,14 +359,30 @@ async function loadWeeklySchedule(
   const items: WeeklyScheduleMatch[] = [];
   const nextWeekSelectedIds = new Set<string>();
   const nextWeekItems: WeeklyScheduleMatch[] = [];
+  const myParticipantsByTournamentId = new Map<string, HomeParticipantRow[]>();
+  for (const participant of myParticipants) {
+    const list = myParticipantsByTournamentId.get(participant.tournament_id) || [];
+    list.push(participant);
+    myParticipantsByTournamentId.set(participant.tournament_id, list);
+  }
   const sortedMatches = matchRows
     .filter((match) =>
       tournamentById.has(match.tournament_id) &&
       (isUnplayedMatch(match.status) || match.status === "completed" || match.status === "bye")
     )
     .sort(compareHomeMatches);
+  const sortedTournamentMatches = tournamentMatchRows
+    .filter((match) =>
+      tournamentById.has(match.tournament_id) &&
+      (isUnplayedMatch(match.status) || match.status === "completed" || match.status === "bye")
+    )
+    .sort(compareHomeMatches);
 
-  const buildScheduleItem = (match: HomeMatchRow, isOverdue: boolean): WeeklyScheduleMatch | null => {
+  const buildScheduleItem = (
+    match: HomeMatchRow,
+    isOverdue: boolean,
+    blocksDartModes?: MatchDartMode[]
+  ): WeeklyScheduleMatch | null => {
     const tournament = tournamentById.get(match.tournament_id);
     if (!tournament) return null;
     const currentReservation = reservationByMatchId.get(match.id) || null;
@@ -382,6 +396,7 @@ async function loadWeeklySchedule(
       match,
       tournament,
       dartMode: match.dart_mode === "soft" ? "soft" : "steel",
+      blocksDartModes,
       participantAName: getParticipantDisplayName(participantDisplayNameById, participantRowById, match.participant_a_id),
       participantBName: getParticipantDisplayName(participantDisplayNameById, participantRowById, match.participant_b_id),
       participantAAvatarUrl: match.participant_a_id ? participantAvatarById.get(match.participant_a_id) || null : null,
@@ -397,17 +412,17 @@ async function loadWeeklySchedule(
     };
   };
 
-  const addItem = (match: HomeMatchRow, isOverdue: boolean) => {
+  const addItem = (match: HomeMatchRow, isOverdue: boolean, blocksDartModes?: MatchDartMode[]) => {
     if (selectedIds.has(match.id)) return;
-    const item = buildScheduleItem(match, isOverdue);
+    const item = buildScheduleItem(match, isOverdue, blocksDartModes);
     if (!item) return;
     items.push(item);
     selectedIds.add(match.id);
   };
 
-  const addNextWeekItem = (match: HomeMatchRow) => {
+  const addNextWeekItem = (match: HomeMatchRow, blocksDartModes?: MatchDartMode[]) => {
     if (selectedIds.has(match.id) || nextWeekSelectedIds.has(match.id)) return;
-    const item = buildScheduleItem(match, false);
+    const item = buildScheduleItem(match, false, blocksDartModes);
     if (!item) return;
     nextWeekItems.push(item);
     nextWeekSelectedIds.add(match.id);
@@ -428,10 +443,22 @@ async function loadWeeklySchedule(
     }
   }
 
+  for (const tournament of activeTournaments) {
+    for (const participant of myParticipantsByTournamentId.get(tournament.id) || []) {
+      const byeMatch = buildSyntheticByeMatch({
+        tournament,
+        participant,
+        weekStart,
+        tournamentMatches: sortedTournamentMatches
+      });
+      if (byeMatch) addItem(byeMatch, false, getTournamentScheduleDartModes(tournament));
+    }
+  }
+
   const selectedCurrentWeekModeKeys = new Set(
     items
       .filter((item) => !item.isOverdue)
-      .map((item) => `${item.match.tournament_id}:${item.dartMode}`)
+      .flatMap((item) => (item.blocksDartModes || [item.dartMode]).map((dartMode) => `${item.match.tournament_id}:${dartMode}`))
   );
 
   for (const tournament of activeTournaments) {
@@ -443,6 +470,7 @@ async function loadWeeklySchedule(
           match.tournament_id === tournament.id &&
           (match.dart_mode === "soft" ? "soft" : "steel") === dartMode &&
           isUnplayedMatch(match.status) &&
+          isTournamentRoundInWeek(match, tournament, weekStart) &&
           !selectedIds.has(match.id) &&
           !isMatchOverdue(match, tournament, reservationByMatchId.get(match.id) || null, weekStart)
       );
@@ -455,6 +483,22 @@ async function loadWeeklySchedule(
 
   const selectedNextWeekModeKeys = new Set<string>();
   for (const tournament of activeTournaments) {
+    for (const participant of myParticipantsByTournamentId.get(tournament.id) || []) {
+      const byeMatch = buildSyntheticByeMatch({
+        tournament,
+        participant,
+        weekStart: weekEnd,
+        tournamentMatches: sortedTournamentMatches
+      });
+      if (!byeMatch) continue;
+      addNextWeekItem(byeMatch, getTournamentScheduleDartModes(tournament));
+      for (const dartMode of getTournamentScheduleDartModes(tournament)) {
+        selectedNextWeekModeKeys.add(`${tournament.id}:${dartMode}`);
+      }
+    }
+  }
+
+  for (const tournament of activeTournaments) {
     for (const dartMode of ["soft", "steel"] as MatchDartMode[]) {
       const key = `${tournament.id}:${dartMode}`;
       if (selectedNextWeekModeKeys.has(key)) continue;
@@ -463,6 +507,7 @@ async function loadWeeklySchedule(
           match.tournament_id === tournament.id &&
           (match.dart_mode === "soft" ? "soft" : "steel") === dartMode &&
           isUnplayedMatch(match.status) &&
+          isTournamentRoundInWeek(match, tournament, weekEnd) &&
           !selectedIds.has(match.id) &&
           !isMatchOverdue(match, tournament, reservationByMatchId.get(match.id) || null, weekStart)
       );
@@ -516,11 +561,11 @@ function WeeklySchedulePanel({
         <div>
           <div className="flex items-center gap-2 text-xs font-black uppercase text-board">
             <Clock3 className="h-4 w-4" aria-hidden />
-            Weekly Matches
+            Match Workspace
           </div>
-          <h2 className="mt-1 text-xl font-black">本周赛程</h2>
+          <h1 className="mt-1 text-2xl font-black">赛事工作区</h1>
           <p className="mt-1 text-sm font-semibold leading-6 text-muted">
-            {schedule ? `${schedule.weekLabel} · 本周默认安排一软一硬，未完成补赛会标黄保留。` : "登录后自动显示你本周要处理的比赛。"}
+            {schedule ? `${schedule.weekLabel} · 预约、布阵、计分和赛果都从这里直接处理。` : "登录后自动显示你本周要处理的比赛。"}
           </p>
         </div>
         {schedule?.overdueCount ? (
@@ -545,7 +590,7 @@ function WeeklySchedulePanel({
         </div>
       ) : (
         <p className="mt-4 rounded-lg bg-surface p-3 text-sm font-semibold text-muted">
-          本周暂无待处理比赛。可以先去赛事页查看完整排名和历史赛程。
+          本周暂无待处理比赛。可以继续向下选择赛事，查看完整排名和历史赛程。
         </p>
       )}
 
@@ -595,15 +640,19 @@ function WeeklyScheduleMatchCard({ item }: { item: WeeklyScheduleMatch }) {
       <div className="min-w-0">
         <div className="truncate text-sm font-black text-board">{item.tournament.name}</div>
         <div className="mt-1 text-base font-black">
-          第 {item.match.round_number} 轮 · 第 {item.match.match_number} 场
+          {isBye ? `第 ${item.match.round_number} 轮 · 轮空` : `第 ${item.match.round_number} 轮 · 第 ${item.match.match_number} 场`}
         </div>
-        <div className="mt-1 text-xs font-bold text-muted">
-          {getCompactMatchRulesSummary({
-            dartMode: item.dartMode,
-            gameVariant: item.match.game_variant,
-            legRules: item.match.leg_rules
-          })}
-        </div>
+        {!isBye ? (
+          <div className="mt-1 text-xs font-bold text-muted">
+            {getCompactMatchRulesSummary({
+              dartMode: item.dartMode,
+              gameVariant: item.match.game_variant,
+              legRules: item.match.leg_rules
+            })}
+          </div>
+        ) : (
+          <div className="mt-1 text-xs font-bold text-board">本周轮空，不占用机台和计分名额。</div>
+        )}
       </div>
 
       <div className="grid min-w-0 gap-2 sm:grid-cols-2">
@@ -704,7 +753,7 @@ function NextWeekOpponentPanel({ schedule }: { schedule: WeeklyScheduleData }) {
           <p className="text-xs font-semibold text-muted">{schedule.nextWeekLabel} · 方便提前约时间和准备布阵。</p>
         </div>
         <Link
-          href="/tournaments"
+          href="/#tournaments"
           className="inline-flex min-h-9 touch-manipulation items-center justify-center rounded-lg border border-wire bg-surface px-3 text-xs font-black text-board"
         >
           查看赛事
@@ -735,7 +784,11 @@ function NextWeekOpponentCard({ item }: { item: WeeklyScheduleMatch }) {
         className="min-w-0"
         name={opponent.name}
         avatarUrl={opponent.avatarUrl}
-        subtitle={`${item.tournament.name} · 第 ${item.match.match_number} 场`}
+        subtitle={
+          item.match.status === "bye"
+            ? `${item.tournament.name} · 下周轮空`
+            : `${item.tournament.name} · 第 ${item.match.match_number} 场`
+        }
         size="sm"
         compact
       />
@@ -803,6 +856,12 @@ function getMatchWinnerName(item: WeeklyScheduleMatch) {
 }
 
 function getOpponentIdentity(item: WeeklyScheduleMatch) {
+  if (item.match.status === "bye") {
+    return {
+      name: "轮空",
+      avatarUrl: null
+    };
+  }
   if (item.participantAIsMine && !item.participantBIsMine) {
     return {
       name: item.participantBName,
@@ -821,6 +880,83 @@ function getOpponentIdentity(item: WeeklyScheduleMatch) {
   };
 }
 
+function buildSyntheticByeMatch({
+  tournament,
+  participant,
+  weekStart,
+  tournamentMatches
+}: {
+  tournament: Tournament;
+  participant: HomeParticipantRow;
+  weekStart: Date;
+  tournamentMatches: HomeMatchRow[];
+}) {
+  if (tournament.format !== "round_robin" && tournament.format !== "league_playoff") return null;
+
+  const weekRound = getTournamentExpectedWeekRound(tournament, weekStart);
+  if (weekRound < 1) return null;
+
+  const roundMatches = tournamentMatches.filter(
+    (match) =>
+      match.tournament_id === tournament.id &&
+      match.stage === "group" &&
+      getMatchLeagueWeekRound(match, tournament) === weekRound
+  );
+  if (roundMatches.length === 0) return null;
+
+  const participantHasRoundMatch = roundMatches.some(
+    (match) => match.participant_a_id === participant.id || match.participant_b_id === participant.id
+  );
+  if (participantHasRoundMatch) return null;
+
+  const firstRoundMatch = roundMatches[0];
+  const dartMode = getTournamentScheduleDartModes(tournament)[0] || "steel";
+
+  return {
+    id: `bye:${tournament.id}:${participant.id}:${weekRound}`,
+    tournament_id: tournament.id,
+    stage: "group" as const,
+    round_number: firstRoundMatch?.round_number || weekRound,
+    match_number: 0,
+    scheduled_at: null,
+    created_at: null,
+    updated_at: null,
+    participant_a_id: participant.id,
+    participant_b_id: null,
+    winner_participant_id: participant.id,
+    score_a: 0,
+    score_b: 0,
+    status: "bye" as const,
+    dart_mode: dartMode,
+    game_variant: null,
+    leg_rules: null,
+    match_finish_mode: null,
+    first_throw_mode: null,
+    details: {
+      syntheticBye: true,
+      leagueWeekRound: weekRound
+    }
+  } satisfies HomeMatchRow;
+}
+
+function getTournamentScheduleDartModes(tournament: Tournament): MatchDartMode[] {
+  if (tournament.dart_mode === "mixed_alternating") return ["soft", "steel"];
+  return [tournament.dart_mode === "soft" ? "soft" : "steel"];
+}
+
+function getTournamentExpectedWeekRound(tournament: Tournament, weekStart: Date) {
+  if (!tournament.tournament_start_at) return 0;
+  const tournamentWeekStart = startOfLocalWeek(new Date(tournament.tournament_start_at));
+  if (weekStart < tournamentWeekStart) return 0;
+  return Math.floor((weekStart.getTime() - tournamentWeekStart.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1;
+}
+
+function getMatchLeagueWeekRound(match: HomeMatchRow, tournament: Tournament) {
+  return tournament.dart_mode === "mixed_alternating"
+    ? Math.max(1, Math.ceil(match.round_number / 2))
+    : match.round_number;
+}
+
 function isMatchOverdue(
   match: HomeMatchRow,
   tournament: Tournament,
@@ -833,17 +969,14 @@ function isMatchOverdue(
 
   const tournamentWeekStart = startOfLocalWeek(new Date(tournament.tournament_start_at));
   if (weekStart <= tournamentWeekStart) return false;
-  const expectedRound = Math.floor((weekStart.getTime() - tournamentWeekStart.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1;
-  return match.round_number < expectedRound;
+  const expectedRound = getTournamentExpectedWeekRound(tournament, weekStart);
+  return getMatchLeagueWeekRound(match, tournament) < expectedRound;
 }
 
 function isTournamentRoundInWeek(match: HomeMatchRow, tournament: Tournament, weekStart: Date) {
-  if (!tournament.tournament_start_at) return false;
-  const tournamentWeekStart = startOfLocalWeek(new Date(tournament.tournament_start_at));
-  if (weekStart < tournamentWeekStart) return false;
-  const expectedRound =
-    Math.floor((weekStart.getTime() - tournamentWeekStart.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1;
-  return match.round_number === expectedRound;
+  const expectedRound = getTournamentExpectedWeekRound(tournament, weekStart);
+  if (expectedRound < 1) return false;
+  return getMatchLeagueWeekRound(match, tournament) === expectedRound;
 }
 
 function startOfLocalWeek(value: Date) {
@@ -938,80 +1071,18 @@ function RealNamePrompt() {
   );
 }
 
-function Hero({ platformName, isAdmin }: { platformName: string; isAdmin: boolean }) {
-  return (
-    <section className="codl-hero relative overflow-hidden rounded-lg border border-wire bg-surface text-ink shadow-[0_24px_70px_rgb(17_24_39/0.10)]">
-      <div className="codl-hero-art" aria-hidden />
-      <div className="codl-hero-content relative grid min-h-[360px] content-between gap-8 p-5 sm:p-6 lg:p-8">
-        <div className="max-w-2xl">
-          <div className="codl-page-kicker">
-            <span className="codl-rule" aria-hidden />
-            Caliburn Office Darts League 2026
-            <span className="ml-2 rounded-full border border-board/25 bg-board/10 px-2 py-0.5 text-[11px] text-board">
-              {APP_VERSION}
-            </span>
-          </div>
-          <img
-            src="/codl/codl-logo-light.png"
-            alt={`${platformName} logo`}
-            className="codl-hero-logo mt-4 h-auto w-full max-w-[560px] object-contain"
-            style={{ height: "auto", maxWidth: "min(560px, 100%)", width: "100%" }}
-          />
-          <h1 className="sr-only">{platformName}</h1>
-          <p className="mt-3 max-w-xl text-base font-bold text-muted sm:text-lg">
-            软镖、硬镖、团队联赛、个人数据和现场计分全部集中在一个赛事系统里。
-          </p>
-        </div>
-        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-          <HeroAction href="/tournaments" icon={<CalendarDays className="h-5 w-5" />} label="赛事" />
-          <HeroAction href="/scorer" icon={<Gauge className="h-5 w-5" />} label="计分" />
-          <HeroAction href="/display" icon={<Monitor className="h-5 w-5" />} label="大屏" />
-          {isAdmin ? (
-            <HeroAction href="/admin" icon={<ShieldCheck className="h-5 w-5" />} label="后台" />
-          ) : (
-            <HeroAction href="/profile" icon={<BarChart3 className="h-5 w-5" />} label="数据" />
-          )}
-        </div>
-      </div>
-    </section>
-  );
-}
+function sortTournamentsForWorkspace(tournaments: Tournament[]) {
+  const statusWeight: Record<Tournament["status"], number> = {
+    in_progress: 0,
+    registration_open: 1,
+    registration_closed: 2,
+    completed: 3,
+    draft: 4
+  };
 
-function HeroAction({ href, icon, label }: { href: string; icon: React.ReactNode; label: string }) {
-  return (
-    <Link
-      href={href}
-      className="flex min-h-16 touch-manipulation items-center justify-between gap-3 rounded-lg border border-primary/10 bg-primary px-4 text-sm font-black text-white shadow-[0_14px_30px_rgb(32_32_32/0.12)] transition-colors duration-75 hover:bg-board active:bg-board"
-    >
-      <span className="flex items-center gap-2">
-        {icon}
-        {label}
-      </span>
-      <ArrowRight className="h-4 w-4" aria-hidden />
-    </Link>
-  );
-}
-
-function MiniMetric({ label, value }: { label: string; value: string | number }) {
-  return (
-    <div className="rounded-lg border border-wire bg-surface/95 p-4 shadow-[0_14px_34px_rgb(17_24_39/0.05)]">
-      <div className="text-xs font-black uppercase text-muted">{label}</div>
-      <div className="mt-1 truncate text-2xl font-black">{value}</div>
-    </div>
-  );
-}
-
-function SectionTitle({ title, href }: { title: string; href: string }) {
-  return (
-    <div className="flex items-center justify-between">
-      <h2 className="flex items-center gap-3 text-xl font-black">
-        <span className="h-4 w-4 rounded-full bg-board" aria-hidden />
-        {title}
-      </h2>
-      <Link className="inline-flex min-h-11 touch-manipulation items-center gap-1 rounded-lg px-3 text-sm font-black text-board hover:bg-board/10" href={href}>
-        全部
-        <ArrowRight className="h-4 w-4" aria-hidden />
-      </Link>
-    </div>
-  );
+  return [...tournaments].sort((a, b) => {
+    const statusDelta = statusWeight[a.status] - statusWeight[b.status];
+    if (statusDelta !== 0) return statusDelta;
+    return new Date(b.tournament_start_at).getTime() - new Date(a.tournament_start_at).getTime();
+  });
 }
