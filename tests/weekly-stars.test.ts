@@ -37,7 +37,14 @@ describe("weekly tournament stars", () => {
           participant_b_id: "p2",
           winner_participant_id: "p1",
           dart_mode: "steel",
-          details: { userStats: { u1: { averagePer3Darts: 72 }, u2: { averagePer3Darts: 68 } } }
+          details: {
+            legResults: [{
+              legNumber: 1,
+              dartMode: "steel",
+              winnerParticipantId: "p1",
+              userStats: { u1: { averagePer3Darts: 72 }, u2: { averagePer3Darts: 68 } }
+            }]
+          }
         },
         {
           id: "current-week",
@@ -47,7 +54,14 @@ describe("weekly tournament stars", () => {
           participant_b_id: "p2",
           winner_participant_id: "p2",
           dart_mode: "steel",
-          details: { userStats: { u1: { averagePer3Darts: 80 }, u2: { averagePer3Darts: 82 } } }
+          details: {
+            legResults: [{
+              legNumber: 1,
+              dartMode: "steel",
+              winnerParticipantId: "p2",
+              userStats: { u1: { averagePer3Darts: 80 }, u2: { averagePer3Darts: 82 } }
+            }]
+          }
         }
       ]
     });
@@ -71,10 +85,16 @@ describe("weekly tournament stars", () => {
           winner_participant_id: "p2",
           dart_mode: "soft",
           details: {
-            userStats: {
-              u1: { averageMpr: 3.2, countWhiteHorse: 1 },
-              u2: { averageScore: 75, countHatTrick: 2 }
-            }
+            legResults: [{
+              legNumber: 1,
+              dartMode: "soft",
+              gameVariant: "soft_cricket",
+              winnerParticipantId: "p2",
+              userStats: {
+                u1: { averageMpr: 3.2, countWhiteHorse: 1 },
+                u2: { averageScore: 75, countHatTrick: 2 }
+              }
+            }]
           }
         }
       ]
@@ -99,7 +119,14 @@ describe("weekly tournament stars", () => {
           participant_b_id: "p2",
           winner_participant_id: "p1",
           dart_mode: "steel",
-          details: { userStats: { u1: { averagePer3Darts: 75 }, u2: { averagePer3Darts: 91, count180: 1 } } }
+          details: {
+            legResults: [{
+              legNumber: 1,
+              dartMode: "steel",
+              winnerParticipantId: "p1",
+              userStats: { u1: { averagePer3Darts: 75 }, u2: { averagePer3Darts: 91, count180: 1 } }
+            }]
+          }
         }
       ]
     });
@@ -113,5 +140,32 @@ describe("weekly tournament stars", () => {
 
     expect(merged[0]).toMatchObject({ userId: "u2", source: "manual", reason: "关键局表现突出" });
     expect(merged[0].metrics.bestAverage).toBe(91);
+  });
+
+  it("derives a hard-dart weekly peak from a single leg instead of the match summary", () => {
+    const evaluation = evaluateWeeklyStars({
+      now: new Date("2026-08-17T04:00:00.000Z"),
+      participantMembersById: members,
+      identitiesByUserId: identities,
+      turnsByMatchId: new Map([
+        ["m-turns", [
+          { participantId: "p1", userId: "u1", legNumber: 1, score: 60, darts: 3, remainingBefore: 501, remainingAfter: 441, isBust: false, isCheckout: false },
+          { participantId: "p1", userId: "u1", legNumber: 2, score: 120, darts: 3, remainingBefore: 501, remainingAfter: 381, isBust: false, isCheckout: false },
+          { participantId: "p2", userId: "u2", legNumber: 1, score: 45, darts: 3, remainingBefore: 501, remainingAfter: 456, isBust: false, isCheckout: false }
+        ]]
+      ]),
+      matches: [{
+        id: "m-turns",
+        status: "completed",
+        updated_at: "2026-08-13T12:00:00.000Z",
+        participant_a_id: "p1",
+        participant_b_id: "p2",
+        winner_participant_id: "p1",
+        dart_mode: "steel",
+        details: { userStats: { u1: { averagePer3Darts: 90 } } }
+      }]
+    });
+
+    expect(evaluation.automaticStars[0].metrics.bestAverage).toBe(120);
   });
 });

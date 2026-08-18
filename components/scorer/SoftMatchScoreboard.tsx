@@ -7,8 +7,10 @@ import { getLegRuleLabel } from "@/lib/darts/variants";
 import {
   compactManualStats,
   getSoftStatFields,
+  isValidMpr,
   isSoftHighScoreVariant,
   mergeManualStats,
+  MPR_MAX_EXCLUSIVE,
   ppdToPpr,
   pprToPpd,
   type ManualMatchStats
@@ -458,6 +460,12 @@ export function SoftMatchScoreboard({
     const nextScoreA = scoreA + (legWinner === participantA.id ? 1 : 0);
     const nextScoreB = scoreB + (legWinner === participantB.id ? 1 : 0);
     const entryUserStats = buildEntryUserStats(sideScoreA, sideScoreB);
+    const invalidMprUserId = Object.entries(entryUserStats).find(([, stats]) => !isValidMpr(stats.averageMpr))?.[0];
+    if (invalidMprUserId) {
+      const playerName = compactPlayerName(memberNames.get(invalidMprUserId)) || `选手 ${invalidMprUserId.slice(0, 6)}`;
+      setMessage(`${playerName} 的 MPR 必须小于 10，请检查是否漏填小数点（例如 2.88 不能填成 288）。`);
+      return;
+    }
     const nextEntries = [
       ...legEntries,
       {
@@ -832,11 +840,15 @@ export function SoftMatchScoreboard({
                         className="form-input"
                         inputMode={field.integer ? "numeric" : "decimal"}
                         min={0}
+                        max={field.key === "averageMpr" ? MPR_MAX_EXCLUSIVE - 0.01 : undefined}
                         step={field.step || "1"}
                         type="number"
                         value={legStats[player.userId]?.[field.key] ?? ""}
                         onChange={(event) => updateStat(player.userId, field.key, event.target.value)}
                       />
+                      {field.key === "averageMpr" ? (
+                        <span className="text-[11px] font-semibold text-muted">必须小于 10，注意填写小数点。</span>
+                      ) : null}
                     </label>
                   )
                 )}

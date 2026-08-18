@@ -18,7 +18,8 @@ import {
   getMatchGameVariant,
   getMatchRulesSummary
 } from "@/lib/darts/variants";
-import { getSoftStatFields, mergeManualStats, ppdToPpr, pprToPpd } from "@/lib/darts/soft-stats";
+import { buildLegUserStatsFromTurns } from "@/lib/darts/leg-stats";
+import { getSoftStatFields, isValidMpr, mergeManualStats, ppdToPpr, pprToPpd } from "@/lib/darts/soft-stats";
 
 const players = [
   { id: "u1", name: "A", rating: 1600 },
@@ -568,6 +569,27 @@ describe("team-first tournament algorithms", () => {
   it("converts soft dart PPD to PPR for manual entry helpers", () => {
     expect(ppdToPpr(25.47)).toBe(76.41);
     expect(pprToPpd(76.41)).toBe(25.47);
+  });
+
+  it("rejects implausible MPR values caused by a missing decimal point", () => {
+    expect(isValidMpr(2.88)).toBe(true);
+    expect(isValidMpr(9.99)).toBe(true);
+    expect(isValidMpr(10)).toBe(false);
+    expect(isValidMpr(288)).toBe(false);
+  });
+
+  it("calculates hard-dart averages independently for each player and leg", () => {
+    const legStats = buildLegUserStatsFromTurns([
+      { participantId: "p1", userId: "u1", legNumber: 1, score: 60, darts: 3, remainingBefore: 501, remainingAfter: 441, isBust: false, isCheckout: false },
+      { participantId: "p1", userId: "u1", legNumber: 1, score: 41, darts: 3, remainingBefore: 441, remainingAfter: 400, isBust: false, isCheckout: false },
+      { participantId: "p1", userId: "u1", legNumber: 2, score: 180, darts: 3, remainingBefore: 501, remainingAfter: 321, isBust: false, isCheckout: false },
+      { participantId: "p2", userId: "u2", legNumber: 1, score: 45, darts: 3, remainingBefore: 501, remainingAfter: 456, isBust: false, isCheckout: false }
+    ]);
+
+    expect(legStats).toHaveLength(2);
+    expect(legStats[0].userStats.u1.averagePer3Darts).toBe(50.5);
+    expect(legStats[1].userStats.u1.averagePer3Darts).toBe(180);
+    expect(legStats[1].userStats.u1.count180).toBe(1);
   });
 
   it("keeps new players in the entry rank until enough data exists", () => {

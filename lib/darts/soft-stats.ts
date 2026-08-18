@@ -29,6 +29,12 @@ export type ManualMatchStats = {
 
 export type ManualSoftStats = ManualMatchStats;
 
+export const MPR_MAX_EXCLUSIVE = 10;
+
+export function isValidMpr(value: number | null | undefined) {
+  return value === undefined || value === null || (Number.isFinite(value) && value >= 0 && value < MPR_MAX_EXCLUSIVE);
+}
+
 export type SoftStatField = {
   key: keyof ManualMatchStats;
   label: string;

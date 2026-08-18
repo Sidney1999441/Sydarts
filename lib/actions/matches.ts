@@ -6,7 +6,8 @@ import { z } from "zod";
 import { calculateDartStats, type ScoreTurn } from "@/lib/algorithms/scoring";
 import { updateUserRating } from "@/lib/algorithms/rating";
 import { requireAdmin, requireUser } from "@/lib/auth/guards";
-import { ppdToPpr } from "@/lib/darts/soft-stats";
+import { attachLegUserStatsFromTurns } from "@/lib/darts/leg-stats";
+import { isValidMpr, MPR_MAX_EXCLUSIVE, ppdToPpr } from "@/lib/darts/soft-stats";
 import { getLegStartingScore, resolveMatchLegRules } from "@/lib/darts/variants";
 import { mergeMatchLineupSubmission } from "@/lib/matches/lineups";
 import { hasSameResultSubmission } from "@/lib/results/submission";
@@ -26,7 +27,7 @@ export type MatchLineupActionState = {
 
 const manualStatsSchema = z.object({
   averageScore: z.number().min(0).optional(),
-  averageMpr: z.number().min(0).optional(),
+  averageMpr: z.number().min(0).lt(MPR_MAX_EXCLUSIVE, "MPR 必须小于 10，请检查是否漏填小数点。").optional(),
   countTon80: z.number().int().min(0).optional(),
   countHatTrick: z.number().int().min(0).optional(),
   highestCheckout: z.number().int().min(0).optional(),
@@ -938,6 +939,28 @@ function mergeManualStatsByUser(...buckets: ManualStatsById[]): ManualStatsById 
       mergeManualStatsForAction(buckets.map((bucket) => bucket[userId]).filter(Boolean))
     ]).filter(([, stats]) => Object.keys(stats as ManualSoftStats).length > 0)
   ) as ManualStatsById;
+}
+
+function overlayLegStatsOnSummary(summaryStats: ManualStatsById, legStats: ManualStatsById): ManualStatsById {
+  const userIds = [...new Set([...Object.keys(summaryStats), ...Object.keys(legStats)])];
+  return Object.fromEntries(
+    userIds
+      .map((userId) => [
+        userId,
+        compactManualStats({ ...(summaryStats[userId] || {}), ...(legStats[userId] || {}) })
+      ])
+      .filter(([, stats]) => Object.keys(stats as ManualSoftStats).length > 0)
+  ) as ManualStatsById;
+}
+
+function assertValidMprStats(...buckets: ManualStatsById[]) {
+  for (const bucket of buckets) {
+    for (const stats of Object.values(bucket)) {
+      if (!isValidMpr(stats.averageMpr)) {
+        throw new Error("MPR 必须小于 10，请检查是否漏填小数点；例如 2.88 不能填写为 288。");
+      }
+    }
+  }
 }
 
 function sumNumbers(values: Array<number | undefined>) {
@@ -1922,6 +1945,7 @@ export async function completeScoredMatchAction(payload: unknown) {
   }
   const dartMode = ((match.dart_mode || "steel") === "soft" ? "soft" : "steel") as MatchDartMode;
   const userStats = values.userStats as ManualStatsById;
+  assertValidMprStats(userStats);
   if (values.turns.length > 0) {
     assertTurnUsersInLineups({
       turns: values.turns,
@@ -1947,6 +1971,10 @@ export async function completeScoredMatchAction(payload: unknown) {
     fallbackUserIds: participantBUserIds,
     lineups: values.legLineups as MatchLegLineup[]
   });
+  const legResults =
+    dartMode === "steel"
+      ? attachLegUserStatsFromTurns(values.legResults as MatchLegResult[], values.turns)
+      : (values.legResults as MatchLegResult[]);
 
   const details = buildManualResultDetails({
     source: dartMode === "soft" ? "soft_scorer" : "scorer",
@@ -1954,7 +1982,7 @@ export async function completeScoredMatchAction(payload: unknown) {
     gameVariant: match.game_variant,
     legRules: (match.leg_rules || []) as MatchLegRule[],
     legLineups: values.legLineups as MatchLegLineup[],
-    legResults: values.legResults as MatchLegResult[],
+    legResults,
     submissionId: values.submissionId,
     participantStats:
       dartMode === "soft"
@@ -1991,7 +2019,7 @@ export async function completeScoredMatchAction(payload: unknown) {
     scoreA: values.scoreA,
     scoreB: values.scoreB,
     details,
-    legResults: values.legResults as MatchLegResult[],
+    legResults,
     turns: values.turns,
     ratingLogs: settlement.ratingLogs,
     statEvents: settlement.statEvents
@@ -2384,7 +2412,11 @@ export async function submitManualResultAction(formData: FormData) {
     allUserIds
   });
   const legUserStats = mergeManualStatsByUser(...legResults.map((result) => (result.userStats || {}) as ManualStatsById));
-  const userStats = mergeManualStatsByUser(summaryUserStats, legUserStats);
+  const userStats = overlayLegStatsOnSummary(summaryUserStats, legUserStats);
+  assertValidMprStats(
+    userStats,
+    ...legResults.map((result) => (result.userStats || {}) as ManualStatsById)
+  );
   const inferredScore = inferMatchScoreFromLegResults({
     legResults,
     participantAId: match.participant_a_id,
@@ -2667,7 +2699,11 @@ export async function adminUpdateMatchResultAction(formData: FormData) {
     allUserIds
   });
   const legUserStats = mergeManualStatsByUser(...legResults.map((result) => (result.userStats || {}) as ManualStatsById));
-  const userStats = mergeManualStatsByUser(summaryUserStats, legUserStats);
+  const userStats = overlayLegStatsOnSummary(summaryUserStats, legUserStats);
+  assertValidMprStats(
+    userStats,
+    ...legResults.map((result) => (result.userStats || {}) as ManualStatsById)
+  );
   const inferredScore = inferMatchScoreFromLegResults({
     legResults,
     participantAId: match.participant_a_id,

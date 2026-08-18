@@ -1,3 +1,5 @@
+import type { ScoreTurn } from "@/lib/algorithms/scoring";
+import { buildLegUserStatsFromTurns } from "@/lib/darts/leg-stats";
 import type { MatchDartMode } from "@/types/domain";
 
 const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1000;
@@ -63,6 +65,8 @@ type WeeklyStatEntry = {
   userId: string;
   dartMode: MatchDartMode;
   gameVariant?: string | number | null;
+  legNumber?: number;
+  isLegLevel: boolean;
   winnerParticipantId?: string | null;
   stats: Record<string, unknown>;
 };
@@ -71,11 +75,13 @@ export function evaluateWeeklyStars({
   matches,
   participantMembersById,
   identitiesByUserId,
+  turnsByMatchId = new Map<string, ScoreTurn[]>(),
   now = new Date()
 }: {
   matches: WeeklyStarMatch[];
   participantMembersById: Map<string, Array<{ userId: string }>>;
   identitiesByUserId: Map<string, WeeklyStarIdentity>;
+  turnsByMatchId?: Map<string, ScoreTurn[]>;
   now?: Date;
 }): WeeklyStarEvaluation {
   const currentWeekStart = getShanghaiWeekStart(now);
@@ -86,7 +92,7 @@ export function evaluateWeeklyStars({
     const weekStart = getShanghaiWeekStart(new Date(match.updated_at));
     if (weekStart >= currentWeekStart) continue;
 
-    const entries = readWeeklyStatEntries(match);
+    const entries = readWeeklyStatEntries(match, turnsByMatchId.get(match.id) || []);
     if (entries.length === 0) continue;
 
     const entriesByUserId = new Map<string, WeeklyStatEntry[]>();
@@ -107,8 +113,10 @@ export function evaluateWeeklyStars({
 
       for (const entry of userEntries) {
         const stats = entry.stats;
-        metrics.bestAverage = Math.max(metrics.bestAverage, statNumber(stats, ["averageScore", "averagePer3Darts"]));
-        metrics.bestMpr = Math.max(metrics.bestMpr, statNumber(stats, ["averageMpr"]));
+        if (entry.isLegLevel) {
+          metrics.bestAverage = Math.max(metrics.bestAverage, statNumber(stats, ["averageScore", "averagePer3Darts"]));
+          metrics.bestMpr = Math.max(metrics.bestMpr, statNumber(stats, ["averageMpr"]));
+        }
         metrics.count180 += statNumber(stats, ["count180", "countTon80"]);
         metrics.hats += statNumber(stats, ["countHatTrick"]);
         metrics.whiteHorse += statNumber(stats, ["countWhiteHorse"]);
@@ -290,13 +298,14 @@ export function getWeeklyStarHighlights(metrics: WeeklyStarMetrics) {
   return items.slice(0, 5);
 }
 
-function readWeeklyStatEntries(match: WeeklyStarMatch): WeeklyStatEntry[] {
+function readWeeklyStatEntries(match: WeeklyStarMatch, turns: ScoreTurn[]): WeeklyStatEntry[] {
   const details = asRecord(match.details);
   const legResults = Array.isArray(details?.legResults) ? details.legResults : [];
   const legEntries = legResults.flatMap((rawResult) => {
     const result = asRecord(rawResult);
     const userStats = asRecord(result?.userStats);
     if (!result || !userStats) return [];
+    const legNumber = Number(result.legNumber);
     const dartMode: MatchDartMode = result.dartMode === "soft" ? "soft" : "steel";
     return Object.entries(userStats).flatMap(([userId, rawStats]) => {
       const stats = asRecord(rawStats);
@@ -310,11 +319,36 @@ function readWeeklyStatEntries(match: WeeklyStarMatch): WeeklyStatEntry[] {
             : null,
         winnerParticipantId:
           typeof result.winnerParticipantId === "string" ? result.winnerParticipantId : null,
+        legNumber: Number.isFinite(legNumber) ? legNumber : undefined,
+        isLegLevel: true,
         stats
       }];
     });
   });
-  if (legEntries.length > 0) return legEntries;
+  const legEntryKeys = new Set(legEntries.map((entry) => `${entry.legNumber}:${entry.userId}`));
+  const turnEntries = buildLegUserStatsFromTurns(turns).flatMap((entry) => {
+    const result = legResults
+      .map(asRecord)
+      .find((item) => item && Number(item.legNumber) === entry.legNumber);
+    if (result?.dartMode === "soft") return [];
+    return Object.entries(entry.userStats).flatMap(([userId, stats]) => {
+      if (legEntryKeys.has(`${entry.legNumber}:${userId}`)) return [];
+      return [{
+        userId,
+        dartMode: "steel" as const,
+        gameVariant:
+          typeof result?.gameVariant === "string" || typeof result?.gameVariant === "number"
+            ? result.gameVariant
+            : match.game_variant,
+        winnerParticipantId:
+          typeof result?.winnerParticipantId === "string" ? result.winnerParticipantId : null,
+        legNumber: entry.legNumber,
+        isLegLevel: true,
+        stats
+      }];
+    });
+  });
+  if (legEntries.length > 0 || turnEntries.length > 0) return [...legEntries, ...turnEntries];
 
   const userStats = asRecord(details?.userStats);
   if (!userStats) return [];
@@ -322,7 +356,14 @@ function readWeeklyStatEntries(match: WeeklyStarMatch): WeeklyStatEntry[] {
   return Object.entries(userStats).flatMap(([userId, rawStats]) => {
     const stats = asRecord(rawStats);
     return stats
-      ? [{ userId, dartMode, gameVariant: match.game_variant, winnerParticipantId: null, stats }]
+      ? [{
+          userId,
+          dartMode,
+          gameVariant: match.game_variant,
+          winnerParticipantId: null,
+          isLegLevel: false,
+          stats
+        }]
       : [];
   });
 }

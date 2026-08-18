@@ -8,8 +8,10 @@ import {
 } from "@/lib/actions/tournaments";
 import { getCurrentUserAndProfile } from "@/lib/auth/guards";
 import { hasSupabaseEnv } from "@/lib/env";
+import type { ScoreTurn } from "@/lib/algorithms/scoring";
 import { updateTournamentStandings, type StandingRow } from "@/lib/algorithms/standings";
 import { calculatePlayerLevel } from "@/lib/algorithms/player-level";
+import { buildLegUserStatsFromTurns } from "@/lib/darts/leg-stats";
 import { getCompactMatchRulesSummary, getDartModeLabel, getGameVariantLabel, resolveMatchLegRules } from "@/lib/darts/variants";
 import {
   areBothMatchLineupsSubmitted,
@@ -26,6 +28,11 @@ import {
   type WeeklyStarIdentity,
   type WeeklyStarOverride
 } from "@/lib/tournaments/weekly-stars";
+import {
+  comparePersonalBest,
+  shouldReplacePersonalBest,
+  type PersonalStatSourceMode
+} from "@/lib/tournaments/personal-ranking";
 import { cn, formatDateTime } from "@/lib/utils";
 import { SetupNotice } from "@/components/SetupNotice";
 import { CodlPageHeader } from "@/components/CodlPageHeader";
@@ -58,6 +65,19 @@ type MatchRow = MatchSummary & {
   round_number: number;
   match_number: number;
   updated_at: string;
+};
+
+type MatchTurnRow = {
+  match_id: string;
+  participant_id: string;
+  user_id: string | null;
+  score: number;
+  darts: number | null;
+  leg_number: number;
+  remaining_before: number;
+  remaining_after: number;
+  is_bust: boolean;
+  is_checkout: boolean;
 };
 
 export default async function TournamentDetailPage({
@@ -155,6 +175,34 @@ export default async function TournamentDetailPage({
   const participantRowById = new Map((participants || []).map((participant) => [participant.id, participant]));
   const tournamentData = tournament as Tournament;
   const matchRows = (matches || []) as MatchRow[];
+  const hardMatchesNeedingTurnBackfill = matchRows.filter(needsHardTurnBackfill);
+  const matchTurnResponses = await Promise.all(
+    hardMatchesNeedingTurnBackfill.map((match) =>
+      admin
+        .from("match_turns")
+        .select("match_id, participant_id, user_id, score, darts, leg_number, remaining_before, remaining_after, is_bust, is_checkout")
+        .eq("match_id", match.id)
+        .order("turn_number", { ascending: true })
+    )
+  );
+  const matchTurnRows = matchTurnResponses.flatMap((response) => response.data || []);
+  const turnsByMatchId = new Map<string, ScoreTurn[]>();
+  for (const row of matchTurnRows as MatchTurnRow[]) {
+    if (!row.match_id || !row.participant_id) continue;
+    const turns = turnsByMatchId.get(row.match_id) || [];
+    turns.push({
+      participantId: row.participant_id,
+      userId: row.user_id || undefined,
+      legNumber: Number(row.leg_number),
+      score: Number(row.score),
+      darts: row.darts === null ? undefined : Number(row.darts),
+      remainingBefore: Number(row.remaining_before),
+      remainingAfter: Number(row.remaining_after),
+      isBust: Boolean(row.is_bust),
+      isCheckout: Boolean(row.is_checkout)
+    });
+    turnsByMatchId.set(row.match_id, turns);
+  }
   const boardRows = ((boards || []) as TournamentBoard[]).map((board) => toBoardView(board));
   const reservationRows = ((reservations || []) as MatchBoardReservation[]).map(toReservationView);
   const boardById = new Map(boardRows.map((board) => [board.id, board]));
@@ -270,6 +318,7 @@ export default async function TournamentDetailPage({
   };
   const personalLeaderboards = buildPersonalLeaderboards({
     matches: matchRows,
+    turnsByMatchId,
     profilesByUserId: statProfileById,
     participantMembersById,
     participantById,
@@ -293,7 +342,8 @@ export default async function TournamentDetailPage({
   const weeklyStarEvaluation = evaluateWeeklyStars({
     matches: matchRows,
     participantMembersById,
-    identitiesByUserId: weeklyStarIdentities
+    identitiesByUserId: weeklyStarIdentities,
+    turnsByMatchId
   });
   const weeklyStars = mergeWeeklyStarOverrides({
     evaluation: weeklyStarEvaluation,
@@ -479,18 +529,21 @@ export default async function TournamentDetailPage({
                   title: "最高均分",
                   rows: personalLeaderboards.steel.average,
                   metric: (row) => row.bestAverage.toFixed(1),
+                  sourceBadge: (row) => getPersonalStatSourceBadge(row.bestAverageMode),
                   emptyText: "暂无硬镖均分数据"
                 },
                 {
                   title: "180 榜",
                   rows: personalLeaderboards.steel.count180,
                   metric: (row) => `${row.count180}`,
+                  sourceBadge: (row) => row.count180IncludesDoubles ? "含双人" : null,
                   emptyText: "暂无 180 数据"
                 },
                 {
                   title: "最高拆分",
                   rows: personalLeaderboards.steel.checkout,
                   metric: (row) => `${row.bestCheckout}`,
+                  sourceBadge: (row) => getPersonalStatSourceBadge(row.bestCheckoutMode),
                   emptyText: "暂无硬镖拆分数据"
                 }
               ]}
@@ -503,30 +556,35 @@ export default async function TournamentDetailPage({
                   title: "PPR 榜",
                   rows: personalLeaderboards.soft.average,
                   metric: (row) => row.bestAverage.toFixed(1),
+                  sourceBadge: (row) => getPersonalStatSourceBadge(row.bestAverageMode),
                   emptyText: "暂无软镖 PPR 数据"
                 },
                 {
                   title: "MPR 榜",
                   rows: personalLeaderboards.soft.mpr,
                   metric: (row) => row.bestMpr.toFixed(2),
+                  sourceBadge: (row) => getPersonalStatSourceBadge(row.bestMprMode),
                   emptyText: "暂无 MPR 数据"
                 },
                 {
                   title: "帽子榜",
                   rows: personalLeaderboards.soft.hats,
                   metric: (row) => `${row.hats}`,
+                  sourceBadge: (row) => row.hatsIncludesDoubles ? "含双人" : null,
                   emptyText: "暂无软镖帽子数据"
                 },
                 {
                   title: "高分赛榜",
                   rows: personalLeaderboards.soft.highScore,
                   metric: (row) => `${row.bestHighScore}`,
+                  sourceBadge: (row) => getPersonalStatSourceBadge(row.bestHighScoreMode),
                   emptyText: "暂无高分赛数据"
                 },
                 {
                   title: "白马榜",
                   rows: personalLeaderboards.soft.whiteHorse,
                   metric: (row) => `${row.whiteHorse}`,
+                  sourceBadge: (row) => row.whiteHorseIncludesDoubles ? "含双人" : null,
                   emptyText: "暂无白马数据"
                 }
               ]}
@@ -724,9 +782,16 @@ type PersonalLeaderboardRow = {
   whiteHorse: number;
   count180: number;
   bestAverage: number;
+  bestAverageMode: PersonalStatSourceMode;
   bestMpr: number;
+  bestMprMode: PersonalStatSourceMode;
   bestHighScore: number;
+  bestHighScoreMode: PersonalStatSourceMode;
   bestCheckout: number;
+  bestCheckoutMode: PersonalStatSourceMode;
+  hatsIncludesDoubles: boolean;
+  whiteHorseIncludesDoubles: boolean;
+  count180IncludesDoubles: boolean;
 };
 
 type PersonalLeaderboardGroup = {
@@ -749,16 +814,21 @@ type PersonalStatEntry = {
   dartMode: MatchDartMode;
   gameVariant?: string | number | null;
   stats: Record<string, unknown>;
+  legNumber?: number;
+  participantMode: PersonalStatSourceMode;
+  isLegLevel: boolean;
 };
 
 function buildPersonalLeaderboards({
   matches,
+  turnsByMatchId,
   profilesByUserId,
   participantMembersById,
   participantById,
   participantDisplayNameById
 }: {
   matches: MatchRow[];
+  turnsByMatchId: Map<string, ScoreTurn[]>;
   profilesByUserId: Map<string, { display_name?: string | null; avatar_url?: string | null }>;
   participantMembersById: Map<string, Array<{ userId: string; name: string }>>;
   participantById: Map<string, ParticipantSeed>;
@@ -783,15 +853,15 @@ function buildPersonalLeaderboards({
   for (const match of matches) {
     if (match.status !== "completed") continue;
 
-    for (const statEntry of readPersonalStatEntries(match)) {
+    for (const statEntry of readPersonalStatEntries(match, turnsByMatchId.get(match.id) || [])) {
       const stats = statEntry.stats;
       const hats = statNumber(stats, ["countHatTrick"]) || 0;
       const whiteHorse = statNumber(stats, ["countWhiteHorse"]) || 0;
       const count180 = statNumber(stats, ["count180", "countTon80"]) || 0;
-      const average = statNumber(stats, ["averageScore", "averagePer3Darts"]) || 0;
-      const mpr = statNumber(stats, ["averageMpr"]) || 0;
+      const average = statEntry.isLegLevel ? statNumber(stats, ["averageScore", "averagePer3Darts"]) || 0 : 0;
+      const mpr = statEntry.isLegLevel ? statNumber(stats, ["averageMpr"]) || 0 : 0;
       const highScore =
-        statEntry.dartMode === "soft" && String(statEntry.gameVariant || "") === "soft_high_score"
+        statEntry.isLegLevel && statEntry.dartMode === "soft" && String(statEntry.gameVariant || "") === "soft_high_score"
           ? statNumber(stats, ["highestTurnScore", "totalScoredPoints"]) || 0
           : 0;
       const checkout = statNumber(stats, ["highestCheckout"]) || 0;
@@ -810,17 +880,61 @@ function buildPersonalLeaderboards({
         whiteHorse: 0,
         count180: 0,
         bestAverage: 0,
+        bestAverageMode: null,
         bestMpr: 0,
+        bestMprMode: null,
         bestHighScore: 0,
-        bestCheckout: 0
+        bestHighScoreMode: null,
+        bestCheckout: 0,
+        bestCheckoutMode: null,
+        hatsIncludesDoubles: false,
+        whiteHorseIncludesDoubles: false,
+        count180IncludesDoubles: false
       };
       current.hats += hats;
       current.whiteHorse += whiteHorse;
       current.count180 += count180;
-      current.bestAverage = Math.max(current.bestAverage, average);
-      current.bestMpr = Math.max(current.bestMpr, mpr);
-      current.bestHighScore = Math.max(current.bestHighScore, highScore);
-      current.bestCheckout = Math.max(current.bestCheckout, checkout);
+      if (statEntry.participantMode === "doubles") {
+        current.hatsIncludesDoubles ||= hats > 0;
+        current.whiteHorseIncludesDoubles ||= whiteHorse > 0;
+        current.count180IncludesDoubles ||= count180 > 0;
+      }
+      if (shouldReplacePersonalBest({
+        currentValue: current.bestAverage,
+        currentMode: current.bestAverageMode,
+        nextValue: average,
+        nextMode: statEntry.participantMode
+      })) {
+        current.bestAverage = average;
+        current.bestAverageMode = statEntry.participantMode;
+      }
+      if (shouldReplacePersonalBest({
+        currentValue: current.bestMpr,
+        currentMode: current.bestMprMode,
+        nextValue: mpr,
+        nextMode: statEntry.participantMode
+      })) {
+        current.bestMpr = mpr;
+        current.bestMprMode = statEntry.participantMode;
+      }
+      if (shouldReplacePersonalBest({
+        currentValue: current.bestHighScore,
+        currentMode: current.bestHighScoreMode,
+        nextValue: highScore,
+        nextMode: statEntry.participantMode
+      })) {
+        current.bestHighScore = highScore;
+        current.bestHighScoreMode = statEntry.participantMode;
+      }
+      if (shouldReplacePersonalBest({
+        currentValue: current.bestCheckout,
+        currentMode: current.bestCheckoutMode,
+        nextValue: checkout,
+        nextMode: statEntry.participantMode
+      })) {
+        current.bestCheckout = checkout;
+        current.bestCheckoutMode = statEntry.participantMode;
+      }
       rowsByMode[statEntry.dartMode].set(statEntry.userId, current);
     }
   }
@@ -857,11 +971,11 @@ function rankPersonalRows(rows: PersonalLeaderboardRow[]): PersonalLeaderboardGr
       .slice(0, 5),
     average: rows
       .filter((row) => row.bestAverage > 0)
-      .sort((a, b) => b.bestAverage - a.bestAverage)
+      .sort((a, b) => comparePersonalBest(a.bestAverage, a.bestAverageMode, b.bestAverage, b.bestAverageMode))
       .slice(0, 5),
     mpr: rows
       .filter((row) => row.bestMpr > 0)
-      .sort((a, b) => b.bestMpr - a.bestMpr)
+      .sort((a, b) => comparePersonalBest(a.bestMpr, a.bestMprMode, b.bestMpr, b.bestMprMode))
       .slice(0, 5),
     checkout: rows
       .filter((row) => row.bestCheckout > 0)
@@ -870,20 +984,61 @@ function rankPersonalRows(rows: PersonalLeaderboardRow[]): PersonalLeaderboardGr
   };
 }
 
-function readPersonalStatEntries(match: MatchRow): PersonalStatEntry[] {
-  const legEntries = readLegUserStatEntries(match.details);
-  if (legEntries.length > 0) return legEntries;
+function readPersonalStatEntries(match: MatchRow, turns: ScoreTurn[]): PersonalStatEntry[] {
+  const legEntries = readLegUserStatEntries(match.details, match.leg_rules || []);
+  const legEntryKeys = new Set(legEntries.map((entry) => `${entry.legNumber}:${entry.userId}`));
+  const turnEntries = buildLegUserStatsFromTurns(turns).flatMap((entry) => {
+    const rule = (match.leg_rules || []).find((item) => item.legNumber === entry.legNumber);
+    if (rule?.dartMode === "soft") return [];
+    return Object.entries(entry.userStats).flatMap(([userId, stats]) => {
+      if (legEntryKeys.has(`${entry.legNumber}:${userId}`)) return [];
+      return [{
+        userId,
+        dartMode: "steel" as const,
+        gameVariant: rule?.gameVariant || match.game_variant,
+        stats,
+        legNumber: entry.legNumber,
+        participantMode: rule?.participantMode || null,
+        isLegLevel: true
+      }];
+    });
+  });
+  if (legEntries.length > 0 || turnEntries.length > 0) return [...legEntries, ...turnEntries];
 
   const matchDartMode: MatchDartMode = match.dart_mode === "soft" ? "soft" : "steel";
   return Object.entries(readMatchUserStats(match.details)).map(([userId, stats]) => ({
     userId,
     dartMode: matchDartMode,
     gameVariant: match.game_variant,
-    stats
+    stats,
+    participantMode: null,
+    isLegLevel: false
   }));
 }
 
-function readLegUserStatEntries(details: unknown): PersonalStatEntry[] {
+function needsHardTurnBackfill(match: MatchRow) {
+  if (match.status !== "completed") return false;
+  const steelLegEntries = readLegUserStatEntries(match.details, match.leg_rules || []).filter((entry) => entry.dartMode === "steel");
+  const details = match.details && typeof match.details === "object" && !Array.isArray(match.details)
+    ? match.details
+    : null;
+  const rawLegResults = details && Array.isArray(details.legResults) ? details.legResults : [];
+  const playedHardLegNumbers = rawLegResults.flatMap((rawResult) => {
+    if (!rawResult || typeof rawResult !== "object" || Array.isArray(rawResult)) return [];
+    const result = rawResult as Record<string, unknown>;
+    const legNumber = Number(result.legNumber);
+    const rule = (match.leg_rules || []).find((item) => item.legNumber === legNumber);
+    const dartMode = result.dartMode === "soft" || result.dartMode === "steel" ? result.dartMode : rule?.dartMode;
+    return Number.isFinite(legNumber) && dartMode !== "soft" ? [legNumber] : [];
+  });
+  if (playedHardLegNumbers.length > 0) {
+    const storedLegNumbers = new Set(steelLegEntries.map((entry) => entry.legNumber));
+    return playedHardLegNumbers.some((legNumber) => !storedLegNumbers.has(legNumber));
+  }
+  return match.dart_mode !== "soft" && steelLegEntries.length === 0;
+}
+
+function readLegUserStatEntries(details: unknown, legRules: MatchLegRule[] = []): PersonalStatEntry[] {
   if (!details || typeof details !== "object" || Array.isArray(details)) return [];
   const legResults = (details as { legResults?: unknown }).legResults;
   if (!Array.isArray(legResults)) return [];
@@ -892,15 +1047,28 @@ function readLegUserStatEntries(details: unknown): PersonalStatEntry[] {
     if (!legResult || typeof legResult !== "object" || Array.isArray(legResult)) return [];
     const dartMode: MatchDartMode = (legResult as { dartMode?: unknown }).dartMode === "soft" ? "soft" : "steel";
     const gameVariant = (legResult as { gameVariant?: unknown }).gameVariant;
+    const legNumber = Number((legResult as { legNumber?: unknown }).legNumber);
+    const rawParticipantMode = (legResult as { participantMode?: unknown }).participantMode;
+    const participantMode: PersonalStatSourceMode =
+      rawParticipantMode === "singles" || rawParticipantMode === "doubles" || rawParticipantMode === "team"
+        ? rawParticipantMode
+        : legRules.find((rule) => rule.legNumber === legNumber)?.participantMode || null;
     const userStats = (legResult as { userStats?: unknown }).userStats;
     if (!userStats || typeof userStats !== "object" || Array.isArray(userStats)) return [];
     return Object.entries(userStats as Record<string, Record<string, unknown>>).map(([userId, stats]) => ({
       userId,
       dartMode,
       gameVariant: typeof gameVariant === "string" || typeof gameVariant === "number" ? gameVariant : null,
-      stats
+      stats,
+      legNumber: Number.isFinite(legNumber) ? legNumber : undefined,
+      participantMode,
+      isLegLevel: true
     }));
   });
+}
+
+function getPersonalStatSourceBadge(mode: PersonalStatSourceMode) {
+  return mode === "doubles" ? "双人" : null;
 }
 
 function readMatchUserStats(details: unknown) {
@@ -1029,6 +1197,7 @@ function LeaderboardSection({
     title: string;
     rows: PersonalLeaderboardRow[];
     metric: (row: PersonalLeaderboardRow) => string;
+    sourceBadge?: (row: PersonalLeaderboardRow) => string | null;
     emptyText: string;
   }>;
 }) {
@@ -1047,6 +1216,7 @@ function LeaderboardSection({
             title={list.title}
             rows={list.rows}
             metric={list.metric}
+            sourceBadge={list.sourceBadge}
             emptyText={list.emptyText}
           />
         ))}
@@ -1059,11 +1229,13 @@ function PersonalLeaderboardList({
   title,
   rows,
   metric,
+  sourceBadge,
   emptyText
 }: {
   title: string;
   rows: PersonalLeaderboardRow[];
   metric: (row: PersonalLeaderboardRow) => string;
+  sourceBadge?: (row: PersonalLeaderboardRow) => string | null;
   emptyText: string;
 }) {
   const topRows = rows.slice(0, 3);
@@ -1080,6 +1252,7 @@ function PersonalLeaderboardList({
               row={row}
               rank={index + 1}
               metric={metric(row)}
+              sourceBadge={sourceBadge?.(row) || null}
             />
           ))}
         </div>
@@ -1100,9 +1273,7 @@ function PersonalLeaderboardList({
               size="sm"
               compact
             />
-            <div className="rounded-lg bg-board/10 px-2 py-1 text-right text-lg font-black text-board">
-              {metric(row)}
-            </div>
+            <PersonalMetric value={metric(row)} sourceBadge={sourceBadge?.(row) || null} />
           </div>
         ))}
         {rows.length === 0 ? <p className="text-sm font-semibold text-muted">{emptyText}</p> : null}
@@ -1114,11 +1285,13 @@ function PersonalLeaderboardList({
 function PersonalPodiumCard({
   row,
   rank,
-  metric
+  metric,
+  sourceBadge
 }: {
   row: PersonalLeaderboardRow;
   rank: number;
   metric: string;
+  sourceBadge: string | null;
 }) {
   return (
     <article className={cn("codl-podium-card relative overflow-hidden rounded-lg border p-3", getPodiumTone(rank, "card"))}>
@@ -1139,11 +1312,33 @@ function PersonalPodiumCard({
           </div>
           {row.teamName ? <div className="mt-1 truncate text-xs font-semibold text-muted">{row.teamName}</div> : null}
         </div>
-        <div className="rounded-lg bg-white/80 px-2 py-1 text-right text-xl font-black text-board shadow-sm">
-          {metric}
-        </div>
+        <PersonalMetric value={metric} sourceBadge={sourceBadge} podium />
       </div>
     </article>
+  );
+}
+
+function PersonalMetric({
+  value,
+  sourceBadge,
+  podium = false
+}: {
+  value: string;
+  sourceBadge: string | null;
+  podium?: boolean;
+}) {
+  return (
+    <div className={cn(
+      "flex shrink-0 items-center justify-end gap-1 rounded-lg px-2 py-1 text-right font-black text-board",
+      podium ? "bg-white/80 text-xl shadow-sm" : "bg-board/10 text-lg"
+    )}>
+      <span>{value}</span>
+      {sourceBadge ? (
+        <span className="whitespace-nowrap rounded bg-board px-1 py-0.5 text-[9px] font-black leading-none text-white">
+          {sourceBadge}
+        </span>
+      ) : null}
+    </div>
   );
 }
 

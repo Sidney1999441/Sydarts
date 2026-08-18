@@ -934,7 +934,9 @@ export function TouchScoreboard({
             </span>
           </div>
           {state.participants.map((participant) => {
-            const stats = calculateDartStats(participant.turns);
+            const stats = calculateDartStats(
+              participant.turns.filter((turn) => turn.legNumber === state.currentLeg)
+            );
             const isActive = state.activeParticipantId === participant.participantId;
             return (
               <PlayerPanel
@@ -1721,13 +1723,40 @@ function SettlementView({
     name: names[participant.participantId],
     stats: calculateDartStats(participant.turns)
   }));
-  const memberRows = [participantA, participantB].flatMap((participant) =>
-    (participant.members || []).map((member) => ({
-      participantName: participant.name,
-      member,
-      stats: calculateDartStats(state.turns.filter((turn) => turn.userId === member.userId))
-    }))
-  ).filter((row) => row.stats.turnsThrown > 0);
+  const memberNameByUserId = new Map(
+    [participantA, participantB].flatMap((participant) =>
+      (participant.members || []).map((member) => [member.userId, member.name] as const)
+    )
+  );
+  const legStatGroups = [...new Set(state.turns.map((turn) => turn.legNumber))]
+    .sort((a, b) => a - b)
+    .map((legNumber) => {
+      const legTurns = state.turns.filter((turn) => turn.legNumber === legNumber);
+      const result = state.legResults.find((item) => item.legNumber === legNumber);
+      const rowsByPlayer = new Map<string, ScoreTurn[]>();
+      for (const turn of legTurns) {
+        const key = `${turn.participantId}:${turn.userId || turn.participantId}`;
+        const playerTurns = rowsByPlayer.get(key) || [];
+        playerTurns.push(turn);
+        rowsByPlayer.set(key, playerTurns);
+      }
+      return {
+        legNumber,
+        result,
+        rows: [...rowsByPlayer.values()].map((turns) => {
+          const firstTurn = turns[0];
+          const participantName = displayName(firstTurn.participantId, legNumber);
+          const memberName = firstTurn.userId ? memberNameByUserId.get(firstTurn.userId) : null;
+          return {
+            key: `${legNumber}:${firstTurn.participantId}:${firstTurn.userId || firstTurn.participantId}`,
+            name: compactPlayerName(memberName) || participantName,
+            participantName,
+            isWinner: result?.winnerParticipantId === firstTurn.participantId,
+            stats: calculateDartStats(turns)
+          };
+        })
+      };
+    });
 
   return (
     <div className="grid h-[calc(100dvh-7rem)] min-h-[560px] grid-rows-[auto_1fr_auto] gap-2 overflow-hidden rounded-lg">
@@ -1748,7 +1777,7 @@ function SettlementView({
         </div>
       </section>
 
-      <section className="grid min-h-0 gap-2 lg:grid-cols-[1fr_1fr]">
+      <section className="grid min-h-0 gap-2 overflow-y-auto lg:grid-cols-[0.8fr_1.2fr]">
         <div className="grid min-h-0 gap-2">
           {playerRows.map(({ participant, name, stats }) => (
             <div key={participant.participantId} className="rounded-lg border border-wire bg-surface p-3 shadow-soft">
@@ -1772,40 +1801,65 @@ function SettlementView({
               </dl>
             </div>
           ))}
-          {memberRows.length > 0 ? (
-            <div className="rounded-lg border border-wire bg-surface p-3 shadow-soft">
-              <div className="mb-2 font-bold">个人出镖统计</div>
-              <div className="grid gap-2 sm:grid-cols-2">
-                {memberRows.map((row) => (
-                  <div key={row.member.userId} className="rounded-lg bg-field p-2">
-                    <div className="truncate text-xs font-bold text-muted">
-                      {composeParticipantMemberName(row.participantName, row.member.name)}
-                    </div>
-                    <dl className="mt-2 grid grid-cols-4 gap-1 text-xs">
-                      <Stat label="Avg" value={row.stats.averagePer3Darts} />
-                      <Stat label="High" value={row.stats.highestTurnScore} />
-                      <Stat label="180" value={row.stats.count180} />
-                      <Stat label="镖数" value={row.stats.totalDarts} />
-                    </dl>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : null}
         </div>
-        <div className="min-h-0 rounded-lg border border-wire bg-surface p-3 shadow-soft">
-          <div className="mb-2 flex items-center gap-2">
-            <ListChecks className="h-4 w-4 text-board" aria-hidden />
-            <h3 className="font-bold">战局回顾</h3>
+        <div className="grid content-start gap-2">
+          <div className="rounded-lg border border-wire bg-surface p-3 shadow-soft">
+            <div className="mb-2 flex items-center gap-2">
+              <BarChart3 className="h-4 w-4 text-board" aria-hidden />
+              <h3 className="font-bold">逐局个人数据</h3>
+            </div>
+            <div className="grid gap-2">
+              {legStatGroups.map((group) => (
+                <section key={group.legNumber} className="rounded-lg bg-field p-2">
+                  <div className="mb-2 flex items-center justify-between gap-2 text-xs font-black">
+                    <span>第 {group.legNumber} 局</span>
+                    <span className="text-muted">
+                      {group.result?.winnerParticipantId
+                        ? `${displayName(group.result.winnerParticipantId, group.legNumber)} 胜`
+                        : "已结束"}
+                    </span>
+                  </div>
+                  <div className="grid gap-1.5 sm:grid-cols-2">
+                    {group.rows.map((row) => (
+                      <div key={row.key} className="rounded-lg bg-surface p-2">
+                        <div className="flex min-w-0 items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-black">{row.name}</div>
+                            {row.name !== row.participantName ? (
+                              <div className="truncate text-[10px] font-semibold text-muted">{row.participantName}</div>
+                            ) : null}
+                          </div>
+                          {row.isWinner ? <span className="shrink-0 text-[10px] font-black text-board">本局胜</span> : null}
+                        </div>
+                        <dl className="mt-2 grid grid-cols-4 gap-1 text-xs">
+                          <Stat label="PPR" value={row.stats.averagePer3Darts} />
+                          <Stat label="最高" value={row.stats.highestTurnScore} />
+                          <Stat label="180" value={row.stats.count180} />
+                          <Stat label="镖数" value={row.stats.totalDarts} />
+                        </dl>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              ))}
+            </div>
           </div>
-          <TurnTimeline
-            turns={state.turns}
-            names={names}
-            participantA={participantA}
-            participantB={participantB}
-            displayName={displayName}
-            turnDisplayName={turnDisplayName}
-          />
+          <details className="rounded-lg border border-wire bg-surface p-3 shadow-soft">
+            <summary className="flex cursor-pointer list-none items-center gap-2 font-bold">
+              <ListChecks className="h-4 w-4 text-board" aria-hidden />
+              完整出镖记录
+            </summary>
+            <div className="mt-3 max-h-80 min-h-0">
+              <TurnTimeline
+                turns={state.turns}
+                names={names}
+                participantA={participantA}
+                participantB={participantB}
+                displayName={displayName}
+                turnDisplayName={turnDisplayName}
+              />
+            </div>
+          </details>
         </div>
       </section>
 

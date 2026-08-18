@@ -1,7 +1,13 @@
 import { ClipboardCheck } from "lucide-react";
 import { adminUpdateMatchResultAction } from "@/lib/actions/matches";
 import { requireAdmin } from "@/lib/auth/guards";
-import { getSoftStatFields, isSoftHighScoreVariant, type SoftStatField } from "@/lib/darts/soft-stats";
+import {
+  getSoftStatFields,
+  isSoftHighScoreVariant,
+  isValidMpr,
+  MPR_MAX_EXCLUSIVE,
+  type SoftStatField
+} from "@/lib/darts/soft-stats";
 import { getLegRuleLabel, getMatchRulesSummary } from "@/lib/darts/variants";
 import { hasSupabaseEnv } from "@/lib/env";
 import { createResultSubmissionId } from "@/lib/results/submission";
@@ -91,6 +97,25 @@ function statDefault(stats: Record<string, unknown> | undefined, ...keys: string
     if (value !== undefined && value !== null && value !== "") return String(value);
   }
   return undefined;
+}
+
+function hasInvalidStoredMpr(stats: Record<string, unknown> | undefined) {
+  if (!stats || stats.averageMpr === undefined || stats.averageMpr === null || stats.averageMpr === "") return false;
+  return !isValidMpr(Number(stats.averageMpr));
+}
+
+function hasInvalidStoredMprInMatch(userStats: StoredUserStats, legResults: StoredLegResult[]) {
+  const legMprUserIds = new Set(
+    legResults.flatMap((result) =>
+      Object.entries(result.userStats || {})
+        .filter(([, stats]) => stats.averageMpr !== undefined && stats.averageMpr !== null && stats.averageMpr !== "")
+        .map(([userId]) => userId)
+    )
+  );
+  return (
+    legResults.some((result) => Object.values(result.userStats || {}).some(hasInvalidStoredMpr)) ||
+    Object.entries(userStats).some(([userId, stats]) => !legMprUserIds.has(userId) && hasInvalidStoredMpr(stats))
+  );
 }
 
 export default async function ResultsAdminPage({
@@ -192,6 +217,8 @@ export default async function ResultsAdminPage({
             const existingLegLineups = readStoredLegLineups(match.details);
             const existingLegResults = readStoredLegResults(match.details);
             const existingUserStats = readStoredUserStats(match.details);
+            const hasAnyLegUserStats = existingLegResults.some((result) => Object.keys(result.userStats || {}).length > 0);
+            const hasInvalidMpr = hasInvalidStoredMprInMatch(existingUserStats, existingLegResults);
             const rulesSummary = getMatchRulesSummary({
               dartMode,
               gameVariant: match.game_variant,
@@ -214,6 +241,11 @@ export default async function ResultsAdminPage({
                       <div className="mt-1 truncate font-bold">
                         {participantAName} vs {participantBName}
                       </div>
+                      {hasInvalidMpr ? (
+                        <div className="mt-2 inline-flex rounded-md bg-red-50 px-2 py-1 text-xs font-black text-red-700">
+                          MPR 数据异常，请展开修正
+                        </div>
+                      ) : null}
                     </div>
                     <div className="rounded-lg bg-board px-4 py-2 text-center text-white">
                       <div className="text-[10px] font-black uppercase opacity-75">比分</div>
@@ -226,6 +258,11 @@ export default async function ResultsAdminPage({
                   <input type="hidden" name="match_id" value={match.id} />
                   <input type="hidden" name="tournament_id" value={id} />
                   <input type="hidden" name="submission_id" value={createResultSubmissionId()} />
+                  {match.status === "completed" ? (
+                    <p className="rounded-lg border border-board/20 bg-board/5 p-3 text-xs font-semibold text-muted">
+                      修正已完赛数据并保存后，系统会撤销旧统计影响，再按当前比分、胜方和逐局个人数据重新结算。
+                    </p>
+                  ) : null}
                   <div className="grid gap-3 lg:grid-cols-[120px_120px_220px_auto] lg:items-end">
                     <label className="label">
                       A
@@ -260,25 +297,31 @@ export default async function ResultsAdminPage({
                     />
                   ) : null}
 
-                  <div className="grid gap-3 rounded-lg bg-field p-3">
-                    <div className="text-xs font-bold text-muted">个人数据（可选）</div>
-                    {match.participant_a_id ? (
-                      <ManualStatsFields
-                        title={`A / ${participantAName}`}
-                        dartMode={dartMode}
-                        members={participantMembersById.get(match.participant_a_id) || []}
-                        existingUserStats={existingUserStats}
-                      />
-                    ) : null}
-                    {match.participant_b_id ? (
-                      <ManualStatsFields
-                        title={`B / ${participantBName}`}
-                        dartMode={dartMode}
-                        members={participantMembersById.get(match.participant_b_id) || []}
-                        existingUserStats={existingUserStats}
-                      />
-                    ) : null}
-                  </div>
+                  {legRules.length === 0 || (match.status === "completed" && !hasAnyLegUserStats) ? (
+                    <div className="grid gap-3 rounded-lg bg-field p-3">
+                      <div className="text-xs font-bold text-muted">个人数据（旧比赛兼容）</div>
+                      {match.participant_a_id ? (
+                        <ManualStatsFields
+                          title={`A / ${participantAName}`}
+                          dartMode={dartMode}
+                          members={participantMembersById.get(match.participant_a_id) || []}
+                          existingUserStats={existingUserStats}
+                        />
+                      ) : null}
+                      {match.participant_b_id ? (
+                        <ManualStatsFields
+                          title={`B / ${participantBName}`}
+                          dartMode={dartMode}
+                          members={participantMembersById.get(match.participant_b_id) || []}
+                          existingUserStats={existingUserStats}
+                        />
+                      ) : null}
+                    </div>
+                  ) : (
+                    <p className="rounded-lg bg-field p-3 text-xs font-semibold text-muted">
+                      全场个人汇总将由上方逐局数据自动生成，无需重复填写。
+                    </p>
+                  )}
                 </form>
               </details>
             );
@@ -330,6 +373,7 @@ function ManualStatsFields({
         </div>
         {members.map((member, index) => {
           const existingStats = existingUserStats[member.userId];
+          const invalidMpr = hasInvalidStoredMpr(existingStats);
           return (
           <details key={member.userId} className="rounded-lg bg-field p-3" open={members.length <= 2 && index === 0}>
             <summary className="cursor-pointer text-sm font-bold">{member.name}</summary>
@@ -352,7 +396,21 @@ function ManualStatsFields({
               ) : (
                 <>
                   <input className="form-input" type="number" step="0.01" min={0} name={`stats_${member.userId}_average_ppd`} placeholder="PPD" />
-                  <input className="form-input" type="number" step="0.01" min={0} name={`stats_${member.userId}_average_mpr`} placeholder="MPR" defaultValue={statDefault(existingStats, "averageMpr")} />
+                  <label className="grid gap-1">
+                    <input
+                      className={`form-input ${invalidMpr ? "border-red-500 ring-2 ring-red-100" : ""}`}
+                      type="number"
+                      step="0.01"
+                      min={0}
+                      max={MPR_MAX_EXCLUSIVE - 0.01}
+                      name={`stats_${member.userId}_average_mpr`}
+                      placeholder="MPR（小于 10）"
+                      defaultValue={statDefault(existingStats, "averageMpr")}
+                    />
+                    {invalidMpr ? (
+                      <span className="text-[11px] font-black text-red-600">当前值异常，请改为小于 10 的真实 MPR。</span>
+                    ) : null}
+                  </label>
                   <input className="form-input" type="number" min={0} name={`stats_${member.userId}_count_5_marks`} placeholder="5 Mark" defaultValue={statDefault(existingStats, "count5Marks")} />
                   <input className="form-input" type="number" min={0} name={`stats_${member.userId}_count_6_marks`} placeholder="6 Mark" defaultValue={statDefault(existingStats, "count6Marks")} />
                   <input className="form-input" type="number" min={0} name={`stats_${member.userId}_count_7_marks`} placeholder="7 Mark" defaultValue={statDefault(existingStats, "count7Marks")} />
@@ -662,6 +720,27 @@ function AdminSoftStatInput({
           placeholder="PPD"
         />
       </>
+    );
+  }
+
+  if (field.key === "averageMpr") {
+    const invalidMpr = hasInvalidStoredMpr(existingStats);
+    return (
+      <label className="grid gap-1">
+        <input
+          className={`form-input ${invalidMpr ? "border-red-500 ring-2 ring-red-100" : ""}`}
+          type="number"
+          step={field.step || "0.01"}
+          min={0}
+          max={MPR_MAX_EXCLUSIVE - 0.01}
+          name={`leg_${legNumber}_stats_${userId}_average_mpr`}
+          placeholder="MPR（小于 10）"
+          defaultValue={statDefault(existingStats, "averageMpr")}
+        />
+        {invalidMpr ? (
+          <span className="text-[11px] font-black text-red-600">异常值，请检查是否漏填小数点。</span>
+        ) : null}
+      </label>
     );
   }
 
