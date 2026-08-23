@@ -19,15 +19,17 @@ type Pairing = {
 export function OfficialLineupGate({
   title = "赛前对阵公示",
   description = "双方队长已提交布阵。确认无误后开始本场计分。",
+  initiallyStarted = false,
   pairings,
   children
 }: {
   title?: string;
   description?: string;
+  initiallyStarted?: boolean;
   pairings: Pairing[];
   children: ReactNode;
 }) {
-  const [started, setStarted] = useState(false);
+  const [started, setStarted] = useState(initiallyStarted);
 
   if (started) return <>{children}</>;
 

@@ -9,6 +9,7 @@ export type WeeklyStarIdentity = {
   name: string;
   avatarUrl: string | null;
   teamName: string;
+  strengthLevel?: number;
 };
 
 export type WeeklyStarMatch = {
@@ -45,6 +46,8 @@ export type WeeklyStar = {
   avatarUrl: string | null;
   teamName: string;
   source: "automatic" | "manual";
+  rawScore: number;
+  expectationAdjustment: number;
   score: number;
   reason: string;
   metrics: WeeklyStarMetrics;
@@ -142,6 +145,9 @@ export function evaluateWeeklyStars({
   }
 
   const candidatesByWeek = new Map<string, WeeklyStar[]>();
+  const fieldStrengthLevels = [...identitiesByUserId.values()]
+    .map((identity) => Number(identity.strengthLevel))
+    .filter((level) => Number.isFinite(level) && level >= 1 && level <= 99);
   for (const [weekStart, metricsByUserId] of metricsByWeek) {
     const candidates = [...metricsByUserId.entries()]
       .map(([userId, metrics]) => {
@@ -150,6 +156,11 @@ export function evaluateWeeklyStars({
           avatarUrl: null,
           teamName: ""
         };
+        const rawScore = calculateWeeklyStarScore(metrics);
+        const expectationAdjustment = calculateWeeklyStarExpectationAdjustment(
+          identity.strengthLevel,
+          fieldStrengthLevels
+        );
         return {
           weekStart,
           weekEnd: addDateParts(weekStart, 6),
@@ -158,8 +169,10 @@ export function evaluateWeeklyStars({
           avatarUrl: identity.avatarUrl,
           teamName: identity.teamName,
           source: "automatic" as const,
-          score: calculateWeeklyStarScore(metrics),
-          reason: buildAutomaticReason(metrics),
+          rawScore,
+          expectationAdjustment,
+          score: Math.round(Math.max(0, rawScore - expectationAdjustment) * 10) / 10,
+          reason: buildAutomaticReason(metrics, expectationAdjustment),
           metrics: { ...metrics }
         };
       })
@@ -209,6 +222,8 @@ export function mergeWeeklyStarOverrides({
       avatarUrl: identity.avatarUrl,
       teamName: identity.teamName,
       source: "manual",
+      rawScore: candidate?.rawScore || 0,
+      expectationAdjustment: candidate?.expectationAdjustment || 0,
       score: candidate?.score || 0,
       reason: override.reason?.trim() || candidate?.reason || "由赛事管理员综合评定。",
       metrics: candidate?.metrics ? { ...candidate.metrics } : emptyMetrics()
@@ -240,6 +255,39 @@ export function calculateWeeklyStarScore(metrics: WeeklyStarMetrics) {
     versatilityBonus +
     highlightScore;
   return Math.round(score * 10) / 10;
+}
+
+export function calculateWeeklyStarExpectationAdjustment(
+  strengthLevel: number | null | undefined,
+  fieldStrengthLevels: number[]
+) {
+  const level = Math.round(Number(strengthLevel));
+  const field = fieldStrengthLevels
+    .map((value) => Math.round(Number(value)))
+    .filter((value) => Number.isFinite(value) && value >= 1 && value <= 99)
+    .sort((a, b) => a - b);
+  if (!Number.isFinite(level) || field.length < 4) return 0;
+
+  let removedSelf = false;
+  const peers = field.filter((value) => {
+    if (!removedSelf && value === level) {
+      removedSelf = true;
+      return false;
+    }
+    return true;
+  });
+  if (!removedSelf || peers.length === 0) return 0;
+
+  const medianLevel = median(field);
+  const nearestPeerGap = Math.min(...peers.map((value) => Math.abs(level - value)));
+  const outlierThreshold = Math.max(55, medianLevel + 18);
+  if (level < outlierThreshold || nearestPeerGap < 12) return 0;
+
+  const adjustment =
+    8 +
+    Math.max(0, level - outlierThreshold) * 0.4 +
+    Math.max(0, nearestPeerGap - 12) * 0.35;
+  return Math.round(clamp(adjustment, 0, 24) * 10) / 10;
 }
 
 export function getShanghaiWeekStart(date = new Date()) {
@@ -379,11 +427,14 @@ function compareCandidates(a: WeeklyStar, b: WeeklyStar) {
   );
 }
 
-function buildAutomaticReason(metrics: WeeklyStarMetrics) {
+function buildAutomaticReason(metrics: WeeklyStarMetrics, expectationAdjustment = 0) {
   const highlights = getWeeklyStarHighlights(metrics);
-  return highlights.length > 0
+  const reason = highlights.length > 0
     ? `综合胜负、出场与个人高光表现：本周 ${highlights.join("，")}。`
     : "根据本周完赛表现自动评选。";
+  return expectationAdjustment > 0
+    ? `${reason} 高水平种子按更高表现预期进行评选。`
+    : reason;
 }
 
 function emptyMetrics(): WeeklyStarMetrics {
@@ -447,4 +498,11 @@ function toDatePart(date: Date) {
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
+}
+
+function median(values: number[]) {
+  const middle = Math.floor(values.length / 2);
+  return values.length % 2 === 0
+    ? (values[middle - 1] + values[middle]) / 2
+    : values[middle];
 }

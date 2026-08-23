@@ -1853,42 +1853,64 @@ export async function saveSoftScoringDraftAction(payload: unknown) {
   await assertMatchMember(values.matchId, user.id);
 
   const admin = createSupabaseAdminClient();
-  const { data: match, error: matchError } = await admin
-    .from("matches")
-    .select("id, tournament_id, participant_a_id, participant_b_id, status, details")
-    .eq("id", values.matchId)
-    .single();
+  const requestedSavedAt = values.draft.savedAt || new Date().toISOString();
+  const requestedSavedAtValue = Date.parse(requestedSavedAt);
+  let draftValidated = false;
 
-  if (matchError) throw new Error(matchError.message);
-  if (match.status === "completed" || match.status === "bye") return;
-  if (!match.participant_a_id || !match.participant_b_id) {
-    throw new Error("Match does not have two participants.");
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const { data: match, error: matchError } = await admin
+      .from("matches")
+      .select("id, participant_a_id, participant_b_id, status, details, updated_at")
+      .eq("id", values.matchId)
+      .single();
+
+    if (matchError) throw new Error(matchError.message);
+    if (match.status === "completed" || match.status === "bye") return;
+    if (!match.participant_a_id || !match.participant_b_id) {
+      throw new Error("Match does not have two participants.");
+    }
+
+    if (!draftValidated) {
+      const participantAUserIds = await getTeamUserIds(admin, match.participant_a_id);
+      const participantBUserIds = await getTeamUserIds(admin, match.participant_b_id);
+      assertSoftScoringDraftBelongsToMatch({
+        draft: values.draft,
+        participantAId: match.participant_a_id,
+        participantBId: match.participant_b_id,
+        participantAUserIds,
+        participantBUserIds
+      });
+      draftValidated = true;
+    }
+
+    const nextDetails = matchDetailsRecord(match.details);
+    const storedDraft = nextDetails.softScoringDraft;
+    const storedSavedAt =
+      storedDraft && typeof storedDraft === "object" && !Array.isArray(storedDraft)
+        ? Date.parse(String((storedDraft as { savedAt?: unknown }).savedAt || ""))
+        : 0;
+    if (Number.isFinite(storedSavedAt) && storedSavedAt >= requestedSavedAtValue) return;
+
+    nextDetails.softScoringDraft = {
+      ...values.draft,
+      savedAt: requestedSavedAt,
+      savedBy: user.id
+    };
+
+    const { data: updatedMatch, error: updateError } = await admin
+      .from("matches")
+      .update({ details: nextDetails })
+      .eq("id", values.matchId)
+      .eq("updated_at", match.updated_at)
+      .neq("status", "completed")
+      .neq("status", "bye")
+      .select("id")
+      .maybeSingle();
+    if (updateError) throw new Error(updateError.message);
+    if (updatedMatch) return;
   }
 
-  const participantAUserIds = await getTeamUserIds(admin, match.participant_a_id);
-  const participantBUserIds = await getTeamUserIds(admin, match.participant_b_id);
-  assertSoftScoringDraftBelongsToMatch({
-    draft: values.draft,
-    participantAId: match.participant_a_id,
-    participantBId: match.participant_b_id,
-    participantAUserIds,
-    participantBUserIds
-  });
-
-  const nextDetails = matchDetailsRecord(match.details);
-  nextDetails.softScoringDraft = {
-    ...values.draft,
-    savedAt: new Date().toISOString(),
-    savedBy: user.id
-  };
-
-  const { error: updateError } = await admin
-    .from("matches")
-    .update({ details: nextDetails })
-    .eq("id", values.matchId)
-    .neq("status", "completed")
-    .neq("status", "bye");
-  if (updateError) throw new Error(updateError.message);
+  throw new Error("保存进度时比赛数据发生变化，请重新点击保存进度。");
 }
 
 export async function clearSoftScoringDraftAction(payload: unknown) {

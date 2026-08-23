@@ -2,6 +2,7 @@
 
 import { clearSoftScoringDraftAction, completeScoredMatchAction, saveSoftScoringDraftAction } from "@/lib/actions/matches";
 import { SoftMatchScoreboard, type SoftScoringDraftPayload } from "@/components/scorer/SoftMatchScoreboard";
+import { getSoftDraftStorageKey } from "@/lib/scorer/draft-recovery";
 import type { ScoringCompletePayload } from "@/components/scorer/TouchScoreboard";
 import type { MatchFinishMode, MatchLegLineup, MatchLegRule } from "@/types/domain";
 
@@ -51,6 +52,7 @@ export function SoftScoreboard({
       matchFinishMode={matchFinishMode}
       initialLineups={initialLineups}
       initialDraft={initialDraft}
+      draftStorageKey={getSoftDraftStorageKey(matchId)}
       onSaveDraft={(draft) => saveSoftScoringDraftAction({ matchId, draft })}
       onClearDraft={() => clearSoftScoringDraftAction({ matchId })}
       saveLabel="上传结果"

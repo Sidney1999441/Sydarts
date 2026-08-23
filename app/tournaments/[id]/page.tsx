@@ -335,7 +335,10 @@ export default async function TournamentDetailPage({
       weeklyStarIdentities.set(member.userId, {
         name: compactPlayerName(member.name) || member.name,
         avatarUrl: profileRow?.avatar_url || null,
-        teamName
+        teamName,
+        strengthLevel: calculatePlayerLevel({
+          rating: tournamentRatingByUserId.get(member.userId) ?? 1000
+        }).level
       });
     }
   }

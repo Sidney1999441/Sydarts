@@ -250,7 +250,10 @@ export default async function MatchScorerPage({
           canSubmitB={canManageLineup(participantB.id)}
         />
       ) : bothLineupsSubmitted ? (
-        <OfficialLineupGate pairings={lineupPairings}>
+        <OfficialLineupGate
+          pairings={lineupPairings}
+          initiallyStarted={Boolean(matchDartMode === "soft" ? softScoringDraft : scoringDraft)}
+        >
           {matchDartMode === "soft" ? (
             <SoftScoreboard
               matchId={match.id}

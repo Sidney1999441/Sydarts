@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { ArrowLeft, Star } from "lucide-react";
+import { calculatePlayerLevel } from "@/lib/algorithms/player-level";
 import { requireAdmin } from "@/lib/auth/guards";
 import { hasSupabaseEnv } from "@/lib/env";
 import { formatUserDisplayName } from "@/lib/scorer/display-names";
@@ -59,8 +60,8 @@ export default async function TournamentStarsAdminPage({ params }: { params: Pro
     ])
   ] as string[];
   const profilesResult = userIds.length > 0
-    ? await admin.from("profiles").select("id, uid, display_name, avatar_url").in("id", userIds)
-    : { data: [] as Array<{ id: string; uid: string; display_name: string | null; avatar_url: string | null }> };
+    ? await admin.from("profiles").select("id, uid, display_name, avatar_url, rating, tournament_rating").in("id", userIds)
+    : { data: [] as Array<{ id: string; uid: string; display_name: string | null; avatar_url: string | null; rating: number | null; tournament_rating: number | null }> };
   const profileById = new Map((profilesResult.data || []).map((profile) => [profile.id, profile]));
   const participantMembersById = new Map<string, Array<{ userId: string }>>();
   const identitiesByUserId = new Map<string, WeeklyStarIdentity>();
@@ -83,7 +84,10 @@ export default async function TournamentStarsAdminPage({ params }: { params: Pro
           includeUid: false
         }),
         avatarUrl: profile?.avatar_url || null,
-        teamName: participant.participant_type === "team" ? participant.display_name || "" : ""
+        teamName: participant.participant_type === "team" ? participant.display_name || "" : "",
+        strengthLevel: calculatePlayerLevel({
+          rating: profile?.tournament_rating ?? profile?.rating ?? 1000
+        }).level
       });
     }
   }

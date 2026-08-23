@@ -62,7 +62,7 @@ export function WeeklyStarBoard({ stars, tournamentStartAt }: { stars: WeeklySta
         <details className="mt-3 text-xs font-semibold text-muted">
           <summary className="cursor-pointer text-board">评选原理</summary>
           <p className="mt-2 leading-6">
-            只统计已经结束且有个人数据的正式比赛。系统综合出场、胜场、赢局、PPR/MPR，以及 180、帽子、白马、9 Mark、最高拆分和高分赛成绩；软硬镖指标会先按各自合理上限归一化，再进行比较。管理员可按实际贡献人工调整，并明确标记为“人工评定”。
+            只统计已经结束且有个人数据的正式比赛。系统综合出场、胜场、赢局、PPR/MPR，以及 180、帽子、白马、9 Mark、最高拆分和高分赛成绩；软硬镖指标会先按各自合理上限归一化。若某位选手的等级既明显高于赛事中位水平、又与其他选手存在较大断层，系统会提高其自动当选门槛，只有显著超出自身常态的表现才能抵消。管理员仍可按实际贡献人工调整。
           </p>
         </details>
       </div>

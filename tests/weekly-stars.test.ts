@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  calculateWeeklyStarExpectationAdjustment,
   evaluateWeeklyStars,
   getPreviousWeekStart,
   getShanghaiWeekStart,
@@ -168,4 +169,99 @@ describe("weekly tournament stars", () => {
 
     expect(evaluation.automaticStars[0].metrics.bestAverage).toBe(120);
   });
+
+  it("raises the automatic selection bar only for an isolated high-level outlier", () => {
+    expect(calculateWeeklyStarExpectationAdjustment(70, [70, 36, 21, 9, 7])).toBeGreaterThan(15);
+    expect(calculateWeeklyStarExpectationAdjustment(36, [70, 36, 21, 9, 7])).toBe(0);
+    expect(calculateWeeklyStarExpectationAdjustment(70, [70, 66, 21, 9, 7])).toBe(0);
+
+    const adjustedIdentities = new Map([
+      ["u1", { name: "强者", avatarUrl: null, teamName: "一队", strengthLevel: 70 }],
+      ["u2", { name: "进步选手", avatarUrl: null, teamName: "二队", strengthLevel: 36 }],
+      ["u3", { name: "丙", avatarUrl: null, teamName: "三队", strengthLevel: 21 }],
+      ["u4", { name: "丁", avatarUrl: null, teamName: "四队", strengthLevel: 9 }]
+    ]);
+    const adjustedMembers = new Map([
+      ["p1", [{ userId: "u1" }]],
+      ["p2", [{ userId: "u2" }]],
+      ["p3", [{ userId: "u3" }]],
+      ["p4", [{ userId: "u4" }]]
+    ]);
+    const evaluation = evaluateWeeklyStars({
+      now: new Date("2026-08-17T04:00:00.000Z"),
+      participantMembersById: adjustedMembers,
+      identitiesByUserId: adjustedIdentities,
+      matches: [
+        completedSteelMatch("strong-routine", "p1", "p3", "p1", { u1: 90, u3: 52 }),
+        completedSteelMatch("improver-win", "p2", "p4", "p2", { u2: 75, u4: 40 })
+      ]
+    });
+
+    const candidates = evaluation.candidatesByWeek.get("2026-08-10") || [];
+    const strongCandidate = candidates.find((candidate) => candidate.userId === "u1");
+    expect(strongCandidate?.rawScore).toBeGreaterThan(
+      candidates.find((candidate) => candidate.userId === "u2")?.rawScore || 0
+    );
+    expect(strongCandidate?.expectationAdjustment).toBeGreaterThan(15);
+    expect(evaluation.automaticStars[0].userId).toBe("u2");
+  });
+
+  it("still allows an isolated high-level player to win with an exceptional week", () => {
+    const adjustedIdentities = new Map([
+      ["u1", { name: "强者", avatarUrl: null, teamName: "一队", strengthLevel: 70 }],
+      ["u2", { name: "乙", avatarUrl: null, teamName: "二队", strengthLevel: 36 }],
+      ["u3", { name: "丙", avatarUrl: null, teamName: "三队", strengthLevel: 21 }],
+      ["u4", { name: "丁", avatarUrl: null, teamName: "四队", strengthLevel: 9 }]
+    ]);
+    const adjustedMembers = new Map([
+      ["p1", [{ userId: "u1" }]],
+      ["p2", [{ userId: "u2" }]],
+      ["p3", [{ userId: "u3" }]],
+      ["p4", [{ userId: "u4" }]]
+    ]);
+    const evaluation = evaluateWeeklyStars({
+      now: new Date("2026-08-17T04:00:00.000Z"),
+      participantMembersById: adjustedMembers,
+      identitiesByUserId: adjustedIdentities,
+      matches: [
+        completedSteelMatch("strong-win-1", "p1", "p3", "p1", { u1: 104, u3: 52 }),
+        completedSteelMatch("strong-win-2", "p1", "p4", "p1", { u1: 110, u4: 40 }),
+        completedSteelMatch("other-win", "p2", "p3", "p2", { u2: 75, u3: 52 })
+      ]
+    });
+
+    expect(evaluation.automaticStars[0].userId).toBe("u1");
+    expect(evaluation.automaticStars[0].reason).toContain("更高表现预期");
+  });
 });
+
+function completedSteelMatch(
+  id: string,
+  participantAId: string,
+  participantBId: string,
+  winnerParticipantId: string,
+  averagesByUserId: Record<string, number>
+) {
+  return {
+    id,
+    status: "completed",
+    updated_at: "2026-08-13T12:00:00.000Z",
+    participant_a_id: participantAId,
+    participant_b_id: participantBId,
+    winner_participant_id: winnerParticipantId,
+    dart_mode: "steel" as const,
+    details: {
+      legResults: [{
+        legNumber: 1,
+        dartMode: "steel",
+        winnerParticipantId,
+        userStats: Object.fromEntries(
+          Object.entries(averagesByUserId).map(([userId, averagePer3Darts]) => [
+            userId,
+            { averagePer3Darts }
+          ])
+        )
+      }]
+    }
+  };
+}

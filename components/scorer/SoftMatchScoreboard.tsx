@@ -17,6 +17,7 @@ import {
 } from "@/lib/darts/soft-stats";
 import { createResultSubmissionId } from "@/lib/results/submission";
 import { compactPlayerName, composeParticipantMemberName } from "@/lib/scorer/display-names";
+import { pickLatestDraft } from "@/lib/scorer/draft-recovery";
 import { Button } from "@/components/ui/Button";
 import { PlayerIdentity } from "@/components/ui/PlayerIdentity";
 import type { MatchFinishMode, MatchLegLineup, MatchLegResult, MatchLegRule } from "@/types/domain";
@@ -112,6 +113,12 @@ function normalizeSoftDraft(
   participantBId: string
 ) {
   if (!draft || draft.version !== 1) return null;
+  if (!draft.submissionId || !Array.isArray(draft.lineups) || !Array.isArray(draft.legEntries)) return null;
+  if (!Number.isInteger(draft.currentLegIndex) || draft.currentLegIndex < 0) return null;
+  if (!Number.isFinite(draft.scoreA) || !Number.isFinite(draft.scoreB)) return null;
+  if (!draft.legStats || typeof draft.legStats !== "object" || !draft.ppdInputs || typeof draft.ppdInputs !== "object") {
+    return null;
+  }
   if (draft.winnerParticipantId && draft.winnerParticipantId !== participantAId && draft.winnerParticipantId !== participantBId) {
     return null;
   }
@@ -131,6 +138,7 @@ export function SoftMatchScoreboard({
   matchFinishMode = "majority",
   initialLineups,
   initialDraft = null,
+  draftStorageKey,
   onSaveDraft,
   onClearDraft,
   saveLabel,
@@ -143,6 +151,7 @@ export function SoftMatchScoreboard({
   matchFinishMode?: MatchFinishMode;
   initialLineups?: MatchLegLineup[];
   initialDraft?: SoftScoringDraftPayload | null;
+  draftStorageKey?: string;
   onSaveDraft?: (draft: SoftScoringDraftPayload) => Promise<void>;
   onClearDraft?: () => Promise<void>;
   saveLabel: string;
@@ -173,12 +182,15 @@ export function SoftMatchScoreboard({
   const [draftStatus, setDraftStatus] = useState<"idle" | "restored" | "saving" | "saved" | "error">(
     safeInitialDraft ? "restored" : "idle"
   );
+  const [isDraftHydrated, setIsDraftHydrated] = useState(!draftStorageKey);
+  const [draftRetryToken, setDraftRetryToken] = useState(0);
   const [isSaved, setIsSaved] = useState(false);
   const [isPending, startTransition] = useTransition();
   const submissionIdRef = useRef(safeInitialDraft?.submissionId || createResultSubmissionId());
   const draftSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastDraftSignatureRef = useRef("");
   const autoSubmitSignatureRef = useRef("");
+  const initialDraftRef = useRef(safeInitialDraft);
 
   const currentRule = rules[currentLegIndex] || rules[0];
   const currentLineup = lineups.find((lineup) => lineup.legNumber === currentRule?.legNumber) || lineups[0];
@@ -239,23 +251,91 @@ export function SoftMatchScoreboard({
     };
   }
 
+  function restoreDraft(draft: SoftScoringDraftPayload) {
+    setLineups(draft.lineups);
+    setLineupConfirmed(draft.lineupConfirmed);
+    setCurrentLegIndex(draft.currentLegIndex);
+    setScoreA(draft.scoreA);
+    setScoreB(draft.scoreB);
+    setWinnerParticipantId(draft.winnerParticipantId);
+    setLegEntries(draft.legEntries);
+    setCurrentWinner(draft.currentWinner);
+    setParticipantScoreA(draft.participantScoreA);
+    setParticipantScoreB(draft.participantScoreB);
+    setLegStats(draft.legStats);
+    setPpdInputs(draft.ppdInputs);
+    submissionIdRef.current = draft.submissionId;
+  }
+
+  function saveLocalDraft(draft: SoftScoringDraftPayload) {
+    if (!draftStorageKey) return;
+    try {
+      window.localStorage.setItem(draftStorageKey, JSON.stringify(draft));
+    } catch {
+      // Database persistence still works when private browsing blocks local storage.
+    }
+  }
+
+  function clearLocalDraft() {
+    if (!draftStorageKey) return;
+    try {
+      window.localStorage.removeItem(draftStorageKey);
+    } catch {
+      // Nothing else is required when local storage is unavailable.
+    }
+  }
+
   useEffect(() => {
-    if (!onSaveDraft || isSaved) return;
+    if (!draftStorageKey) return;
+    let localDraft: SoftScoringDraftPayload | null = null;
+    try {
+      const raw = window.localStorage.getItem(draftStorageKey);
+      localDraft = raw
+        ? normalizeSoftDraft(JSON.parse(raw) as SoftScoringDraftPayload, participantA.id, participantB.id)
+        : null;
+    } catch {
+      clearLocalDraft();
+    }
+
+    const latestDraft = pickLatestDraft(initialDraftRef.current, localDraft);
+    if (latestDraft && latestDraft !== initialDraftRef.current) {
+      restoreDraft(latestDraft);
+      setMessage("已恢复本机保存的最新进度，正在同步到服务器。");
+      setDraftStatus("restored");
+    }
+    setIsDraftHydrated(true);
+  }, [draftStorageKey, participantA.id, participantB.id]);
+
+  useEffect(() => {
+    const retryAfterReconnect = () => setDraftRetryToken((value) => value + 1);
+    window.addEventListener("online", retryAfterReconnect);
+    return () => window.removeEventListener("online", retryAfterReconnect);
+  }, []);
+
+  useEffect(() => {
+    if (!isDraftHydrated || isSaved) return;
     const draftCore = buildDraftCore();
     if (!draftCore) return;
     const signature = JSON.stringify(draftCore);
+    const snapshot: SoftScoringDraftPayload = {
+      ...draftCore,
+      savedAt: new Date().toISOString()
+    };
+    saveLocalDraft(snapshot);
+    if (!onSaveDraft) return;
     if (signature === lastDraftSignatureRef.current) return;
     if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current);
 
     draftSaveTimerRef.current = setTimeout(() => {
       lastDraftSignatureRef.current = signature;
       setDraftStatus("saving");
-      onSaveDraft({
-        ...draftCore,
-        savedAt: new Date().toISOString()
-      })
+      onSaveDraft(snapshot)
         .then(() => setDraftStatus("saved"))
-        .catch(() => setDraftStatus("error"));
+        .catch(() => {
+          lastDraftSignatureRef.current = "";
+          setDraftStatus("error");
+          setMessage("网络保存失败，当前输入已保存在本机；联网后会自动重试。");
+        });
     }, 650);
 
     return () => {
@@ -265,6 +345,7 @@ export function SoftMatchScoreboard({
     currentLegIndex,
     currentWinner,
     isSaved,
+    isDraftHydrated,
     legEntries,
     legStats,
     lineups,
@@ -275,6 +356,7 @@ export function SoftMatchScoreboard({
     ppdInputs,
     scoreA,
     scoreB,
+    draftRetryToken,
     winnerParticipantId
   ]);
 
@@ -377,6 +459,7 @@ export function SoftMatchScoreboard({
     submissionIdRef.current = createResultSubmissionId();
     if (draftSaveTimerRef.current) clearTimeout(draftSaveTimerRef.current);
     lastDraftSignatureRef.current = "";
+    clearLocalDraft();
     if (onClearDraft) void onClearDraft().catch(() => setDraftStatus("error"));
   }
 
@@ -392,10 +475,12 @@ export function SoftMatchScoreboard({
     const signature = JSON.stringify(draftCore);
     lastDraftSignatureRef.current = signature;
     setDraftStatus("saving");
-    onSaveDraft({
+    const snapshot: SoftScoringDraftPayload = {
       ...draftCore,
       savedAt: new Date().toISOString()
-    })
+    };
+    saveLocalDraft(snapshot);
+    onSaveDraft(snapshot)
       .then(() => {
         setDraftStatus("saved");
         setMessage("当前进度已保存，断线后可从这里继续。");
@@ -547,6 +632,7 @@ export function SoftMatchScoreboard({
           legLineups: lineups,
           userStats
         });
+        clearLocalDraft();
         setIsSaved(true);
         setDraftStatus("idle");
         setMessage(successMessage);
