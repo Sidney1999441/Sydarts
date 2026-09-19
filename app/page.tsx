@@ -25,6 +25,7 @@ import { formatUserDisplayName, isOpaqueIdentifier } from "@/lib/scorer/display-
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { cn, formatDateTime } from "@/lib/utils";
+import { classifyWeeklyMatch, startOfChinaWeek, addDays } from "@/lib/schedule/weekly";
 import type {
   MatchBoardReservation,
   MatchDartMode,
@@ -262,7 +263,7 @@ async function loadWeeklySchedule(
   ]);
 
   const activeTournaments = ((tournamentRows || []) as Tournament[]).filter((tournament) =>
-    ["registration_open", "in_progress"].includes(tournament.status)
+    ["registration_open", "registration_closed", "in_progress"].includes(tournament.status)
   );
   const tournamentById = new Map(activeTournaments.map((tournament) => [tournament.id, tournament]));
   const participantRows = (allParticipants || []) as HomeParticipantRow[];
@@ -432,13 +433,8 @@ async function loadWeeklySchedule(
     const tournament = tournamentById.get(match.tournament_id);
     if (!tournament) continue;
     const currentReservation = reservationByMatchId.get(match.id) || null;
-    const matchTime = getMatchScheduleTime(match, currentReservation);
-    const scheduledThisWeek = Boolean(matchTime && matchTime >= weekStart && matchTime < weekEnd);
-    const completedTime = match.status === "completed" ? getMatchCompletionTime(match, currentReservation) : null;
-    const completedThisWeek = Boolean(completedTime && completedTime >= weekStart && completedTime < weekEnd);
-    const overdue = isUnplayedMatch(match.status) && isMatchOverdue(match, tournament, currentReservation, weekStart);
-    const byeThisWeek = match.status === "bye" && isTournamentRoundInWeek(match, tournament, weekStart);
-    if (overdue || scheduledThisWeek || completedThisWeek || byeThisWeek) {
+    const { current, overdue } = classifyWeeklyMatch(match, tournament, now, currentReservation?.reservedStartAt);
+    if (current) {
       addItem(match, overdue);
     }
   }
@@ -452,32 +448,6 @@ async function loadWeeklySchedule(
         tournamentMatches: sortedTournamentMatches
       });
       if (byeMatch) addItem(byeMatch, false, getTournamentScheduleDartModes(tournament));
-    }
-  }
-
-  const selectedCurrentWeekModeKeys = new Set(
-    items
-      .filter((item) => !item.isOverdue)
-      .flatMap((item) => (item.blocksDartModes || [item.dartMode]).map((dartMode) => `${item.match.tournament_id}:${dartMode}`))
-  );
-
-  for (const tournament of activeTournaments) {
-    for (const dartMode of ["soft", "steel"] as MatchDartMode[]) {
-      const key = `${tournament.id}:${dartMode}`;
-      if (selectedCurrentWeekModeKeys.has(key)) continue;
-      const nextMatch = sortedMatches.find(
-        (match) =>
-          match.tournament_id === tournament.id &&
-          (match.dart_mode === "soft" ? "soft" : "steel") === dartMode &&
-          isUnplayedMatch(match.status) &&
-          isTournamentRoundInWeek(match, tournament, weekStart) &&
-          !selectedIds.has(match.id) &&
-          !isMatchOverdue(match, tournament, reservationByMatchId.get(match.id) || null, weekStart)
-      );
-      if (nextMatch) {
-        addItem(nextMatch, false);
-        selectedCurrentWeekModeKeys.add(key);
-      }
     }
   }
 
@@ -568,6 +538,9 @@ function WeeklySchedulePanel({
             {schedule ? `${schedule.weekLabel} · 预约、布阵、计分和赛果都从这里直接处理。` : "登录后自动显示你本周要处理的比赛。"}
           </p>
         </div>
+        <Link href="/boards" className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-wire bg-surface px-3 text-sm font-bold text-board">
+          <CalendarDays className="h-4 w-4" aria-hidden />预约日历
+        </Link>
         {schedule?.overdueCount ? (
           <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-black text-amber-800">
             {schedule.overdueCount} 场补赛
@@ -980,22 +953,15 @@ function isTournamentRoundInWeek(match: HomeMatchRow, tournament: Tournament, we
 }
 
 function startOfLocalWeek(value: Date) {
-  const date = new Date(value);
-  date.setHours(0, 0, 0, 0);
-  const day = date.getDay();
-  const offset = day === 0 ? -6 : 1 - day;
-  date.setDate(date.getDate() + offset);
-  return date;
+  return startOfChinaWeek(value);
 }
 
 function addLocalDays(value: Date, days: number) {
-  const date = new Date(value);
-  date.setDate(date.getDate() + days);
-  return date;
+  return addDays(value, days);
 }
 
 function formatWeekRange(weekStart: Date, weekEnd: Date) {
-  const formatter = new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit" });
+  const formatter = new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", timeZone: "Asia/Shanghai" });
   return `${formatter.format(weekStart)}-${formatter.format(addLocalDays(weekEnd, -1))}`;
 }
 

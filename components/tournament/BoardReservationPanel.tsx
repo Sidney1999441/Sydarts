@@ -8,7 +8,9 @@ import {
   reserveMatchBoardAction,
   type BoardReservationActionState
 } from "@/lib/actions/board-reservations";
-import { formatDateTime, toDatetimeLocal } from "@/lib/utils";
+import { formatDateTime } from "@/lib/utils";
+import { boardDayAvailability } from "@/lib/schedule/board-calendar";
+import { chinaDate, chinaDay, addDays } from "@/lib/schedule/weekly";
 import { Button } from "@/components/ui/Button";
 
 export type BoardReservationBoard = {
@@ -45,7 +47,6 @@ const initialState: BoardReservationActionState = {
   error: null
 };
 
-const ONE_HOUR_MS = 60 * 60 * 1000;
 const BOOKING_WINDOW_DAYS = 7;
 
 export function BoardReservationPanel({
@@ -77,7 +78,7 @@ export function BoardReservationPanel({
 
   useEffect(() => {
     if (reserveState.ok || cancelState.ok) router.refresh();
-  }, [cancelState.ok, reserveState.ok, router]);
+  }, [cancelState, reserveState, router]);
 
   useEffect(() => {
     setSelectedDate((value) => clampDateValue(value, todayDateValue, maxDateValue));
@@ -224,7 +225,7 @@ export function BoardReservationPanel({
                         <form key={`${board.id}-${slot.startAt}`} action={reserveAction}>
                           <input type="hidden" name="match_id" value={matchId} />
                           <input type="hidden" name="board_id" value={board.id} />
-                          <input type="hidden" name="reserved_start_at" value={toDatetimeLocal(slot.startAt)} />
+                          <input type="hidden" name="reserved_start_at" value={slot.startAt} />
                           <button
                             className="grid min-h-14 w-full touch-manipulation place-items-center rounded-lg border border-board/20 bg-board/10 px-2 text-center text-xs font-black text-board active:bg-board/20"
                             type="submit"
@@ -301,85 +302,13 @@ function ActionMessage({ state }: { state: BoardReservationActionState }) {
   return null;
 }
 
-function buildFreeSlotsForDate({
-  board,
-  reservations,
-  currentMatchId,
-  datePart
-}: {
+function buildFreeSlotsForDate({ board, reservations, currentMatchId, datePart }: {
   board: BoardReservationBoard;
   reservations: BoardReservationRow[];
   currentMatchId: string;
   datePart: string;
 }) {
-  const slots: Array<{ startAt: string; endAt: string }> = [];
-  const now = new Date();
-  const selectedDayStart = combineLocalDateAndTime(datePart, "00:00:00");
-  const selectedDayEnd = addLocalDays(selectedDayStart, 1);
-
-  for (const availableSlot of getActiveBoardSlots(board)) {
-    if (!availableSlot.dailyStartTime || !availableSlot.dailyEndTime) {
-      const boardStart = maxDate(ceilToHour(new Date(availableSlot.availableStartAt)), selectedDayStart);
-      const boardEnd = new Date(availableSlot.availableEndAt);
-      const rangeEnd = minDate(boardEnd, selectedDayEnd);
-
-      for (let cursor = ceilToHour(boardStart); cursor.getTime() + ONE_HOUR_MS <= rangeEnd.getTime(); cursor = new Date(cursor.getTime() + ONE_HOUR_MS)) {
-        pushFreeSlotIfAvailable({ slots, cursor, board, reservations, currentMatchId, now });
-      }
-      continue;
-    }
-
-    const boardStart = ceilToHour(combineLocalDateAndTime(datePart, availableSlot.dailyStartTime));
-    let boardEnd = combineLocalDateAndTime(datePart, availableSlot.dailyEndTime);
-    if (boardEnd <= boardStart) {
-      boardEnd = addLocalDays(boardEnd, 1);
-    }
-
-    for (let cursor = boardStart; cursor.getTime() + ONE_HOUR_MS <= boardEnd.getTime(); cursor = new Date(cursor.getTime() + ONE_HOUR_MS)) {
-      pushFreeSlotIfAvailable({ slots, cursor, board, reservations, currentMatchId, now });
-    }
-  }
-
-  const seen = new Set<string>();
-  return slots
-    .sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime())
-    .filter((slot) => {
-      const key = `${slot.startAt}-${slot.endAt}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-}
-
-function pushFreeSlotIfAvailable({
-  slots,
-  cursor,
-  board,
-  reservations,
-  currentMatchId,
-  now
-}: {
-  slots: Array<{ startAt: string; endAt: string }>;
-  cursor: Date;
-  board: BoardReservationBoard;
-  reservations: BoardReservationRow[];
-  currentMatchId: string;
-  now: Date;
-}) {
-  const endAt = new Date(cursor.getTime() + ONE_HOUR_MS);
-  if (cursor < now) return;
-
-  const busy = reservations.some(
-    (reservation) =>
-      reservation.status === "active" &&
-      reservation.boardId === board.id &&
-      reservation.matchId !== currentMatchId &&
-      overlaps(cursor, endAt, new Date(reservation.reservedStartAt), new Date(reservation.reservedEndAt))
-  );
-
-  if (!busy) {
-    slots.push({ startAt: cursor.toISOString(), endAt: endAt.toISOString() });
-  }
+  return boardDayAvailability(board, datePart, reservations, new Date(), currentMatchId).free;
 }
 
 function getActiveBoardSlots(board: BoardReservationBoard): BoardReservationSlot[] {
@@ -421,51 +350,25 @@ function normalizeDailyTime(time: string) {
 }
 
 function startOfLocalDay(date: Date) {
-  const result = new Date(date);
-  result.setHours(0, 0, 0, 0);
-  return result;
+  return chinaDay(chinaDate(date));
 }
 
 function addLocalDays(date: Date, days: number) {
-  const result = new Date(date);
-  result.setDate(result.getDate() + days);
-  return result;
+  return addDays(date, days);
 }
 
 function toLocalDatePart(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return chinaDate(date);
 }
 
 function combineLocalDateAndTime(datePart: string, time: string) {
-  return new Date(`${datePart}T${normalizeDailyTime(time)}`);
+  return new Date(`${datePart}T${normalizeDailyTime(time)}+08:00`);
 }
 
 function clampDateValue(datePart: string, minDatePart: string, maxDatePart: string) {
   if (datePart < minDatePart) return minDatePart;
   if (datePart > maxDatePart) return maxDatePart;
   return datePart;
-}
-
-function maxDate(dateA: Date, dateB: Date) {
-  return dateA > dateB ? dateA : dateB;
-}
-
-function minDate(dateA: Date, dateB: Date) {
-  return dateA < dateB ? dateA : dateB;
-}
-
-function ceilToHour(date: Date) {
-  const next = new Date(date);
-  next.setMinutes(0, 0, 0);
-  if (next < date) next.setHours(next.getHours() + 1);
-  return next;
-}
-
-function overlaps(startA: Date, endA: Date, startB: Date, endB: Date) {
-  return startA < endB && endA > startB;
 }
 
 function formatReservationRange(reservation: BoardReservationRow) {
@@ -475,14 +378,16 @@ function formatReservationRange(reservation: BoardReservationRow) {
 function formatTimeRange(startAt: string, endAt: string) {
   const start = new Date(startAt);
   const end = new Date(endAt);
-  const sameDay = start.toDateString() === end.toDateString();
+  const sameDay = chinaDate(start) === chinaDate(end);
   const dateFormatter = new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit"
   });
   const timeFormatter = new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
     hour: "2-digit",
     minute: "2-digit"
   });
@@ -492,6 +397,7 @@ function formatTimeRange(startAt: string, endAt: string) {
 
 function formatDateLabel(datePart: string) {
   return new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
     month: "2-digit",
     day: "2-digit",
     weekday: "short"

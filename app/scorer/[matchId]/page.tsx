@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import Link from "next/link";
 import { requireUser } from "@/lib/auth/guards";
 import { resolveFirstThrowHandicap } from "@/lib/algorithms/first-throw-handicap";
 import { getCompactMatchRulesSummary, getDartModeLabel, getLegRuleLabel, getLegStartingScore, resolveMatchLegRules } from "@/lib/darts/variants";
@@ -32,7 +33,7 @@ export default async function MatchScorerPage({
   const { matchId } = await params;
   if (!hasSupabaseEnv()) return <SetupNotice />;
 
-  const { user } = await requireUser();
+  const { user, profile } = await requireUser();
   const supabase = await createSupabaseServerClient();
   const admin = createSupabaseAdminClient();
   const { data: match } = await supabase
@@ -235,6 +236,14 @@ export default async function MatchScorerPage({
           <p className="text-sm font-semibold text-muted">
             这场比赛已完成，比分 {match.score_a}:{match.score_b}。
           </p>
+          <div className="mt-4 flex flex-wrap gap-4 text-sm font-bold text-board">
+            <Link href={`/reports/official/${match.id}`}>查看战报</Link>
+            {profile?.role === "admin" ? (
+              <Link href={`/admin/tournaments/${match.tournament_id}/results?match=${match.id}#match-${match.id}`}>
+                更正本场逐局数据
+              </Link>
+            ) : null}
+          </div>
         </Card>
       ) : needsPrivateLineup && !bothLineupsSubmitted ? (
         <PreMatchLineupPanel

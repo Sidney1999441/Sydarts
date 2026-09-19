@@ -29,6 +29,7 @@ import {
 import { getLegRuleLabel, getLegStartingScore } from "@/lib/darts/variants";
 import type { ManualMatchStats } from "@/lib/darts/soft-stats";
 import { createResultSubmissionId } from "@/lib/results/submission";
+import { packUndoHistory, unpackUndoHistory, type UndoCheckpoint, type ScoringHistoryEntry } from "@/lib/scorer/undo-history";
 import {
   compactPlayerName,
   composeParticipantMemberName,
@@ -51,10 +52,6 @@ export type RoundLimit = 10 | 15 | 20 | "unlimited";
 type PlayerOption = { userId: string; name: string; avatarUrl?: string | null };
 type ParticipantInfo = { id: string; name: string; avatarUrl?: string | null; members?: PlayerOption[] };
 type ThrowerByParticipant = Record<string, string>;
-type ScoringHistoryEntry = {
-  state: ScoringState;
-  throwers: ThrowerByParticipant;
-};
 
 type TurnRoundRow = {
   legNumber: number;
@@ -75,6 +72,7 @@ export type ScoringCompletePayload = {
 };
 
 export type ScoringDraftPayload = {
+  undoHistory?: UndoCheckpoint[];
   version: 1;
   savedAt?: string;
   savedBy?: string;
@@ -357,7 +355,7 @@ export function TouchScoreboard({
   const [state, setState] = useState(() =>
     safeInitialDraft?.state || createFreshState(draftLineups, draftFirstParticipantId, draftFirstThrowMode)
   );
-  const [history, setHistory] = useState<ScoringHistoryEntry[]>([]);
+  const [history, setHistory] = useState<ScoringHistoryEntry[]>(() => safeInitialDraft ? unpackUndoHistory(safeInitialDraft.state, safeInitialDraft.undoHistory) : []);
   const [scoreInput, setScoreInput] = useState("");
   const [checkoutScore, setCheckoutScore] = useState<number | null>(null);
   const [showDetails, setShowDetails] = useState(false);
@@ -379,6 +377,7 @@ export function TouchScoreboard({
       version: 1 as const,
       submissionId: submissionIdRef.current,
       state,
+      undoHistory: packUndoHistory(history),
       lineups,
       firstParticipantId,
       firstThrowMode,
@@ -427,6 +426,7 @@ export function TouchScoreboard({
     };
   }, [
     activeThrowerByParticipant,
+    history,
     firstParticipantId,
     firstThrowMode,
     isSaved,
@@ -716,6 +716,8 @@ export function TouchScoreboard({
     const previous = history.at(-1);
     if (!previous) return;
     setState(previous.state);
+    setFirstParticipantId(previous.state.firstParticipantId);
+    setFirstThrowMode(previous.state.firstThrowMode);
     setActiveThrowerByParticipant(previous.throwers);
     setHistory((current) => current.slice(0, -1));
     setScoreInput("");

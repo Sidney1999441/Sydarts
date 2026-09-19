@@ -241,6 +241,7 @@ function isInsideOneAvailableSlot({
 
 function revalidateReservationPaths(tournamentId: string, matchId?: string) {
   revalidatePath("/");
+  revalidatePath("/boards");
   revalidatePath("/scorer");
   revalidatePath(`/tournaments/${tournamentId}`);
   revalidatePath(`/tournaments/${tournamentId}/display`);

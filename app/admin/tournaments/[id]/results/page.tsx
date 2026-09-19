@@ -119,10 +119,13 @@ function hasInvalidStoredMprInMatch(userStats: StoredUserStats, legResults: Stor
 }
 
 export default async function ResultsAdminPage({
-  params
+  params,
+  searchParams
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ match?: string }>;
 }) {
+  const selectedMatchId = (await searchParams).match;
   const { id } = await params;
   if (!hasSupabaseEnv()) return <SetupNotice />;
   await requireAdmin();
@@ -229,7 +232,8 @@ export default async function ResultsAdminPage({
               <details
                 key={match.id}
                 className="rounded-lg border border-wire bg-surface p-4 shadow-soft"
-                open={match.status !== "completed"}
+              id={`match-${match.id}`}
+              open={match.id === selectedMatchId || match.status !== "completed"}
               >
                 <summary className="cursor-pointer list-none">
                   <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">

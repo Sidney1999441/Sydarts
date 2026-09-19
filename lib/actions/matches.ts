@@ -210,6 +210,14 @@ const scoringStateDraftSchema = z.object({
 });
 
 const scoringDraftSchema = z.object({
+  undoHistory: z.array(z.object({
+    currentLeg: z.number().int().min(1),
+    activeParticipantId: z.string().uuid(), firstParticipantId: z.string().uuid(),
+    firstThrowMode: z.enum(["alternate", "winner", "loser", "fixed"]),
+    turnCount: z.number().int().nonnegative(), legResultCount: z.number().int().nonnegative(),
+    throwers: z.record(z.string(), z.string()),
+    participants: z.array(scoringParticipantDraftSchema.omit({ turns: true })).length(2)
+  })).max(2000).optional(),
   version: z.literal(1),
   savedAt: z.string().optional(),
   savedBy: z.string().uuid().optional(),
@@ -2804,4 +2812,7 @@ export async function adminUpdateMatchResultAction(formData: FormData) {
   });
   revalidatePath(`/admin/tournaments/${tournamentId}/results`);
   revalidatePath(`/tournaments/${tournamentId}`);
+  revalidatePath(`/scorer/${matchId}`);
+  revalidatePath(`/reports/official/${matchId}`);
+  revalidatePath("/");
 }

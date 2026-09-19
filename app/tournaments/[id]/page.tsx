@@ -411,6 +411,9 @@ export default async function TournamentDetailPage({
               <CalendarDays className="h-4 w-4" aria-hidden />
               查看赛程
             </Link>
+            <Link href={`/boards?tournament=${id}`} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-wire bg-surface px-4 text-sm font-bold text-board">
+              <CalendarDays className="h-4 w-4" aria-hidden />预约日历
+            </Link>
             <Link
               className="inline-flex min-h-11 touch-manipulation items-center justify-center gap-2 rounded-lg bg-primary px-4 text-sm font-black text-white shadow-soft"
               href={`/tournaments/${id}/display`}

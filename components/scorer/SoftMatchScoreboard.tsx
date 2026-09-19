@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { Check, ChevronRight, RotateCcw, Save, Trophy, UsersRound } from "lucide-react";
+import { Check, ChevronRight, Pencil, RotateCcw, Save, Trophy, UsersRound } from "lucide-react";
 import { legsNeeded } from "@/lib/algorithms/scoring";
 import { getLegRuleLabel } from "@/lib/darts/variants";
 import {
@@ -18,6 +18,8 @@ import {
 import { createResultSubmissionId } from "@/lib/results/submission";
 import { compactPlayerName, composeParticipantMemberName } from "@/lib/scorer/display-names";
 import { pickLatestDraft } from "@/lib/scorer/draft-recovery";
+import { correctSoftLeg, type SoftLegEntry } from "@/lib/scorer/soft-leg-correction";
+import { SoftLegCorrectionDialog } from "@/components/scorer/SoftLegCorrectionDialog";
 import { Button } from "@/components/ui/Button";
 import { PlayerIdentity } from "@/components/ui/PlayerIdentity";
 import type { MatchFinishMode, MatchLegLineup, MatchLegResult, MatchLegRule } from "@/types/domain";
@@ -26,13 +28,6 @@ import type { ScoringCompletePayload } from "@/components/scorer/TouchScoreboard
 type PlayerOption = { userId: string; name: string; avatarUrl?: string | null };
 type ParticipantInfo = { id: string; name: string; avatarUrl?: string | null; members?: PlayerOption[] };
 type LineupSide = "A" | "B";
-type SoftLegEntry = {
-  legNumber: number;
-  winnerParticipantId: string;
-  scoreA?: number;
-  scoreB?: number;
-  userStats: Record<string, ManualMatchStats>;
-};
 
 export type SoftScoringDraftPayload = {
   version: 1;
@@ -173,6 +168,7 @@ export function SoftMatchScoreboard({
   const [scoreB, setScoreB] = useState(safeInitialDraft?.scoreB || 0);
   const [winnerParticipantId, setWinnerParticipantId] = useState<string | null>(safeInitialDraft?.winnerParticipantId || null);
   const [legEntries, setLegEntries] = useState<SoftLegEntry[]>(safeInitialDraft?.legEntries || []);
+  const [editingLeg, setEditingLeg] = useState<SoftLegEntry | null>(null);
   const [currentWinner, setCurrentWinner] = useState(safeInitialDraft?.currentWinner || "");
   const [participantScoreA, setParticipantScoreA] = useState(safeInitialDraft?.participantScoreA || "");
   const [participantScoreB, setParticipantScoreB] = useState(safeInitialDraft?.participantScoreB || "");
@@ -542,8 +538,6 @@ export function SoftMatchScoreboard({
       return;
     }
 
-    const nextScoreA = scoreA + (legWinner === participantA.id ? 1 : 0);
-    const nextScoreB = scoreB + (legWinner === participantB.id ? 1 : 0);
     const entryUserStats = buildEntryUserStats(sideScoreA, sideScoreB);
     const invalidMprUserId = Object.entries(entryUserStats).find(([, stats]) => !isValidMpr(stats.averageMpr))?.[0];
     if (invalidMprUserId) {
@@ -552,7 +546,7 @@ export function SoftMatchScoreboard({
       return;
     }
     const nextEntries = [
-      ...legEntries,
+      ...legEntries.filter((entry) => entry.legNumber !== currentRule.legNumber),
       {
         legNumber: currentRule.legNumber,
         winnerParticipantId: legWinner,
@@ -566,6 +560,8 @@ export function SoftMatchScoreboard({
       }
     ];
 
+    const nextScoreA = nextEntries.filter((entry) => entry.winnerParticipantId === participantA.id).length;
+    const nextScoreB = nextEntries.filter((entry) => entry.winnerParticipantId === participantB.id).length;
     const isLastConfiguredLeg = currentLegIndex >= rules.length - 1;
     const majorityWinnerReached = Math.max(nextScoreA, nextScoreB) >= legsNeeded(rules.length);
     const shouldFinish =
@@ -805,6 +801,35 @@ export function SoftMatchScoreboard({
 
   return (
     <div className="grid gap-3 rounded-lg">
+      {editingLeg ? <SoftLegCorrectionDialog key={editingLeg.legNumber} entry={editingLeg}
+        rule={rules.find((rule) => rule.legNumber === editingLeg.legNumber)!}
+        participantA={participantA} participantB={participantB}
+        users={(() => {
+          const lineup = lineups.find((item) => item.legNumber === editingLeg.legNumber);
+          return [
+            ...(lineup?.participantAUserIds || []).map((id) => ({ id, name: compactPlayerName(memberNames.get(id)) || "选手", side: "A" as const })),
+            ...(lineup?.participantBUserIds || []).map((id) => ({ id, name: compactPlayerName(memberNames.get(id)) || "选手", side: "B" as const }))
+          ];
+        })()}
+        onClose={() => setEditingLeg(null)}
+        onSave={(entry) => {
+          const corrected = correctSoftLeg(legEntries, entry, participantA.id, participantB.id, rules.length, matchFinishMode);
+          setLegEntries(corrected.entries);
+          setScoreA(corrected.scoreA);
+          setScoreB(corrected.scoreB);
+          setWinnerParticipantId(corrected.winnerParticipantId);
+          setDraftStatus(onSaveDraft ? "saving" : "idle");
+          lastDraftSignatureRef.current = "";
+          setEditingLeg(null);
+          setMessage(`第 ${entry.legNumber} 局已修正，其他局次已保留。`);
+        }} /> : null}
+      {legEntries.length ? <details className="border-b border-wire pb-3">
+        <summary className="min-h-11 cursor-pointer py-2 text-sm font-bold text-board">已录 {legEntries.length} 局 · 查看 / 修改</summary>
+        <div className="grid divide-y divide-wire">{legEntries.map((entry) => <div key={entry.legNumber} className="flex min-w-0 items-center justify-between gap-2 py-2">
+          <div className="min-w-0"><strong className="text-sm">第 {entry.legNumber} 局</strong><p className="break-words text-xs text-muted">胜方：{entry.winnerParticipantId === participantA.id ? participantA.name : participantB.name}</p></div>
+          <button type="button" onClick={() => setEditingLeg(entry)} className="inline-flex min-h-11 shrink-0 items-center gap-1 px-3 text-sm font-bold text-board"><Pencil className="h-4 w-4" />修改</button>
+        </div>)}</div>
+      </details> : null}
       <section className="rounded-lg border border-wire bg-surface p-3 shadow-soft">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
