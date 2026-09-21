@@ -193,7 +193,7 @@ export function BoardCalendar({
                     (item) => item.id === r.id,
                   )!;
                   return (
-                    <Link
+                    <a
                       key={r.id}
                       href={`/scorer/${r.matchId}`}
                       className="grid min-w-0 gap-1 rounded-lg border border-sky-200 bg-sky-50 p-3"
@@ -209,7 +209,7 @@ export function BoardCalendar({
                       <strong className="break-words text-sm">
                         {booking.label}
                       </strong>
-                    </Link>
+                    </a>
                   );
                 })}
               </div>

@@ -42,7 +42,7 @@ export function MatchLineupSubmissionForm({
 
   useEffect(() => {
     if (state.ok) router.refresh();
-  }, [router, state.ok]);
+  }, [router, state]);
 
   if (members.length === 0) {
     return <p className="rounded-lg bg-field p-3 text-sm font-semibold text-muted">当前队伍暂无可布阵队员。</p>;

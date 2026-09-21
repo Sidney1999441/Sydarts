@@ -754,9 +754,9 @@ export default async function TournamentDetailPage({
                 </div>
                 <div className="flex min-w-0 flex-wrap gap-2">
                   {canScore ? (
-                    <Link className="rounded-lg bg-board px-3 py-2 text-sm font-black text-white" href={`/scorer/${match.id}`}>
+                    <a className="inline-flex min-h-11 touch-manipulation items-center rounded-lg bg-board px-3 py-2 text-sm font-black text-white" href={`/scorer/${match.id}`}>
                       计分
-                    </Link>
+                    </a>
                   ) : null}
                   {match.status === "completed" ? (
                     <Link className="inline-flex items-center gap-1 rounded-lg border border-wire bg-surface px-3 py-2 text-sm font-black text-board" href={`/reports/official/${match.id}`}>

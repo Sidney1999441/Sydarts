@@ -686,7 +686,7 @@ function WeeklyScheduleMatchCard({ item }: { item: WeeklyScheduleMatch }) {
 
       <div className={cn("grid gap-2", isBye ? "grid-cols-1" : "grid-cols-2")}>
         {!isBye ? (
-          <Link
+          <a
             href={isCompleted ? `/reports/official/${item.match.id}` : `/scorer/${item.match.id}`}
             className={cn(
               "inline-flex min-h-11 touch-manipulation items-center justify-center rounded-lg px-3 text-sm font-black",
@@ -694,7 +694,7 @@ function WeeklyScheduleMatchCard({ item }: { item: WeeklyScheduleMatch }) {
             )}
           >
             {isCompleted ? "查看战报" : "排阵 / 计分"}
-          </Link>
+          </a>
         ) : null}
         <Link
           href={`/tournaments/${item.tournament.id}?schedule=mine#schedule`}

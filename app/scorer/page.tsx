@@ -129,7 +129,7 @@ export default async function ScorerPage() {
             const currentBoard = currentReservation ? boardById.get(currentReservation.boardId) || null : null;
 
             return (
-              <Link
+              <a
                 key={match.id}
                 href={`/scorer/${match.id}`}
                 className="block min-h-20 touch-manipulation rounded-lg border border-wire bg-surface/90 p-4 transition-colors duration-75 hover:border-board/40 hover:bg-field active:bg-field"
@@ -160,7 +160,7 @@ export default async function ScorerPage() {
                 <div className="mt-2">
                   <MatchBoardReservationBadge reservation={currentReservation} board={currentBoard} />
                 </div>
-              </Link>
+              </a>
             );
           })}
           {(matches || []).length === 0 ? (
