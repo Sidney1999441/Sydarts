@@ -10,6 +10,7 @@ import {
   getMatchLineupSubmissions
 } from "@/lib/matches/lineups";
 import { getMatchStatusLabel } from "@/lib/matches/status";
+import { isHolidayMatchPlayable } from "@/lib/schedule/weekly";
 import { formatUserDisplayName, isOpaqueIdentifier } from "@/lib/scorer/display-names";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -244,6 +245,11 @@ export default async function MatchScorerPage({
               </Link>
             ) : null}
           </div>
+        </Card>
+      ) : !isHolidayMatchPlayable(match, new Date()) ? (
+        <Card>
+          <p className="text-sm font-semibold text-muted">休赛期间仅开放下一轮软镖和硬镖比赛。本场尚未轮到，请在 10 月 12 日后查看顺延赛程。</p>
+          <Link className="mt-3 inline-block text-sm font-bold text-board" href="/">返回赛事工作区</Link>
         </Card>
       ) : needsPrivateLineup && !bothLineupsSubmitted ? (
         <PreMatchLineupPanel

@@ -24,10 +24,57 @@ type ScheduledMatch = {
   completed_at?: string | null;
 };
 type ScheduleTournament = {
+  id?: string;
   dart_mode: string;
   format: string;
   tournament_start_at: string;
 };
+const HOLIDAY_TOURNAMENT_ID = "eb6e0008-064c-4ae7-97e3-524889a4edf1";
+const HOLIDAY_START = chinaDay("2026-09-28");
+const HOLIDAY_END = chinaDay("2026-10-12");
+const HOLIDAY_LEAGUE_WEEK = 8;
+
+export function isHolidayLeagueBreak(tournamentId: string | undefined, at: Date) {
+  return tournamentId === HOLIDAY_TOURNAMENT_ID && at >= HOLIDAY_START && at < HOLIDAY_END;
+}
+
+export function expectedLeagueWeek(tournament: ScheduleTournament, at: Date, holidayRoundCompleted = false) {
+  const weekStart = startOfChinaWeek(at);
+  const start = startOfChinaWeek(new Date(tournament.tournament_start_at));
+  const calendarWeek = Math.floor((weekStart.getTime() - start.getTime()) / (7 * DAY)) + 1;
+  if (tournament.id !== HOLIDAY_TOURNAMENT_ID || weekStart < HOLIDAY_START) return calendarWeek;
+  if (weekStart < HOLIDAY_END) return Math.min(calendarWeek, HOLIDAY_LEAGUE_WEEK);
+  return calendarWeek - (holidayRoundCompleted ? 1 : 2);
+}
+
+export function hasCompletedHolidayRound(
+  matches: Array<{ tournament_id: string; stage: string; round_number: number; status: string;
+    participant_a_id: string | null; participant_b_id: string | null }>,
+  tournamentId: string,
+  participantId: string,
+) {
+  if (tournamentId !== HOLIDAY_TOURNAMENT_ID) return false;
+  return [HOLIDAY_LEAGUE_WEEK * 2 - 1, HOLIDAY_LEAGUE_WEEK * 2].every((roundNumber) => {
+    const roundMatches = matches.filter((match) =>
+      match.tournament_id === tournamentId && match.stage === "group" && match.round_number === roundNumber
+    );
+    if (!roundMatches.length) return false;
+    const ownMatch = roundMatches.find((match) =>
+      match.participant_a_id === participantId || match.participant_b_id === participantId
+    );
+    return !ownMatch || ownMatch.status === "completed" || ownMatch.status === "bye";
+  });
+}
+
+export function isHolidayMatchPlayable(
+  match: { tournament_id: string; stage: string; round_number: number },
+  at: Date,
+) {
+  if (!isHolidayLeagueBreak(match.tournament_id, at)) return true;
+  return match.stage === "group" &&
+    (match.round_number === HOLIDAY_LEAGUE_WEEK * 2 - 1 ||
+      match.round_number === HOLIDAY_LEAGUE_WEEK * 2);
+}
 export function leagueWeek(
   match: ScheduledMatch,
   tournament: ScheduleTournament,
@@ -41,12 +88,11 @@ export function classifyWeeklyMatch(
   tournament: ScheduleTournament,
   now: Date,
   reservationStart?: string | null,
+  holidayRoundCompleted = false,
 ) {
   const weekStart = startOfChinaWeek(now);
   const weekEnd = addDays(weekStart, 7);
-  const start = startOfChinaWeek(new Date(tournament.tournament_start_at));
-  const expectedWeek =
-    Math.floor((weekStart.getTime() - start.getTime()) / (7 * DAY)) + 1;
+  const expectedWeek = expectedLeagueWeek(tournament, now, holidayRoundCompleted);
   const isLeague =
     match.stage === "group" &&
     ["round_robin", "league_playoff"].includes(tournament.format);
@@ -63,7 +109,8 @@ export function classifyWeeklyMatch(
   const current =
     overdue ||
     (isUnplayedMatch(match.status) &&
-      (inWeek(scheduledTime) || plannedWeek === expectedWeek)) ||
+      ((inWeek(scheduledTime) && (!isHolidayLeagueBreak(tournament.id, now) ||
+        plannedWeek === null || plannedWeek <= expectedWeek)) || plannedWeek === expectedWeek)) ||
     (match.status === "completed" &&
       inWeek(new Date(match.completed_at || match.updated_at || ""))) ||
     (match.status === "bye" && plannedWeek === expectedWeek);

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireAdmin, requireUser } from "@/lib/auth/guards";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { fromFormString } from "@/lib/utils";
+import { isHolidayMatchPlayable } from "@/lib/schedule/weekly";
 
 const RESERVATION_DURATION_MS = 60 * 60 * 1000;
 const RESERVATION_BOOKING_WINDOW_DAYS = 7;
@@ -143,7 +144,7 @@ function friendlyBoardSlotError(error: { message?: string; code?: string } | nul
 async function getMatchForReservation(admin: AdminClient, matchId: string, userId: string, isAdmin: boolean) {
   const { data: match, error } = await admin
     .from("matches")
-    .select("id, tournament_id, participant_a_id, participant_b_id, status")
+    .select("id, tournament_id, participant_a_id, participant_b_id, status, stage, round_number")
     .eq("id", matchId)
     .maybeSingle();
 
@@ -432,6 +433,9 @@ export async function reserveMatchBoardAction(
     assertReservationInsideBookingWindow(reservedStartAt);
 
     const match = await getMatchForReservation(admin, matchId, user.id, isAdmin);
+    if (!isHolidayMatchPlayable(match, reservedStartAt)) {
+      throw new Error("休赛期间只开放下一轮软镖和硬镖各一场；后续轮次请在休赛结束后预约。");
+    }
     const { data: board, error: boardError } = await admin
       .from("tournament_boards")
       .select("id, tournament_id, name, available_start_at, available_end_at, status")

@@ -4,6 +4,7 @@ import { requireUser } from "@/lib/auth/guards";
 import { getCompactMatchRulesSummary, getDartModeLabel } from "@/lib/darts/variants";
 import { hasSupabaseEnv } from "@/lib/env";
 import { getMatchStatusLabel } from "@/lib/matches/status";
+import { isHolidayMatchPlayable } from "@/lib/schedule/weekly";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { cn } from "@/lib/utils";
 import { SetupNotice } from "@/components/SetupNotice";
@@ -120,6 +121,7 @@ export default async function ScorerPage() {
         </h2>
         <div className="mt-4 grid gap-3">
           {(matches || []).map((match) => {
+            const playable = isHolidayMatchPlayable(match, new Date());
             const dartMode = ((match.dart_mode || "steel") === "soft" ? "soft" : "steel");
             const participantAName = participantById.get(match.participant_a_id || "")?.display_name || "TBD";
             const participantBName = participantById.get(match.participant_b_id || "")?.display_name || "TBD";
@@ -131,14 +133,19 @@ export default async function ScorerPage() {
             return (
               <a
                 key={match.id}
-                href={`/scorer/${match.id}`}
-                className="block min-h-20 touch-manipulation rounded-lg border border-wire bg-surface/90 p-4 transition-colors duration-75 hover:border-board/40 hover:bg-field active:bg-field"
+                href={playable ? `/scorer/${match.id}` : undefined}
+                aria-disabled={!playable || undefined}
+                className={cn(
+                  "block min-h-20 rounded-lg border border-wire bg-surface/90 p-4",
+                  playable && "touch-manipulation transition-colors duration-75 hover:border-board/40 hover:bg-field active:bg-field"
+                )}
               >
                 <div className="flex flex-wrap items-center gap-2">
                   <DartModeBadge dartMode={dartMode} />
                   <div className="text-xs font-black uppercase text-muted">
                     第 {match.round_number} 轮 / 第 {match.match_number} 场 / {getMatchStatusLabel(match.status)}
                   </div>
+                  {!playable ? <span className="text-xs font-black text-amber-800">休赛顺延</span> : null}
                 </div>
                 <div className="mt-1 font-black">
                   第 {match.round_number} 轮，

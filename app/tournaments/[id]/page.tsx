@@ -19,6 +19,7 @@ import {
   getMatchLineupSubmissions
 } from "@/lib/matches/lineups";
 import { getMatchStatusLabel, isUnplayedMatch } from "@/lib/matches/status";
+import { isHolidayLeagueBreak, isHolidayMatchPlayable } from "@/lib/schedule/weekly";
 import { compactPlayerName, formatUserDisplayName, isOpaqueIdentifier } from "@/lib/scorer/display-names";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -346,7 +347,8 @@ export default async function TournamentDetailPage({
     matches: matchRows,
     participantMembersById,
     identitiesByUserId: weeklyStarIdentities,
-    turnsByMatchId
+    turnsByMatchId,
+    overrides: (weeklyStarOverrides || []) as WeeklyStarOverride[]
   });
   const weeklyStars = mergeWeeklyStarOverrides({
     evaluation: weeklyStarEvaluation,
@@ -625,6 +627,11 @@ export default async function TournamentDetailPage({
             <span>{tournamentData.format === "league_playoff" ? "联赛赛程" : "赛程"}</span>
             <span className="rounded-full bg-field px-3 py-1 text-xs font-black text-board">点击展开/收起</span>
           </summary>
+          {isHolidayLeagueBreak(id, new Date()) ? (
+            <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm font-bold text-amber-900">
+              9/28-10/11 休赛。仅开放下一轮软镖、硬镖各一场提前对战；其余赛程顺延，未完成场次从 10/12 起继续安排。
+            </p>
+          ) : null}
           <div className="mt-4 flex flex-wrap gap-2">
             <ScheduleFilterLink href={`/tournaments/${id}?schedule=all#schedule`} active={schedule === "all"}>
               全部赛程
@@ -681,7 +688,9 @@ export default async function TournamentDetailPage({
                     participantBUserIds: participantBMembers.map((member) => member.userId)
                   })
                 : [];
+            const holidayPlayable = isHolidayMatchPlayable({ ...match, tournament_id: id }, new Date());
             const canScore =
+              holidayPlayable &&
               match.status !== "completed" &&
               match.status !== "bye" &&
               Boolean(match.participant_a_id && match.participant_b_id) &&
@@ -698,6 +707,9 @@ export default async function TournamentDetailPage({
                       第 {match.round_number} 轮 / 第 {match.match_number} 场 / {getMatchStatusLabel(match.status)}
                     </div>
                     <MatchBoardReservationBadge reservation={currentReservation} board={currentBoard} />
+                    {!holidayPlayable && match.status !== "completed" && match.status !== "bye" ? (
+                      <span className="text-xs font-black text-amber-800">休赛顺延</span>
+                    ) : null}
                   </div>
                   <div className="mt-1 text-xs font-semibold text-board">
                     {getCompactMatchRulesSummary({

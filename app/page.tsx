@@ -25,7 +25,7 @@ import { formatUserDisplayName, isOpaqueIdentifier } from "@/lib/scorer/display-
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { cn, formatDateTime } from "@/lib/utils";
-import { classifyWeeklyMatch, startOfChinaWeek, addDays } from "@/lib/schedule/weekly";
+import { classifyWeeklyMatch, startOfChinaWeek, addDays, expectedLeagueWeek, hasCompletedHolidayRound, isHolidayLeagueBreak, isHolidayMatchPlayable } from "@/lib/schedule/weekly";
 import type {
   MatchBoardReservation,
   MatchDartMode,
@@ -147,6 +147,7 @@ type WeeklyScheduleMatch = {
   boardRows: BoardReservationBoard[];
   reservationRows: BoardReservationRow[];
   canReserve: boolean;
+  canScore: boolean;
   isOverdue: boolean;
 };
 
@@ -156,6 +157,7 @@ type WeeklyScheduleData = {
   nextWeekLabel: string;
   nextWeekItems: WeeklyScheduleMatch[];
   overdueCount: number;
+  holidayBreak: boolean;
 };
 
 async function loadWeeklySchedule(
@@ -172,7 +174,8 @@ async function loadWeeklySchedule(
     items: [],
     nextWeekLabel: formatWeekRange(weekEnd, nextWeekEnd),
     nextWeekItems: [],
-    overdueCount: 0
+    overdueCount: 0,
+    holidayBreak: false
   });
   const visibleMatchStatuses = ["not_started", "in_progress", "pending_confirmation", "disputed", "completed", "bye"];
 
@@ -378,6 +381,14 @@ async function loadWeeklySchedule(
       (isUnplayedMatch(match.status) || match.status === "completed" || match.status === "bye")
     )
     .sort(compareHomeMatches);
+  const completedHolidayParticipantIds = new Set(myParticipants
+    .filter((participant) => hasCompletedHolidayRound(
+      sortedTournamentMatches, participant.tournament_id, participant.id
+    ))
+    .map((participant) => participant.id));
+  const holidayRoundCompletedFor = (match: HomeMatchRow) =>
+    completedHolidayParticipantIds.has(match.participant_a_id || "") ||
+    completedHolidayParticipantIds.has(match.participant_b_id || "");
 
   const buildScheduleItem = (
     match: HomeMatchRow,
@@ -408,7 +419,9 @@ async function loadWeeklySchedule(
       currentBoard,
       boardRows: tournamentBoards,
       reservationRows: tournamentReservations,
-      canReserve: isUnplayedMatch(match.status) && Boolean(isAdmin || participantAIsMine || participantBIsMine),
+      canReserve: isUnplayedMatch(match.status) &&
+        isHolidayMatchPlayable(match, now) && Boolean(isAdmin || participantAIsMine || participantBIsMine),
+      canScore: isHolidayMatchPlayable(match, now),
       isOverdue
     };
   };
@@ -433,7 +446,9 @@ async function loadWeeklySchedule(
     const tournament = tournamentById.get(match.tournament_id);
     if (!tournament) continue;
     const currentReservation = reservationByMatchId.get(match.id) || null;
-    const { current, overdue } = classifyWeeklyMatch(match, tournament, now, currentReservation?.reservedStartAt);
+    const { current, overdue } = classifyWeeklyMatch(
+      match, tournament, now, currentReservation?.reservedStartAt, holidayRoundCompletedFor(match)
+    );
     if (current) {
       addItem(match, overdue);
     }
@@ -445,7 +460,8 @@ async function loadWeeklySchedule(
         tournament,
         participant,
         weekStart,
-        tournamentMatches: sortedTournamentMatches
+        tournamentMatches: sortedTournamentMatches,
+        holidayRoundCompleted: completedHolidayParticipantIds.has(participant.id)
       });
       if (byeMatch) addItem(byeMatch, false, getTournamentScheduleDartModes(tournament));
     }
@@ -458,7 +474,8 @@ async function loadWeeklySchedule(
         tournament,
         participant,
         weekStart: weekEnd,
-        tournamentMatches: sortedTournamentMatches
+        tournamentMatches: sortedTournamentMatches,
+        holidayRoundCompleted: completedHolidayParticipantIds.has(participant.id)
       });
       if (!byeMatch) continue;
       addNextWeekItem(byeMatch, getTournamentScheduleDartModes(tournament));
@@ -477,9 +494,9 @@ async function loadWeeklySchedule(
           match.tournament_id === tournament.id &&
           (match.dart_mode === "soft" ? "soft" : "steel") === dartMode &&
           isUnplayedMatch(match.status) &&
-          isTournamentRoundInWeek(match, tournament, weekEnd) &&
+          isTournamentRoundInWeek(match, tournament, weekEnd, holidayRoundCompletedFor(match)) &&
           !selectedIds.has(match.id) &&
-          !isMatchOverdue(match, tournament, reservationByMatchId.get(match.id) || null, weekStart)
+          !isMatchOverdue(match, tournament, reservationByMatchId.get(match.id) || null, weekStart, holidayRoundCompletedFor(match))
       );
       if (nextMatch) {
         addNextWeekItem(nextMatch);
@@ -501,7 +518,8 @@ async function loadWeeklySchedule(
     items,
     nextWeekLabel: formatWeekRange(weekEnd, nextWeekEnd),
     nextWeekItems,
-    overdueCount: items.filter((item) => item.isOverdue).length
+    overdueCount: items.filter((item) => item.isOverdue).length,
+    holidayBreak: activeTournaments.some((tournament) => isHolidayLeagueBreak(tournament.id, now))
   };
 }
 
@@ -537,6 +555,11 @@ function WeeklySchedulePanel({
           <p className="mt-1 text-sm font-semibold leading-6 text-muted">
             {schedule ? `${schedule.weekLabel} · 预约、布阵、计分和赛果都从这里直接处理。` : "登录后自动显示你本周要处理的比赛。"}
           </p>
+          {schedule?.holidayBreak ? (
+            <p className="mt-2 text-sm font-bold text-amber-900">
+              9/28-10/11 休赛：仅开放下一轮软镖、硬镖各一场提前对战；未完成的比赛从 10/12 起顺延。
+            </p>
+          ) : null}
         </div>
         <Link href="/boards" className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-wire bg-surface px-3 text-sm font-bold text-board">
           <CalendarDays className="h-4 w-4" aria-hidden />预约日历
@@ -615,6 +638,11 @@ function WeeklyScheduleMatchCard({ item }: { item: WeeklyScheduleMatch }) {
         <div className="mt-1 text-base font-black">
           {isBye ? `第 ${item.match.round_number} 轮 · 轮空` : `第 ${item.match.round_number} 轮 · 第 ${item.match.match_number} 场`}
         </div>
+        {!isBye && !isCompleted && !item.canScore ? (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm font-bold text-amber-900">
+            本场不在休赛期开放轮次内，保留在赛程中，休赛后顺延。
+          </div>
+        ) : null}
         {!isBye ? (
           <div className="mt-1 text-xs font-bold text-muted">
             {getCompactMatchRulesSummary({
@@ -685,7 +713,7 @@ function WeeklyScheduleMatchCard({ item }: { item: WeeklyScheduleMatch }) {
       </div>
 
       <div className={cn("grid gap-2", isBye ? "grid-cols-1" : "grid-cols-2")}>
-        {!isBye ? (
+        {isCompleted || (!isBye && item.canScore) ? (
           <a
             href={isCompleted ? `/reports/official/${item.match.id}` : `/scorer/${item.match.id}`}
             className={cn(
@@ -695,6 +723,10 @@ function WeeklyScheduleMatchCard({ item }: { item: WeeklyScheduleMatch }) {
           >
             {isCompleted ? "查看战报" : "排阵 / 计分"}
           </a>
+        ) : !isBye ? (
+          <span className="inline-flex min-h-11 items-center justify-center rounded-lg bg-field px-3 text-sm font-bold text-muted">
+            休赛顺延
+          </span>
         ) : null}
         <Link
           href={`/tournaments/${item.tournament.id}?schedule=mine#schedule`}
@@ -857,16 +889,18 @@ function buildSyntheticByeMatch({
   tournament,
   participant,
   weekStart,
-  tournamentMatches
+  tournamentMatches,
+  holidayRoundCompleted = false
 }: {
   tournament: Tournament;
   participant: HomeParticipantRow;
   weekStart: Date;
   tournamentMatches: HomeMatchRow[];
+  holidayRoundCompleted?: boolean;
 }) {
   if (tournament.format !== "round_robin" && tournament.format !== "league_playoff") return null;
 
-  const weekRound = getTournamentExpectedWeekRound(tournament, weekStart);
+  const weekRound = getTournamentExpectedWeekRound(tournament, weekStart, holidayRoundCompleted);
   if (weekRound < 1) return null;
 
   const roundMatches = tournamentMatches.filter(
@@ -917,11 +951,9 @@ function getTournamentScheduleDartModes(tournament: Tournament): MatchDartMode[]
   return [tournament.dart_mode === "soft" ? "soft" : "steel"];
 }
 
-function getTournamentExpectedWeekRound(tournament: Tournament, weekStart: Date) {
+function getTournamentExpectedWeekRound(tournament: Tournament, weekStart: Date, holidayRoundCompleted = false) {
   if (!tournament.tournament_start_at) return 0;
-  const tournamentWeekStart = startOfLocalWeek(new Date(tournament.tournament_start_at));
-  if (weekStart < tournamentWeekStart) return 0;
-  return Math.floor((weekStart.getTime() - tournamentWeekStart.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1;
+  return Math.max(0, expectedLeagueWeek(tournament, weekStart, holidayRoundCompleted));
 }
 
 function getMatchLeagueWeekRound(match: HomeMatchRow, tournament: Tournament) {
@@ -934,7 +966,8 @@ function isMatchOverdue(
   match: HomeMatchRow,
   tournament: Tournament,
   reservation: BoardReservationRow | null,
-  weekStart: Date
+  weekStart: Date,
+  holidayRoundCompleted = false
 ) {
   const scheduledTime = getMatchScheduleTime(match, reservation);
   if (scheduledTime && scheduledTime < weekStart) return true;
@@ -942,12 +975,12 @@ function isMatchOverdue(
 
   const tournamentWeekStart = startOfLocalWeek(new Date(tournament.tournament_start_at));
   if (weekStart <= tournamentWeekStart) return false;
-  const expectedRound = getTournamentExpectedWeekRound(tournament, weekStart);
+  const expectedRound = getTournamentExpectedWeekRound(tournament, weekStart, holidayRoundCompleted);
   return getMatchLeagueWeekRound(match, tournament) < expectedRound;
 }
 
-function isTournamentRoundInWeek(match: HomeMatchRow, tournament: Tournament, weekStart: Date) {
-  const expectedRound = getTournamentExpectedWeekRound(tournament, weekStart);
+function isTournamentRoundInWeek(match: HomeMatchRow, tournament: Tournament, weekStart: Date, holidayRoundCompleted = false) {
+  const expectedRound = getTournamentExpectedWeekRound(tournament, weekStart, holidayRoundCompleted);
   if (expectedRound < 1) return false;
   return getMatchLeagueWeekRound(match, tournament) === expectedRound;
 }

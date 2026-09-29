@@ -92,12 +92,13 @@ export default async function TournamentStarsAdminPage({ params }: { params: Pro
     }
   }
 
+  const rawOverrides = (overridesResult.data || []) as WeeklyStarOverride[];
   const evaluation = evaluateWeeklyStars({
     matches: (matchesResult.data || []) as WeeklyStarMatch[],
     participantMembersById,
-    identitiesByUserId
+    identitiesByUserId,
+    overrides: rawOverrides
   });
-  const rawOverrides = (overridesResult.data || []) as WeeklyStarOverride[];
   const stars = mergeWeeklyStarOverrides({ evaluation, overrides: rawOverrides, identitiesByUserId });
   const players = [...identitiesByUserId.entries()]
     .map(([userId, identity]) => ({ userId, name: identity.name, teamName: identity.teamName }))

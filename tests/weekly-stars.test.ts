@@ -18,6 +18,55 @@ const members = new Map([
 ]);
 
 describe("weekly tournament stars", () => {
+  it("makes repeat selection exceptional, but still allows a dominant return", () => {
+    const matches = [
+      completedSteelMatch("first", "p1", "p2", "p1", { u1: 95, u2: 55 }),
+      { ...completedSteelMatch("second", "p1", "p2", "p1", { u1: 105, u2: 65 }), updated_at: "2026-08-20T12:00:00.000Z" },
+      { ...completedSteelMatch("third", "p1", "p2", "p1", { u1: 110, u2: 75 }), updated_at: "2026-08-27T12:00:00.000Z" },
+      { ...completedSteelMatch("fourth", "p1", "p2", "p1", { u1: 110, u2: 75 }), updated_at: "2026-08-28T12:00:00.000Z" },
+      { ...completedSteelMatch("fifth", "p1", "p2", "p1", { u1: 110, u2: 75 }), updated_at: "2026-08-29T12:00:00.000Z" },
+      { ...completedSteelMatch("sixth", "p1", "p2", "p1", { u1: 110, u2: 75 }), updated_at: "2026-08-29T13:00:00.000Z" },
+      { ...completedSteelMatch("seventh", "p1", "p2", "p1", { u1: 110, u2: 75 }), updated_at: "2026-08-30T12:00:00.000Z" },
+    ];
+    const evaluation = evaluateWeeklyStars({
+      matches,
+      participantMembersById: members,
+      identitiesByUserId: identities,
+      now: new Date("2026-08-31T04:00:00Z")
+    });
+    expect(evaluation.automaticStars.map((star) => star.userId).reverse()).toEqual(["u1", "u2", "u1"]);
+    expect(evaluation.candidatesByWeek.get("2026-08-17")?.find((star) => star.userId === "u1")?.repeatAdjustment).toBe(80);
+    expect(evaluation.candidatesByWeek.get("2026-08-24")?.find((star) => star.userId === "u1")?.rawScore).toBeGreaterThanOrEqual(120);
+  });
+
+  it("counts manual winners instead of displaced automatic winners in later weeks", () => {
+    const matches = [
+      completedSteelMatch("first", "p1", "p2", "p1", { u1: 95, u2: 55 }),
+      { ...completedSteelMatch("second", "p1", "p2", "p1", { u1: 100, u2: 65 }), updated_at: "2026-08-20T12:00:00.000Z" },
+    ];
+    const evaluation = evaluateWeeklyStars({
+      matches,
+      participantMembersById: members,
+      identitiesByUserId: identities,
+      overrides: [{ week_start: "2026-08-10", user_id: "u2" }],
+      now: new Date("2026-08-24T04:00:00Z")
+    });
+    expect(evaluation.automaticStars.find((star) => star.weekStart === "2026-08-17")?.userId).toBe("u1");
+    expect(evaluation.candidatesByWeek.get("2026-08-17")?.find((star) => star.userId === "u1")?.repeatAdjustment).toBe(0);
+    expect(evaluation.candidatesByWeek.get("2026-08-17")?.find((star) => star.userId === "u2")?.repeatAdjustment).toBe(80);
+  });
+
+  it("counts a manually awarded no-match week when evaluating a later week", () => {
+    const evaluation = evaluateWeeklyStars({
+      matches: [{ ...completedSteelMatch("later", "p1", "p2", "p1", { u1: 100, u2: 55 }), updated_at: "2026-08-20T12:00:00.000Z" }],
+      participantMembersById: members,
+      identitiesByUserId: identities,
+      overrides: [{ week_start: "2026-08-10", user_id: "u1" }],
+      now: new Date("2026-08-24T04:00:00Z")
+    });
+    expect(evaluation.candidatesByWeek.get("2026-08-17")?.find((star) => star.userId === "u1")?.repeatAdjustment).toBe(80);
+    expect(evaluation.automaticStars.find((star) => star.weekStart === "2026-08-17")?.userId).toBe("u2");
+  });
   it("uses Shanghai Monday boundaries and finalizes only past weeks", () => {
     const now = new Date("2026-08-17T04:00:00.000Z");
     expect(getShanghaiWeekStart(now)).toBe("2026-08-17");

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyWeeklyMatch, startOfChinaWeek } from "@/lib/schedule/weekly";
+import { classifyWeeklyMatch, expectedLeagueWeek, hasCompletedHolidayRound, isHolidayMatchPlayable, startOfChinaWeek } from "@/lib/schedule/weekly";
 import { boardDayAvailability } from "@/lib/schedule/board-calendar";
 import type {
   BoardReservationBoard,
@@ -103,6 +103,70 @@ describe("weekly schedule carry-over", () => {
         now,
       ).current,
     ).toBe(false);
+  });
+});
+
+describe("2026 National Day league break", () => {
+  const holidayTournament = {
+    ...tournament,
+    id: "eb6e0008-064c-4ae7-97e3-524889a4edf1",
+  };
+  const round = (round_number: number) => ({ ...match, round_number });
+
+  it("holds the next soft/steel pair for both break weeks and resumes on October 12", () => {
+    expect(expectedLeagueWeek(holidayTournament, new Date("2026-09-27T10:00:00Z"))).toBe(7);
+    for (const date of ["2026-09-28", "2026-10-05", "2026-10-12"]) {
+      const at = new Date(`${date}T04:00:00Z`);
+      expect(expectedLeagueWeek(holidayTournament, at)).toBe(8);
+      expect(classifyWeeklyMatch(round(15), holidayTournament, at)).toEqual({ current: true, overdue: false });
+      expect(classifyWeeklyMatch(round(16), holidayTournament, at)).toEqual({ current: true, overdue: false });
+      expect(classifyWeeklyMatch(round(17), holidayTournament, at).current).toBe(false);
+    }
+    const following = new Date("2026-10-19T04:00:00Z");
+    expect(expectedLeagueWeek(holidayTournament, following)).toBe(9);
+    expect(classifyWeeklyMatch(round(15), holidayTournament, following).overdue).toBe(true);
+    expect(classifyWeeklyMatch(round(17), holidayTournament, following).current).toBe(true);
+  });
+
+  it("does not pull a prebooked later round into the holiday workspace", () => {
+    const at = new Date("2026-10-05T04:00:00Z");
+    expect(classifyWeeklyMatch(round(17), holidayTournament, at, at.toISOString()).current).toBe(false);
+    expect(classifyWeeklyMatch(round(17), tournament, at).current).toBe(true);
+  });
+
+  it("advances only participants who finished both modes before the restart", () => {
+    const pair = [15, 16].map((round_number) => ({
+      tournament_id: holidayTournament.id,
+      stage: "group",
+      round_number,
+      status: "completed",
+      participant_a_id: "team-a",
+      participant_b_id: "team-b",
+    }));
+    expect(hasCompletedHolidayRound(pair, holidayTournament.id, "team-a")).toBe(true);
+    expect(hasCompletedHolidayRound([{ ...pair[0], status: "not_started" }, pair[1]], holidayTournament.id, "team-a")).toBe(false);
+    expect(hasCompletedHolidayRound(pair, holidayTournament.id, "bye-team")).toBe(true);
+    expect(hasCompletedHolidayRound([pair[0]], holidayTournament.id, "team-a")).toBe(false);
+
+    const restart = new Date("2026-10-12T04:00:00Z");
+    expect(expectedLeagueWeek(holidayTournament, restart, false)).toBe(8);
+    expect(expectedLeagueWeek(holidayTournament, restart, true)).toBe(9);
+    expect(classifyWeeklyMatch(round(17), holidayTournament, restart, null, true).current).toBe(true);
+    expect(classifyWeeklyMatch(round(17), holidayTournament, restart, null, false).current).toBe(false);
+  });
+
+  it("rejects later rounds for holiday play but leaves the next pair and normal weeks open", () => {
+    const future = { tournament_id: holidayTournament.id, stage: "group", round_number: 17 };
+    const current = { ...future, round_number: 16 };
+    expect(isHolidayMatchPlayable(future, new Date("2026-09-28T00:00:00Z"))).toBe(false);
+    expect(isHolidayMatchPlayable(future, new Date("2026-10-11T15:59:59Z"))).toBe(false);
+    expect(isHolidayMatchPlayable(current, new Date("2026-10-05T04:00:00Z"))).toBe(true);
+    expect(isHolidayMatchPlayable({ ...current, round_number: 14 }, new Date("2026-10-05T04:00:00Z"))).toBe(false);
+    expect(isHolidayMatchPlayable({ ...current, stage: "knockout" }, new Date("2026-10-05T04:00:00Z"))).toBe(false);
+    expect(isHolidayMatchPlayable(future, new Date("2026-09-27T15:59:59Z"))).toBe(true);
+    expect(isHolidayMatchPlayable(future, new Date("2026-09-27T16:00:00Z"))).toBe(false);
+    expect(isHolidayMatchPlayable(future, new Date("2026-10-11T16:00:00Z"))).toBe(true);
+    expect(isHolidayMatchPlayable({ ...future, tournament_id: "another-event" }, new Date("2026-10-05T04:00:00Z"))).toBe(true);
   });
 });
 

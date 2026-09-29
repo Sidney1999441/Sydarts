@@ -11,6 +11,7 @@ import { isValidMpr, MPR_MAX_EXCLUSIVE, ppdToPpr } from "@/lib/darts/soft-stats"
 import { getLegStartingScore, resolveMatchLegRules } from "@/lib/darts/variants";
 import { mergeMatchLineupSubmission } from "@/lib/matches/lineups";
 import { hasSameResultSubmission } from "@/lib/results/submission";
+import { isHolidayMatchPlayable } from "@/lib/schedule/weekly";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { fromFormString } from "@/lib/utils";
@@ -1959,11 +1960,14 @@ export async function completeScoredMatchAction(payload: unknown) {
   const admin = createSupabaseAdminClient();
   const { data: match, error: matchError } = await admin
     .from("matches")
-    .select("id, tournament_id, participant_a_id, participant_b_id, status, dart_mode, game_variant, leg_rules, match_finish_mode, details")
+    .select("id, tournament_id, participant_a_id, participant_b_id, status, stage, round_number, dart_mode, game_variant, leg_rules, match_finish_mode, details")
     .eq("id", values.matchId)
     .single();
 
   if (matchError) throw new Error(matchError.message);
+  if (!isHolidayMatchPlayable(match, new Date())) {
+    throw new Error("休赛期间只开放下一轮软镖和硬镖各一场，不能提前提交后续轮次结果。");
+  }
   if (match.status === "bye") {
     throw new Error("This match has already been settled.");
   }
@@ -2374,10 +2378,13 @@ export async function submitManualResultAction(formData: FormData) {
   const admin = createSupabaseAdminClient();
   const { data: match, error: matchError } = await admin
     .from("matches")
-    .select("id, tournament_id, participant_a_id, participant_b_id, status, dart_mode, game_variant, leg_rules, details")
+    .select("id, tournament_id, participant_a_id, participant_b_id, status, stage, round_number, dart_mode, game_variant, leg_rules, details")
     .eq("id", matchId)
     .single();
   if (matchError) throw new Error(matchError.message);
+  if (!isAdmin && !isHolidayMatchPlayable(match, new Date())) {
+    throw new Error("休赛期间只开放下一轮软镖和硬镖各一场，不能提前提交后续轮次结果。");
+  }
   if (match.status === "bye") {
     throw new Error("This match has already been settled.");
   }

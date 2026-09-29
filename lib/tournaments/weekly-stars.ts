@@ -4,6 +4,8 @@ import type { MatchDartMode } from "@/types/domain";
 
 const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
+const REPEAT_WIN_PENALTY = 80;
+const REPEAT_MINIMUM_RAW_SCORE = 120;
 
 export type WeeklyStarIdentity = {
   name: string;
@@ -48,6 +50,7 @@ export type WeeklyStar = {
   source: "automatic" | "manual";
   rawScore: number;
   expectationAdjustment: number;
+  repeatAdjustment: number;
   score: number;
   reason: string;
   metrics: WeeklyStarMetrics;
@@ -79,13 +82,15 @@ export function evaluateWeeklyStars({
   participantMembersById,
   identitiesByUserId,
   turnsByMatchId = new Map<string, ScoreTurn[]>(),
-  now = new Date()
+  now = new Date(),
+  overrides = []
 }: {
   matches: WeeklyStarMatch[];
   participantMembersById: Map<string, Array<{ userId: string }>>;
   identitiesByUserId: Map<string, WeeklyStarIdentity>;
   turnsByMatchId?: Map<string, ScoreTurn[]>;
   now?: Date;
+  overrides?: WeeklyStarOverride[];
 }): WeeklyStarEvaluation {
   const currentWeekStart = getShanghaiWeekStart(now);
   const metricsByWeek = new Map<string, Map<string, WeeklyStarMetrics>>();
@@ -171,6 +176,7 @@ export function evaluateWeeklyStars({
           source: "automatic" as const,
           rawScore,
           expectationAdjustment,
+          repeatAdjustment: 0,
           score: Math.round(Math.max(0, rawScore - expectationAdjustment) * 10) / 10,
           reason: buildAutomaticReason(metrics, expectationAdjustment),
           metrics: { ...metrics }
@@ -180,10 +186,34 @@ export function evaluateWeeklyStars({
     candidatesByWeek.set(weekStart, candidates);
   }
 
-  const automaticStars = [...candidatesByWeek.values()]
-    .map((candidates) => candidates[0])
-    .filter((star): star is WeeklyStar => Boolean(star))
-    .sort((a, b) => b.weekStart.localeCompare(a.weekStart));
+  const overridesByWeek = new Map(overrides.map((item) => [normalizeDatePart(item.week_start), item.user_id]));
+  const previousWins = new Map<string, number>();
+  const automaticStars: WeeklyStar[] = [];
+  for (const weekStart of [...new Set([
+    ...candidatesByWeek.keys(),
+    ...overridesByWeek.keys()
+  ])].filter((week): week is string => Boolean(week && week < currentWeekStart)).sort()) {
+    const ranked = (candidatesByWeek.get(weekStart) || []).map((candidate) => {
+      const wins = previousWins.get(candidate.userId) || 0;
+      if (!wins) return candidate;
+      const repeatAdjustment = REPEAT_WIN_PENALTY * wins;
+      return {
+        ...candidate,
+        repeatAdjustment,
+        score: Math.round(Math.max(0, candidate.rawScore - candidate.expectationAdjustment - repeatAdjustment) * 10) / 10,
+        reason: `${candidate.reason} 已获 ${wins} 次赛事之星，复选需达到更高表现门槛。`
+      };
+    }).sort(compareCandidates);
+    candidatesByWeek.set(weekStart, ranked);
+    const overrideUserId = overridesByWeek.get(weekStart);
+    const automatic = ranked.find((candidate) =>
+      candidate.score > 0 && (!candidate.repeatAdjustment || candidate.rawScore >= REPEAT_MINIMUM_RAW_SCORE)
+    );
+    if (automatic) automaticStars.push(automatic);
+    const selectedUserId = overrideUserId || automatic?.userId;
+    if (selectedUserId) previousWins.set(selectedUserId, (previousWins.get(selectedUserId) || 0) + 1);
+  }
+  automaticStars.sort((a, b) => b.weekStart.localeCompare(a.weekStart));
 
   return { automaticStars, candidatesByWeek };
 }
@@ -224,6 +254,7 @@ export function mergeWeeklyStarOverrides({
       source: "manual",
       rawScore: candidate?.rawScore || 0,
       expectationAdjustment: candidate?.expectationAdjustment || 0,
+      repeatAdjustment: candidate?.repeatAdjustment || 0,
       score: candidate?.score || 0,
       reason: override.reason?.trim() || candidate?.reason || "由赛事管理员综合评定。",
       metrics: candidate?.metrics ? { ...candidate.metrics } : emptyMetrics()
