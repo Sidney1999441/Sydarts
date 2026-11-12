@@ -13,6 +13,7 @@ import {
 import { updateTournamentStandings } from "@/lib/algorithms/standings";
 import { requireAdmin, requireUser } from "@/lib/auth/guards";
 import { isSnowGame, resolveMatchLegRules, selectMatchLegRules, validateMatchLegRules } from "@/lib/darts/variants";
+import { playoffActivityKeys, readPlayoffRules } from "@/lib/darts/playoff-rules";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { fromFormString } from "@/lib/utils";
@@ -1407,6 +1408,15 @@ export async function generateLeaguePlayoffsAction(formData: FormData) {
     throw new Error("只有联赛 + 季后赛赛制可以从联赛排名生成季后赛。");
   }
 
+  const { data: existingPlayoffs, error: existingError } = await supabase
+    .from("matches")
+    .select("id")
+    .eq("tournament_id", tournamentId)
+    .eq("stage", "knockout")
+    .limit(1);
+  if (existingError) throw new Error(existingError.message);
+  if (existingPlayoffs?.length) throw new Error("季后赛已生成，请在季后赛规则中修改。");
+
   const { data: participants, error: participantsError } = await supabase
     .from("tournament_participants")
     .select("id, display_name, rating_snapshot")
@@ -1441,12 +1451,6 @@ export async function generateLeaguePlayoffsAction(formData: FormData) {
       rank: index + 1
     };
   });
-
-  await supabase
-    .from("matches")
-    .delete()
-    .eq("tournament_id", tournamentId)
-    .eq("stage", "knockout");
 
   const generated = generateLeaguePlayoffBracket(playoffSeeds);
   const rankByParticipantId = new Map(playoffSeeds.map((participant) => [participant.id, participant.rank]));
@@ -1517,6 +1521,45 @@ export async function generateLeaguePlayoffsAction(formData: FormData) {
   revalidatePath(`/admin/tournaments/${tournamentId}/schedule`);
   revalidatePath(`/admin/tournaments/${tournamentId}/results`);
   revalidatePath(`/tournaments/${tournamentId}`);
+}
+
+export async function savePlayoffRoundRulesAction(
+  _previous: { message: string; ok: boolean },
+  formData: FormData
+): Promise<{ message: string; ok: boolean }> {
+  await requireAdmin();
+  try {
+    const tournamentId = z.string().uuid().parse(formData.get("tournament_id"));
+    const roundNumber = z.coerce.number().int().min(1).max(4).parse(formData.get("round_number"));
+    const supabase = await createSupabaseServerClient();
+    const { data: tournament, error: tournamentError } = await supabase
+      .from("tournaments").select("format, team_size").eq("id", tournamentId).single();
+    if (tournamentError || tournament?.format !== "league_playoff") {
+      throw new Error("找不到可设置季后赛规则的赛事。");
+    }
+    const rules = readPlayoffRules(formData, tournament.team_size);
+    let update = supabase.from("matches").update(rules)
+      .eq("tournament_id", tournamentId)
+      .eq("stage", "knockout")
+      .eq("round_number", roundNumber)
+      .eq("status", "not_started");
+    for (const key of playoffActivityKeys) {
+      update = update.filter(`details->${key}`, "is", "null");
+    }
+    const { data: updated, error } = await update.select("id");
+    if (error) throw new Error("保存失败，请刷新后重试。");
+    if (!updated?.length) throw new Error("该轮已没有可修改的场次，请刷新确认。");
+
+    revalidatePath(`/admin/tournaments/${tournamentId}/schedule`);
+    revalidatePath(`/admin/tournaments/${tournamentId}/results`);
+    revalidatePath(`/tournaments/${tournamentId}`);
+    revalidatePath("/scorer");
+    for (const match of updated) revalidatePath(`/scorer/${match.id}`);
+    return { message: `已保存 ${updated.length} 场比赛的规则。`, ok: true };
+  } catch (error) {
+    return { message: error instanceof z.ZodError ? "赛事或轮次无效。" :
+      error instanceof Error ? error.message : "保存失败，请重试。", ok: false };
+  }
 }
 
 export async function updateKnockoutMatchPairingAction(formData: FormData) {

@@ -8,7 +8,8 @@ import {
 import { generateGroupsAndScheduleAction, generateLeaguePlayoffsAction } from "@/lib/actions/tournaments";
 import { calculatePlayerLevel } from "@/lib/algorithms/player-level";
 import { requireAdmin } from "@/lib/auth/guards";
-import { getDartModeLabel, getMatchRulesSummary } from "@/lib/darts/variants";
+import { getDartModeLabel, getMatchRulesSummary, normalizeMatchLegRules, resolveMatchLegRules } from "@/lib/darts/variants";
+import { canEditPlayoffRules } from "@/lib/darts/playoff-rules";
 import { hasSupabaseEnv } from "@/lib/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { formatDateTime } from "@/lib/utils";
@@ -21,6 +22,7 @@ import {
 import { SetupNotice } from "@/components/SetupNotice";
 import { CodlPageHeader } from "@/components/CodlPageHeader";
 import { TournamentBracket } from "@/components/TournamentBracket";
+import { PlayoffRoundRulesForm } from "@/components/admin/PlayoffRoundRulesForm";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import type { MatchBoardReservation, Tournament, TournamentBoard, TournamentBoardTimeSlot } from "@/types/domain";
@@ -102,7 +104,7 @@ export default async function ScheduleAdminPage({
               {isLeaguePlayoff ? "生成联赛赛程" : "自动分组并生成赛程"}
             </Button>
           </form>
-          {isLeaguePlayoff ? (
+          {isLeaguePlayoff && knockoutMatches.length === 0 ? (
             <form action={generateLeaguePlayoffsAction} className="flex flex-wrap items-end gap-3">
               <input type="hidden" name="tournament_id" value={id} />
               <Button type="submit" variant="secondary">根据当前排名生成季后赛</Button>
@@ -115,6 +117,60 @@ export default async function ScheduleAdminPage({
           </p>
         ) : null}
       </Card>
+      {isLeaguePlayoff && tournamentData && knockoutMatches.length > 0 ? (
+        <Card>
+          <h2 className="text-lg font-bold">季后赛规则</h2>
+          <div className="mt-4 grid gap-2">
+            {["附加赛", "席位赛", "四强赛", "决赛"].map((label, index) => {
+              const roundNumber = index + 1;
+              const round = knockoutMatches.filter((match) => match.round_number === roundNumber);
+              if (round.length === 0) return null;
+              const editable = round.filter(canEditPlayoffRules);
+              const match = editable[0] || round[0];
+              const savedRules = normalizeMatchLegRules(match.leg_rules);
+              const initialRules = savedRules.length ? savedRules : resolveMatchLegRules({
+                matchRuleMode: tournamentData.match_rule_mode,
+                customRules: tournamentData.match_leg_rules,
+                dartMode: match.dart_mode || tournamentData.dart_mode,
+                dartGame: tournamentData.dart_game,
+                softGame: tournamentData.soft_game,
+                bestOf: tournamentData.best_of,
+                tournamentType: tournamentData.tournament_type,
+                teamSize: tournamentData.team_size,
+                roundNumber,
+                mixedFirstDartMode: tournamentData.mixed_first_dart_mode
+              });
+              return (
+                <details key={roundNumber} className="rounded-lg border border-wire p-3">
+                  <summary className="cursor-pointer font-bold">
+                    {label} <span className="ml-2 text-sm font-normal text-muted">
+                      {editable.length} 场可修改{round.length > editable.length ? ` · ${round.length - editable.length} 场已锁定` : ""}
+                    </span>
+                  </summary>
+                  <ul className="mt-2 grid gap-1 text-sm text-muted">
+                    {round.map((item) => (
+                      <li key={item.id} className="break-words">
+                        {participantById.get(item.participant_a_id)?.display_name || "待晋级"} vs{" "}
+                        {participantById.get(item.participant_b_id)?.display_name || "待晋级"} ·{" "}
+                        {getMatchRulesSummary({ dartMode: item.dart_mode, gameVariant: item.game_variant, legRules: item.leg_rules })}
+                        {!canEditPlayoffRules(item) ? " · 已锁定" : ""}
+                      </li>
+                    ))}
+                  </ul>
+                  {editable.length > 0 ? <PlayoffRoundRulesForm
+                    tournamentId={id}
+                    roundNumber={roundNumber}
+                    initialRules={initialRules}
+                    finishMode={match.match_finish_mode || tournamentData.match_finish_mode || "majority"}
+                    firstThrowMode={match.first_throw_mode || ""}
+                    teamSize={tournamentData.team_size}
+                  /> : null}
+                </details>
+              );
+            })}
+          </div>
+        </Card>
+      ) : null}
       {tournamentData ? (
         <TournamentBoardAdminPanel
           tournament={tournamentData}
